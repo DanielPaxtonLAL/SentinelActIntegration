@@ -53,9 +53,11 @@
             <input v-model.trim="form.enforcementId" type="number" min="1" step="1" required :disabled="loading">
           </label>
           <label>
-            Line item type
+            Entitlement type
             <select v-model="form.lineItemType" :disabled="loading">
-              <option value="Hardware_Key">Hardware key</option>
+              <option value="Hardware_Key">Hardware Key</option>
+              <option value="Product_Key">Product Key</option>
+              <option value="ProtectionKey_Update">Protection Key Update</option>
             </select>
           </label>
         </div>
@@ -74,13 +76,21 @@
           </label>
         </div>
         <div class="entitlement-form-row">
-          <label>
-            Number of keys
+          <label v-if="form.lineItemType === 'Product_Key'">
+            Number of product keys
             <input v-model.number="form.numberOfKeys" type="number" min="1" max="999999" step="1" required :disabled="loading">
           </label>
-          <label>
-            Activations per key
+          <label v-if="form.lineItemType !== 'ProtectionKey_Update'">
+            {{ form.lineItemType === 'Product_Key' ? 'Activations per product key' : 'Number of keys' }}
             <input v-model.number="form.activationsPerKey" type="number" min="1" max="999999" step="1" required :disabled="loading">
+          </label>
+          <label v-if="form.lineItemType === 'ProtectionKey_Update'">
+            Number of updates
+            <input v-model.number="form.numberOfUpdates" type="number" min="1" max="999999" step="1" required :disabled="loading">
+          </label>
+          <label v-if="form.lineItemType === 'ProtectionKey_Update'">
+            Protection key IDs
+            <input v-model.trim="form.haspIds" required :disabled="loading" placeholder="Separate multiple IDs with semicolons">
           </label>
         </div>
         <label>
@@ -169,6 +179,8 @@
             neverExpires: true,
             numberOfKeys: 1,
             activationsPerKey: 1,
+            numberOfUpdates: 1,
+            haspIds: '',
             lineItemType: 'Hardware_Key',
             description: '',
             refId1: '',
@@ -207,10 +219,16 @@
           this.error = '';
           this.notice = '';
           try {
+            const payload = {
+              ...this.form,
+              haspIds: this.form.lineItemType === 'ProtectionKey_Update'
+                ? this.form.haspIds.split(';').map((id) => id.trim()).filter(Boolean)
+                : [],
+            };
             const response = await fetch('/api/entitlements', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(this.form),
+              body: JSON.stringify(payload),
             });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);

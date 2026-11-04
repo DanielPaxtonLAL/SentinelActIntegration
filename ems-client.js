@@ -209,6 +209,15 @@ class EmsClient {
 
   async createEntitlement(entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
+    const lineItemType = entitlement.lineItemType;
+    if (!['Hardware_Key', 'Product_Key', 'ProtectionKey_Update'].includes(lineItemType)) {
+      throw new Error('Unsupported entitlement line item type.');
+    }
+
+    const productKeyCount = lineItemType === 'Product_Key' ? entitlement.numberOfKeys : 1;
+    const activationCount = lineItemType === 'ProtectionKey_Update'
+      ? entitlement.numberOfUpdates
+      : entitlement.activationsPerKey;
 
     const item = (name, value) => `<${name}>${escapeXml(value)}</${name}>`;
     const entitlementXml =
@@ -229,11 +238,14 @@ class EmsClient {
       item('startDate', entitlement.startDate) +
       item('endDate', entitlement.endDate) +
       '<itemLicenseType>0</itemLicenseType>' +
-      item('numProductKeys', entitlement.numberOfKeys) +
-      item('numActivationPerProductKey', entitlement.activationsPerKey) +
+      item('lineItemType', lineItemType) +
+      item('numActivationPerProductKey', activationCount) +
+      item('numProductKeys', productKeyCount) +
+      (lineItemType === 'ProtectionKey_Update'
+        ? (entitlement.haspIds || []).map((id) => item('haspId', id)).join('')
+        : '') +
       item('vendorId', entitlement.vendorId) +
       item('enforcementId', entitlement.enforcementId) +
-      item('lineItemType', entitlement.lineItemType) +
       '<itemProduct><isRevoked>false</isRevoked>' +
       item('productId', entitlement.productId) +
       '</itemProduct>' +
@@ -257,7 +269,7 @@ class EmsClient {
         entitlementXML: entitlementXml,
         entProductDynamicMemoryDataXml: '<dynamicMemorySegments></dynamicMemorySegments>',
         produceAndPush: 'false',
-        lineItemTypeForProdPush: entitlement.lineItemType,
+        lineItemTypeForProdPush: lineItemType,
         vendorIdForProdPush: entitlement.vendorId,
       }),
     });

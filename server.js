@@ -115,6 +115,8 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     neverExpires,
     numberOfKeys,
     activationsPerKey,
+    numberOfUpdates,
+    haspIds,
     lineItemType,
     description,
     refId1,
@@ -136,11 +138,24 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       (!neverExpires && endDate < startDate)) {
     return res.status(400).json({ error: 'Enter a valid start date and an end date on or after it' });
   }
-  if (!isPositiveInteger(numberOfKeys) || !isPositiveInteger(activationsPerKey)) {
-    return res.status(400).json({ error: 'Number of keys and activations per key must be between 1 and 999999' });
-  }
-  if (lineItemType !== 'Hardware_Key') {
+  const validLineItemTypes = new Set(['Hardware_Key', 'Product_Key', 'ProtectionKey_Update']);
+  if (!validLineItemTypes.has(lineItemType)) {
     return res.status(400).json({ error: 'Unsupported line item type' });
+  }
+  if (lineItemType === 'Product_Key' &&
+      (!isPositiveInteger(numberOfKeys) || !isPositiveInteger(activationsPerKey))) {
+    return res.status(400).json({ error: 'Number of product keys and activations per key must be between 1 and 999999' });
+  }
+  if (lineItemType === 'Hardware_Key' && !isPositiveInteger(activationsPerKey)) {
+    return res.status(400).json({ error: 'Number of keys must be between 1 and 999999' });
+  }
+  if (lineItemType === 'ProtectionKey_Update' &&
+      (!isPositiveInteger(numberOfUpdates) ||
+       !Array.isArray(haspIds) ||
+       haspIds.length === 0 ||
+       haspIds.length > 100 ||
+       haspIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 250))) {
+    return res.status(400).json({ error: 'Enter 1 to 100 protection key IDs (250 characters each maximum) and a valid number of updates' });
   }
   if (typeof description !== 'string' || description.length > 510 ||
       typeof refId1 !== 'string' || refId1.length > 250 ||
@@ -169,6 +184,8 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       endDate: neverExpires ? '2500-12-31' : endDate,
       numberOfKeys,
       activationsPerKey,
+      numberOfUpdates,
+      haspIds,
       lineItemType,
       description,
       refId1,
