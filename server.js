@@ -103,6 +103,10 @@ app.post('/api/act/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/act/session', (req, res) => {
+  res.json({ authenticated: Boolean(act.token) });
+});
+
 app.get('/api/act/companies', async (req, res) => {
   if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
   try {

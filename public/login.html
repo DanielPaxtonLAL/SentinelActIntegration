@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in to Act!</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+    main { max-width: 24rem; margin: 10vh auto; }
+    label { display: block; margin-top: 1rem; }
+    input { box-sizing: border-box; display: block; width: 100%; padding: .6rem; margin-top: .35rem; }
+    button { margin-top: 1.25rem; padding: .5rem .9rem; }
+    #status { min-height: 1.5rem; margin-top: 1rem; white-space: pre-wrap; word-break: break-word; }
+    #status.error { color: #b00020; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Log in to Act!</h1>
+    <form id="loginForm">
+      <label>
+        Username
+        <input name="username" autocomplete="username" required>
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="submitButton" type="submit">Log in</button>
+    </form>
+    <div id="status" role="status" aria-live="polite"></div>
+  </main>
+  <script>
+    const form = document.querySelector('#loginForm');
+    const button = document.querySelector('#submitButton');
+    const status = document.querySelector('#status');
+
+    async function checkSession() {
+      try {
+        const response = await fetch('/api/act/session');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || response.statusText);
+        if (data.authenticated) window.location.replace('/');
+      } catch (err) {
+        status.textContent = 'Could not check the Act! session: ' + err.message;
+        status.classList.add('error');
+      }
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      status.textContent = 'Logging in…';
+      status.classList.remove('error');
+      const fields = new FormData(form);
+      try {
+        const response = await fetch('/api/act/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: fields.get('username'),
+            password: fields.get('password'),
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || response.statusText);
+        window.location.replace('/');
+      } catch (err) {
+        form.elements.password.value = '';
+        status.textContent = 'Log in failed: ' + err.message;
+        status.classList.add('error');
+        button.disabled = false;
+      }
+    });
+
+    checkSession();
+  </script>
+</body>
+</html>

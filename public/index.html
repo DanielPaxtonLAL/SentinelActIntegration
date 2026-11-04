@@ -17,10 +17,11 @@
     .on { color: #1b7f3b; } .off { color: #b00020; }
     .sync-error { color: #b00020; }
     .sync-success { color: #1b7f3b; }
+    [v-cloak] { display: none; }
   </style>
 </head>
 <body>
-  <main id="app">
+  <main id="app" v-cloak>
     <h1>Customers</h1>
     <h2>EMS Customers</h2>
     <div id="status" :class="{ error: Boolean(error) }">{{ status }}</div>
@@ -49,12 +50,8 @@
 
     <h2>ACT Companies</h2>
     <div id="actStatus" :class="{ error: Boolean(actError) }">{{ actStatus }}</div>
-    <form @submit.prevent="actLogin">
-      <input v-model="actUser" placeholder="Act! username" autocomplete="username" style="width:160px">
-      <input v-model="actPass" type="password" placeholder="Act! password" autocomplete="current-password" style="width:160px">
-      <button type="submit" :disabled="actLoading">Log in</button>
-      <button type="button" @click="loadCompanies">Reload</button>
-    </form>
+    <button type="button" @click="loadCompanies" :disabled="actLoading">Reload companies</button>
+    <button type="button" @click="logout" :disabled="actLoading">Log out</button>
     <table>
       <thead>
         <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Country</th><th>Website</th><th>EMS</th></tr>
@@ -92,8 +89,7 @@
           companies: [],
           companySync: {},
           actLoading: false,
-          actUser: '',
-          actPass: '',
+          actAuthenticated: false,
           actError: '',
           filter: '',
           loading: true,
@@ -105,7 +101,7 @@
         actStatus() {
           if (this.actLoading) return 'Loading…';
           if (this.actError) return this.actError;
-          return this.companies.length ? `${this.companies.length} companies` : 'Log in to load companies';
+          return this.actAuthenticated ? `${this.companies.length} companies` : 'Log in to load companies';
         },
         filteredCustomers() {
           const query = this.filter.trim().toLowerCase();
@@ -124,25 +120,24 @@
           const id = String(company.id ?? '').trim().toLowerCase();
           return Boolean(id) && this.customers.some((c) => String(c.refId1 ?? '').trim().toLowerCase() === id);
         },
-        async actLogin() {
+        async restoreActSession() {
           this.actLoading = true;
           this.actError = '';
           try {
-            const response = await fetch('/api/act/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username: this.actUser, password: this.actPass }),
-            });
+            const response = await fetch('/api/act/session');
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
-            this.actPass = '';
+            this.actAuthenticated = data.authenticated;
+            if (!this.actAuthenticated) {
+              window.location.replace('/login.html');
+              return;
+            }
+            await Promise.all([this.loadCustomers(), this.loadCompanies()]);
           } catch (err) {
-            this.actPass = '';
+            this.actError = 'Failed to restore Act! session: ' + err.message;
+          } finally {
             this.actLoading = false;
-            this.actError = 'Log in failed: ' + err.message;
-            return;
           }
-          await this.loadCompanies();
         },
         async loadCompanies() {
           this.actLoading = true;
@@ -150,11 +145,30 @@
           try {
             const response = await fetch('/api/act/companies');
             const data = await response.json();
+            if (response.status === 401) {
+              this.actAuthenticated = false;
+              window.location.replace('/login.html');
+              return;
+            }
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.companies = data;
+            this.actAuthenticated = true;
           } catch (err) {
             this.actError = 'Failed to load companies: ' + err.message;
           } finally {
+            this.actLoading = false;
+          }
+        },
+        async logout() {
+          this.actLoading = true;
+          this.actError = '';
+          try {
+            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            window.location.replace('/login.html');
+          } catch (err) {
+            this.actError = 'Log out failed: ' + err.message;
             this.actLoading = false;
           }
         },
@@ -167,6 +181,11 @@
               method: 'POST',
             });
             const data = await response.json();
+            if (response.status === 401) {
+              this.actAuthenticated = false;
+              window.location.replace('/login.html');
+              return;
+            }
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.companySync[id] = { state: 'added', error: '' };
             await this.loadCustomers();
@@ -191,7 +210,7 @@
         },
       },
       mounted() {
-        this.loadCustomers();
+        this.restoreActSession();
       },
     }).mount('#app');
 
