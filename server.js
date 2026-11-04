@@ -119,8 +119,8 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     haspIds,
     lineItemType,
     description,
-    refId1,
-    refId2,
+    refId1 = '',
+    refId2 = '',
   } = req.body || {};
   const isDate = (value) => {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;

@@ -97,16 +97,6 @@
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
-        <div class="entitlement-form-row">
-          <label>
-            Reference ID 1
-            <input v-model.trim="form.refId1" maxlength="250" :disabled="loading">
-          </label>
-          <label>
-            Reference ID 2
-            <input v-model.trim="form.refId2" maxlength="250" :disabled="loading">
-          </label>
-        </div>
         <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
         <div class="entitlement-form-actions">
           <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
@@ -183,8 +173,6 @@
             haspIds: '',
             lineItemType: 'Hardware_Key',
             description: '',
-            refId1: '',
-            refId2: '',
           };
         },
         openCreateEntitlement() {
