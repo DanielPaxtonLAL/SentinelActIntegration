@@ -77,6 +77,15 @@ app.get('/api/customers', async (req, res) => {
   }
 });
 
+app.get('/api/entitlements', async (req, res) => {
+  try {
+    res.json(await withSession(() => ems.listEntitlements()));
+  } catch (err) {
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 const { ACT_URL, ACT_DATABASE } = process.env;
 const act = new ActClient({
   baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
@@ -135,7 +144,7 @@ app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
     const location = await withSession(() => ems.createCustomer({
       name: company.name.trim(),
       reference,
-      vendorId: process.env.EMS_VENDOR_ID || 1,
+      vendorId: process.env.EMS_VENDOR_ID || 2,
       phone: company.businessPhone || company.phone || '',
     }));
     res.status(201).json({ location });

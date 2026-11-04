@@ -106,8 +106,11 @@ class EmsClient {
   }
 
   // Lists entitlements (XML). The server returns XML even for .json requests.
-  listEntitlements() {
-    return this.call('/entitlement.xml');
+  async listEntitlements() {
+    const xml = await this.call('/entitlement.xml');
+    const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
+    const inst = parsed?.listResponse?.instance ?? [];
+    return Array.isArray(inst) ? inst : [inst];
   }
 
   // Gets one entitlement by its numeric id (e.g. 5057), not the EID GUID.
