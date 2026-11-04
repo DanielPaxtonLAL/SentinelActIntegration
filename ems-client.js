@@ -4,6 +4,13 @@
 
 const { XMLParser } = require('fast-xml-parser');
 
+const escapeXml = (value) => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&apos;');
+
 class EmsClient {
   constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false }) {
     if (!baseUrl) throw new Error('baseUrl is required');
@@ -66,6 +73,7 @@ class EmsClient {
     if (!this.cookies.has('JSESSIONID')) throw new Error('Login succeeded but no JSESSIONID cookie was returned.');
 
     this.authenticated = true;
+    this.webSessionUrl = new URL(location, `${this.baseUrl}/ems/`).href;
     return { baseUrl: this.baseUrl, sessionId: this.cookies.get('JSESSIONID'), redirectedTo: location };
   }
 
@@ -111,6 +119,87 @@ class EmsClient {
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
     const inst = parsed?.listResponse?.instance ?? [];
     return Array.isArray(inst) ? inst : [inst];
+  }
+
+  async createEntitlement(entitlement) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+
+    const item = (name, value) => `<${name}>${escapeXml(value)}</${name}>`;
+    const entitlementXml =
+      '<entitlement>' +
+      '<enabled>true</enabled><action>Save</action><isTest>false</isTest>' +
+      item('customerId', entitlement.customerId) +
+      '<customerEmail></customerEmail><partnerId></partnerId><partnerEmail></partnerEmail>' +
+      item('refId1', entitlement.refId1) +
+      item('refId2', entitlement.refId2) +
+      item('description', entitlement.description) +
+      '<proContId></proContId>' +
+      item('startDate', entitlement.startDate) +
+      item('endDate', entitlement.endDate) +
+      '<identity></identity><policy><revocationAllowed>true</revocationAllowed></policy>' +
+      '<entitlementItem>' +
+      '<priority>D</priority><type>CLOUD_KEY</type><deploymentType></deploymentType>' +
+      '<featureCachingMode></featureCachingMode><containerType>0</containerType>' +
+      item('startDate', entitlement.startDate) +
+      item('endDate', entitlement.endDate) +
+      '<itemLicenseType>0</itemLicenseType>' +
+      item('numProductKeys', entitlement.numberOfKeys) +
+      item('numActivationPerProductKey', entitlement.activationsPerKey) +
+      item('vendorId', entitlement.vendorId) +
+      item('enforcementId', entitlement.enforcementId) +
+      item('lineItemType', entitlement.lineItemType) +
+      '<itemProduct><isRevoked>false</isRevoked>' +
+      item('productId', entitlement.productId) +
+      '</itemProduct>' +
+      '</entitlementItem>' +
+      '</entitlement>';
+    const webUrl = new URL(`${this.baseUrl}/ems/addEntitlement.html`);
+    const sessionUrl = new URL(this.webSessionUrl);
+    if (sessionUrl.searchParams.has('ET')) {
+      webUrl.searchParams.set('ET', sessionUrl.searchParams.get('ET'));
+    }
+
+    const response = await this._fetch(webUrl.href, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Origin: new URL(this.baseUrl).origin,
+        Referer: `${this.baseUrl}/ems/entitlementMain.html`,
+      },
+      body: new URLSearchParams({
+        entitlementXML: entitlementXml,
+        entProductDynamicMemoryDataXml: '<dynamicMemorySegments></dynamicMemorySegments>',
+        produceAndPush: 'false',
+        lineItemTypeForProdPush: entitlement.lineItemType,
+        vendorIdForProdPush: entitlement.vendorId,
+      }),
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while creating the entitlement. Please retry.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS entitlement creation failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = data || text;
+      throw error;
+    }
+    if (!data || !['true', true].includes(data.saved)) {
+      const error = new Error(data?.message || 'EMS did not confirm that the entitlement was saved');
+      error.status = 502;
+      throw error;
+    }
+    return data;
   }
 
   // Gets one entitlement by its numeric id (e.g. 5057), not the EID GUID.

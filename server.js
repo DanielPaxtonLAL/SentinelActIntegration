@@ -86,6 +86,86 @@ app.get('/api/entitlements', async (req, res) => {
   }
 });
 
+app.post('/api/entitlements', express.json(), async (req, res) => {
+  const {
+    customerId,
+    productId,
+    enforcementId,
+    startDate,
+    endDate,
+    neverExpires,
+    numberOfKeys,
+    activationsPerKey,
+    lineItemType,
+    description,
+    refId1,
+    refId2,
+  } = req.body || {};
+  const isDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
+  const isPositiveInteger = (value) => /^\d+$/.test(String(value)) && Number(value) > 0 && Number(value) <= 999999;
+  const isId = (value) => /^\d+$/.test(String(value || '')) && Number(value) > 0;
+
+  if (!isId(customerId) || !isId(productId) || !isId(enforcementId)) {
+    return res.status(400).json({ error: 'Select a customer and enter numeric product and enforcement IDs' });
+  }
+  if (typeof neverExpires !== 'boolean' ||
+      !isDate(startDate) || (!neverExpires && !isDate(endDate)) ||
+      (!neverExpires && endDate < startDate)) {
+    return res.status(400).json({ error: 'Enter a valid start date and an end date on or after it' });
+  }
+  if (!isPositiveInteger(numberOfKeys) || !isPositiveInteger(activationsPerKey)) {
+    return res.status(400).json({ error: 'Number of keys and activations per key must be between 1 and 999999' });
+  }
+  if (lineItemType !== 'Hardware_Key') {
+    return res.status(400).json({ error: 'Unsupported line item type' });
+  }
+  if (typeof description !== 'string' || description.length > 510 ||
+      typeof refId1 !== 'string' || refId1.length > 250 ||
+      typeof refId2 !== 'string' || refId2.length > 250) {
+    return res.status(400).json({ error: 'Description must be 510 characters or fewer; reference IDs must be 250 characters or fewer' });
+  }
+
+  try {
+    const customers = await withSession(() => ems.listCustomers());
+    const selectedCustomerId = String(customerId).trim();
+    const selectedCustomer = customers.find((customer) =>
+      [customer.customerId, customer.id].some((id) => String(id ?? '').trim() === selectedCustomerId)
+    );
+    if (!selectedCustomer) {
+      return res.status(400).json({ error: 'The selected customer is no longer in the EMS customer list. Reload customers and try again.' });
+    }
+
+    if (!ems.authenticated) await ems.authenticate();
+    const vendorId = process.env.EMS_VENDOR_ID || '2';
+    const result = await ems.createEntitlement({
+      customerId: selectedCustomer.customerId ?? selectedCustomer.id,
+      productId,
+      enforcementId,
+      vendorId,
+      startDate,
+      endDate: neverExpires ? '2500-12-31' : endDate,
+      numberOfKeys,
+      activationsPerKey,
+      lineItemType,
+      description,
+      refId1,
+      refId2,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
+  }
+});
+
 const { ACT_URL, ACT_DATABASE } = process.env;
 const act = new ActClient({
   baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',

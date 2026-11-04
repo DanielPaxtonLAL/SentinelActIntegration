@@ -14,6 +14,7 @@
       <div class="header-actions">
         <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
         <button type="button" @click="loadEntitlements" :disabled="loading">Reload</button>
+        <button type="button" @click="openCreateEntitlement" :disabled="loading">Create entitlement</button>
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
     </header>
@@ -26,7 +27,86 @@
       <a href="#" onclick="event.preventDefault()">Administration</a>
       <a href="/custom-entities.html">Developer</a>
     </nav>
-    <section class="table-wrap">
+    <section v-if="createEntitlementOpen" class="create-entitlement">
+      <div class="create-entitlement-toolbar">
+        <h2>Create entitlement</h2>
+        <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
+      </div>
+      <form class="entitlement-form" @submit.prevent="createEntitlement">
+        <label>
+          Customer
+          <select v-model="form.customerId" required :disabled="customersLoading || loading">
+            <option value="" disabled>Select an EMS customer</option>
+            <option v-for="customer in customers" :key="customer.customerId" :value="String(customer.customerId)">
+              {{ customer.name || customer.customerName || ('Customer ' + customer.customerId) }}
+            </option>
+          </select>
+        </label>
+        <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
+        <div class="entitlement-form-row">
+          <label>
+            Product ID
+            <input v-model.trim="form.productId" type="number" min="1" step="1" required :disabled="loading">
+          </label>
+          <label>
+            Enforcement ID
+            <input v-model.trim="form.enforcementId" type="number" min="1" step="1" required :disabled="loading">
+          </label>
+          <label>
+            Line item type
+            <select v-model="form.lineItemType" :disabled="loading">
+              <option value="Hardware_Key">Hardware key</option>
+            </select>
+          </label>
+        </div>
+        <div class="entitlement-form-row">
+          <label>
+            Start date
+            <input v-model="form.startDate" type="date" required :disabled="loading">
+          </label>
+          <label class="entitlement-checkbox">
+            <input v-model="form.neverExpires" type="checkbox" :disabled="loading">
+            Never expires
+          </label>
+          <label v-if="!form.neverExpires">
+            End date
+            <input v-model="form.endDate" type="date" :min="form.startDate" required :disabled="loading">
+          </label>
+        </div>
+        <div class="entitlement-form-row">
+          <label>
+            Number of keys
+            <input v-model.number="form.numberOfKeys" type="number" min="1" max="999999" step="1" required :disabled="loading">
+          </label>
+          <label>
+            Activations per key
+            <input v-model.number="form.activationsPerKey" type="number" min="1" max="999999" step="1" required :disabled="loading">
+          </label>
+        </div>
+        <label>
+          Description
+          <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
+        </label>
+        <div class="entitlement-form-row">
+          <label>
+            Reference ID 1
+            <input v-model.trim="form.refId1" maxlength="250" :disabled="loading">
+          </label>
+          <label>
+            Reference ID 2
+            <input v-model.trim="form.refId2" maxlength="250" :disabled="loading">
+          </label>
+        </div>
+        <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
+        <div class="entitlement-form-actions">
+          <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
+          <button type="submit" :disabled="loading || customersLoading || !customers.length">
+            {{ loading ? 'Saving…' : 'Save draft entitlement' }}
+          </button>
+        </div>
+      </form>
+    </section>
+    <section v-else class="table-wrap">
       <table v-if="entitlements.length">
         <thead><tr><th v-for="column in columns" :key="column">{{ column }}</th></tr></thead>
         <tbody>
@@ -43,12 +123,23 @@
 
     createApp({
       data() {
-        return { entitlements: [], loading: false, error: '' };
+        return {
+          entitlements: [],
+          customers: [],
+          loading: false,
+          customersLoading: false,
+          error: '',
+          customerError: '',
+          notice: '',
+          createEntitlementOpen: false,
+          form: this.createEmptyForm(),
+        };
       },
       computed: {
         status() {
-          if (this.loading) return 'Loading entitlements…';
+          if (this.loading) return this.createEntitlementOpen ? 'Saving entitlement…' : 'Loading entitlements…';
           if (this.error) return this.error;
+          if (this.notice) return this.notice;
           return `${this.entitlements.length} entitlements`;
         },
         columns() {
@@ -58,6 +149,72 @@
         },
       },
       methods: {
+        createEmptyForm() {
+          const today = new Date();
+          return {
+            customerId: '',
+            productId: '',
+            enforcementId: '',
+            startDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+            endDate: '',
+            neverExpires: true,
+            numberOfKeys: 1,
+            activationsPerKey: 1,
+            lineItemType: 'Hardware_Key',
+            description: '',
+            refId1: '',
+            refId2: '',
+          };
+        },
+        openCreateEntitlement() {
+          this.error = '';
+          this.notice = '';
+          this.customerError = '';
+          this.createEntitlementOpen = true;
+          if (!this.customers.length && !this.customersLoading) this.loadCustomers();
+        },
+        closeCreateEntitlement() {
+          this.createEntitlementOpen = false;
+          this.error = '';
+          this.customerError = '';
+        },
+        async loadCustomers() {
+          this.customersLoading = true;
+          this.customerError = '';
+          try {
+            const response = await fetch('/api/customers');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid customer list');
+            this.customers = data;
+          } catch (err) {
+            this.customerError = 'Failed to load EMS customers: ' + err.message;
+          } finally {
+            this.customersLoading = false;
+          }
+        },
+        async createEntitlement() {
+          this.loading = true;
+          this.error = '';
+          this.notice = '';
+          try {
+            const response = await fetch('/api/entitlements', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.form),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            this.createEntitlementOpen = false;
+            this.form = this.createEmptyForm();
+            this.notice = 'Entitlement saved as a draft.';
+          } catch (err) {
+            this.error = 'Failed to create entitlement: ' + err.message;
+          } finally {
+            this.loading = false;
+          }
+          if (!this.error) await this.loadEntitlements();
+        },
         cellValue(item, column) {
           return column === 'value' && (item === null || typeof item !== 'object') ? item : item[column];
         },
@@ -95,6 +252,7 @@
       },
       mounted() {
         this.loadEntitlements();
+        this.loadCustomers();
       },
     }).mount('#app');
   </script>

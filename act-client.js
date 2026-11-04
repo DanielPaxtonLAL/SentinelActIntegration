@@ -1,4 +1,4 @@
-// Minimal Act! Web API client (mirrors auth_test.py).
+// Read-only Act! Web API client (mirrors auth_test.py).
 class ActClient {
   constructor({ baseUrl, database }) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -6,10 +6,26 @@ class ActClient {
     this.token = null;
   }
 
+  async _get(url, { headers }) {
+    const requestUrl = new URL(url);
+    const baseUrl = new URL(this.baseUrl);
+    const basePath = baseUrl.pathname.replace(/\/+$/, '');
+    if (requestUrl.origin !== baseUrl.origin ||
+        (requestUrl.pathname !== basePath && !requestUrl.pathname.startsWith(`${basePath}/`))) {
+      throw new Error('Act! requests must stay within the configured API URL');
+    }
+
+    return fetch(requestUrl.href, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(30000),
+    });
+  }
+
   // The password is only used for this request; just the token is kept.
   async authenticate(username, password) {
     const basic = Buffer.from(`${username}:${password}`).toString('base64');
-    const res = await fetch(`${this.baseUrl}/authorize`, {
+    const res = await this._get(`${this.baseUrl}/authorize`, {
       headers: {
         Authorization: `Basic ${basic}`,
         'Act-Database-Name': this.database,
@@ -30,7 +46,7 @@ class ActClient {
     const pageSize = 200;
     const all = [];
     for (let skip = 0; ; skip += pageSize) {
-      const res = await fetch(`${this.baseUrl}/api/companies?$top=${pageSize}&$skip=${skip}`, {
+      const res = await this._get(`${this.baseUrl}/api/companies?$top=${pageSize}&$skip=${skip}`, {
         headers: {
           Authorization: `Bearer ${this.token}`,
           Accept: 'application/json',
@@ -50,7 +66,7 @@ class ActClient {
   }
 
   async getCompany(companyId) {
-    const res = await fetch(`${this.baseUrl}/api/companies/${encodeURIComponent(companyId)}`, {
+    const res = await this._get(`${this.baseUrl}/api/companies/${encodeURIComponent(companyId)}`, {
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: 'application/json',

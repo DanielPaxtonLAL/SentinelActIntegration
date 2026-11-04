@@ -154,6 +154,21 @@ button:disabled { cursor: default; }
 
 .entitlements-page { padding: 1.5rem; }
 .entitlements-page .table-wrap { overflow-x: auto; }
+.entitlements-page .create-entitlement { max-width: 54rem; margin: 1.5rem auto; }
+.entitlements-page .create-entitlement-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+.entitlements-page .create-entitlement-toolbar h2 { margin: 0; font-size: 1.1rem; }
+.entitlements-page .entitlement-form { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
+.entitlements-page .entitlement-form label { display: grid; gap: .35rem; min-width: 0; font-size: .9rem; font-weight: 600; }
+.entitlements-page .entitlement-form input:not([type="checkbox"]),
+.entitlements-page .entitlement-form select,
+.entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid #aaa; border-radius: 4px; font: inherit; font-weight: 400; }
+.entitlements-page .entitlement-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.entitlements-page .entitlement-form-row:first-of-type { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.entitlements-page .entitlement-form .entitlement-checkbox { display: flex; align-items: center; align-self: end; gap: .5rem; min-height: 2.5rem; }
+.entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
+.entitlements-page .form-hint { color: #666; }
+.entitlements-page .form-error { color: #b00020; }
+.entitlements-page .entitlement-form-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 
 .custom-entities-page a { color: #123b68; }
 .custom-entities-page main { padding: 1.5rem; }
@@ -219,6 +234,9 @@ td { overflow-wrap: anywhere; }
   .customers-page .company-list { max-height: 14rem; }
   .customers-page .details { padding: 1.25rem; }
   .entitlements-page, .custom-entities-page main { padding: 1rem; }
+  .entitlements-page .entitlement-form-row,
+  .entitlements-page .entitlement-form-row:first-of-type { grid-template-columns: 1fr; }
+  .entitlements-page .entitlement-form .entitlement-checkbox { align-self: auto; }
 }
 
 @media (max-width: 600px) {
