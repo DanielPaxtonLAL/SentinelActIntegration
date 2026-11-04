@@ -241,7 +241,7 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data)) throw new Error('The server returned an invalid entitlements list');
-            this.entitlements = data;
+            this.entitlements = data.filter((entitlement) => entitlement.state !== 'PRODUCT_KEY_GENERATED');
           } catch (err) {
             this.error = 'Failed to load entitlements: ' + err.message;
           } finally {

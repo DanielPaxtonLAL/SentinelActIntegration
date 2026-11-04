@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const express = require('express');
 const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
@@ -275,5 +276,11 @@ app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
   }
 });
 
-// Bound to localhost because the page exposes customer data without its own login.
-app.listen(PORT, '127.0.0.1', () => console.log(`Open http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Open http://localhost:${PORT}`);
+  const addresses = Object.values(os.networkInterfaces())
+    .flat()
+    .filter((network) => network && network.family === 'IPv4' && !network.internal)
+    .map((network) => `http://${network.address}:${PORT}`);
+  for (const address of addresses) console.log(`Network: ${address}`);
+});
