@@ -3,79 +3,99 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EMS Customers</title>
+  <title>ACT Companies</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
-    h1 { margin-bottom: .25rem; }
-    #status { color: #666; margin-bottom: 1rem; }
-    #status.error, #actStatus.error { color: #b00020; }
-    #status, #actStatus { white-space: pre-wrap; word-break: break-word; }
-    input { padding: .4rem .6rem; width: 260px; margin-right: .5rem; }
-    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-    th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid #ddd; }
-    th { background: #f3f3f3; }
-    .on { color: #1b7f3b; } .off { color: #b00020; }
-    .sync-error { color: #b00020; }
-    .sync-success { color: #1b7f3b; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; color: #222; }
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; }
+    .dev-disclaimer { margin: 0; padding: 0; background: #ffeb3b; color: #222; text-align: center; }
+    .app-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 1.5rem; border-bottom: 1px solid #ddd; }
+    .app-header h1 { margin: 0; font-size: 1.35rem; }
+    .header-actions { display: flex; align-items: center; gap: .75rem; }
+    #actStatus { color: #666; white-space: pre-wrap; word-break: break-word; }
+    #actStatus.error, .sync-error { color: #b00020; }
+    .layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); min-height: calc(100vh - 65px); }
+    .sidebar { padding: 1rem; border-right: 1px solid #ddd; background: #f8f8f8; }
+    .sidebar h2 { margin: 0 0 .75rem; font-size: 1rem; }
+    .company-filter { width: 100%; padding: .55rem .65rem; margin-bottom: .75rem; border: 1px solid #bbb; border-radius: 4px; }
+    .company-list { display: grid; gap: 0; max-height: calc(100vh - 170px); overflow-y: auto; }
+    .company-item { padding: .35rem .6rem; text-align: left; border: 0; border-radius: 2px; background: #fff; font-size: .9rem; }
+    .company-item:nth-child(even) { background: #eee; }
+    .company-item:hover { background: #ddd; }
+    .company-item.selected { color: #123b68; background: #e4edf7; font-weight: 600; }
+    .company-count, .empty-list { color: #666; font-size: .9rem; }
+    .company-count { margin: 0 0 .5rem; }
+    .empty-list { padding: .5rem 0; }
+    .details { padding: 2rem; }
+    .details h2 { margin-top: 0; }
+    .company-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .65rem 1.25rem; max-width: 40rem; }
+    .company-details dt { color: #666; }
+    .company-details dd { margin: 0; overflow-wrap: anywhere; }
+    .sync-error { margin-top: 1rem; }
+    @media (max-width: 640px) {
+      .app-header { align-items: flex-start; flex-direction: column; }
+      .header-actions { flex-wrap: wrap; }
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { border-right: 0; border-bottom: 1px solid #ddd; }
+      .company-list { max-height: 14rem; }
+      .details { padding: 1.25rem; }
+    }
     [v-cloak] { display: none; }
   </style>
 </head>
 <body>
   <main id="app" v-cloak>
-    <h1>Customers</h1>
-    <h2>EMS Customers</h2>
-    <div id="status" :class="{ error: Boolean(error) }">{{ status }}</div>
-    <input v-model="filter" placeholder="Filter by name, email, city…">
-    <button type="button" @click="loadCustomers">Reload</button>
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Name</th><th>Type</th><th>Email</th><th>Contact</th><th>Phone</th><th>City</th><th>Country</th><th>Enabled</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="customer in filteredCustomers" :key="customer.customerId">
-          <td>{{ customer.customerId }}</td>
-          <td>{{ customer.name }}</td>
-          <td>{{ types[customer.type] || customer.type }}</td>
-          <td>{{ customer.defaultEmail }}</td>
-          <td>{{ customer.defaultContactName }}</td>
-          <td>{{ customer.phone }}</td>
-          <td>{{ customer.billingCity }}</td>
-          <td>{{ customer.billingCountry }}</td>
-          <td :class="String(customer.enabled) === 'true' ? 'on' : 'off'">
-            {{ String(customer.enabled) === 'true' ? 'Yes' : 'No' }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <h2>ACT Companies</h2>
-    <div id="actStatus" :class="{ error: Boolean(actError) }">{{ actStatus }}</div>
-    <button type="button" @click="loadCompanies" :disabled="actLoading">Reload companies</button>
-    <button type="button" @click="logout" :disabled="actLoading">Log out</button>
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Country</th><th>Website</th><th>EMS</th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="(company, i) in companies" :key="company.id || i">
-          <td>{{ company.id }}</td>
-          <td>{{ company.name }}</td>
-          <td>{{ company.businessPhone || company.phone || company.mainPhone }}</td>
-          <td>{{ company.city || (company.address && company.address.city) || company.businessAddress?.city }}</td>
-          <td>{{ company.country || (company.address && company.address.country) || company.businessAddress?.country }}</td>
-          <td>{{ company.webSite || company.website }}</td>
-          <td>
-            <button type="button" @click="addCompanyToEms(company)"
-              :disabled="!company.id || inEms(company) || (companySync[company.id] && ['adding', 'added'].includes(companySync[company.id].state))">
-              {{ companySync[company.id]?.state === 'adding' ? 'Adding…' : (inEms(company) || companySync[company.id]?.state === 'added') ? 'In EMS' : 'Add to EMS' }}
+    <div class="dev-disclaimer">DEVELOPMENT - NOT LIVE</div>
+    <header class="app-header">
+      <h1>ACT Companies</h1>
+      <div class="header-actions">
+        <div id="actStatus" :class="{ error: Boolean(actError) }">{{ actStatus }}</div>
+        <button type="button" @click="loadCompanies" :disabled="actLoading">Reload</button>
+        <button type="button" @click="logout" :disabled="actLoading">Log out</button>
+      </div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar" aria-label="ACT companies">
+        <h2>Companies</h2>
+        <input class="company-filter" v-model="companyFilter" placeholder="Search companies…" aria-label="Search companies">
+        <p class="company-count">{{ filteredCompanies.length }} companies</p>
+        <nav class="company-list" aria-label="Company list">
+          <button v-for="(company, i) in filteredCompanies" :key="company.id || i"
+            type="button" class="company-item" :class="{ selected: selectedCompany === company }"
+            @click="selectedCompany = company">
+            {{ company.name || 'Unnamed company' }}
+          </button>
+          <div v-if="!filteredCompanies.length" class="empty-list">
+            {{ companies.length ? 'No matching companies' : (actLoading ? 'Loading companies…' : 'No companies found') }}
+          </div>
+        </nav>
+      </aside>
+      <section class="details" aria-live="polite">
+        <template v-if="selectedCompany">
+          <h2>{{ selectedCompany.name || 'Unnamed company' }}</h2>
+          <dl class="company-details">
+            <dt>ID</dt><dd>{{ selectedCompany.id }}</dd>
+            <dt>Phone</dt><dd>{{ selectedCompany.businessPhone || selectedCompany.phone || selectedCompany.mainPhone || '—' }}</dd>
+            <dt>City</dt><dd>{{ selectedCompany.city || (selectedCompany.address && selectedCompany.address.city) || (selectedCompany.businessAddress && selectedCompany.businessAddress.city) || '—' }}</dd>
+            <dt>Country</dt><dd>{{ selectedCompany.country || (selectedCompany.address && selectedCompany.address.country) || (selectedCompany.businessAddress && selectedCompany.businessAddress.country) || '—' }}</dd>
+            <dt>Website</dt><dd>{{ selectedCompany.webSite || selectedCompany.website || '—' }}</dd>
+          </dl>
+          <p>
+            <button type="button" @click="addCompanyToEms(selectedCompany)"
+              :disabled="!selectedCompany.id || inEms(selectedCompany) || (companySync[selectedCompany.id] && ['adding', 'added'].includes(companySync[selectedCompany.id].state))">
+              {{ companySync[selectedCompany.id]?.state === 'adding' ? 'Adding…' : (inEms(selectedCompany) || companySync[selectedCompany.id]?.state === 'added') ? 'In EMS' : 'Add to EMS' }}
             </button>
-            <span v-if="companySync[company.id]?.error" class="sync-error">
-              {{ companySync[company.id].error }}
-            </span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+          </p>
+          <div v-if="companySync[selectedCompany.id]?.error" class="sync-error">
+            {{ companySync[selectedCompany.id].error }}
+          </div>
+        </template>
+        <p v-else-if="actLoading">Loading companies…</p>
+        <p v-else>Select a company from the sidebar.</p>
+      </section>
+    </div>
   </main>
 
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -88,13 +108,11 @@
           customers: [],
           companies: [],
           companySync: {},
+          selectedCompany: null,
           actLoading: false,
           actAuthenticated: false,
           actError: '',
-          filter: '',
-          loading: true,
-          error: '',
-          types: { org: 'Organisation', ind: 'Individual' },
+          companyFilter: '',
         };
       },
       computed: {
@@ -103,16 +121,11 @@
           if (this.actError) return this.actError;
           return this.actAuthenticated ? `${this.companies.length} companies` : 'Log in to load companies';
         },
-        filteredCustomers() {
-          const query = this.filter.trim().toLowerCase();
-          return this.customers.filter((customer) =>
-            !query || Object.values(customer).join(' ').toLowerCase().includes(query)
+        filteredCompanies() {
+          const query = this.companyFilter.trim().toLowerCase();
+          return this.companies.filter((company) =>
+            !query || String(company.name || '').toLowerCase().includes(query)
           );
-        },
-        status() {
-          if (this.loading) return 'Loading…';
-          if (this.error) return this.error;
-          return `${this.filteredCustomers.length} of ${this.customers.length} customers`;
         },
       },
       methods: {
@@ -152,6 +165,9 @@
             }
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.companies = data;
+            if (!this.selectedCompany || !data.some((company) => company.id === this.selectedCompany.id)) {
+              this.selectedCompany = data[0] || null;
+            }
             this.actAuthenticated = true;
           } catch (err) {
             this.actError = 'Failed to load companies: ' + err.message;
@@ -195,17 +211,13 @@
           }
         },
         async loadCustomers() {
-          this.loading = true;
-          this.error = '';
           try {
             const response = await fetch('/api/customers');
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.customers = data;
           } catch (err) {
-            this.error = 'Failed to load customers: ' + err.message;
-          } finally {
-            this.loading = false;
+            this.actError = 'Failed to load EMS customer references: ' + err.message;
           }
         },
       },
