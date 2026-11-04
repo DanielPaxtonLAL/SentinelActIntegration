@@ -60,6 +60,33 @@ button:disabled { cursor: default; }
   font-weight: 600;
 }
 
+.catalog-page { padding-bottom: 1.5rem; }
+.catalog-subnav {
+  display: flex;
+  gap: .5rem;
+  padding: .75rem 1.5rem;
+  border-bottom: 1px solid #ddd;
+  background: #f8f8f8;
+}
+.catalog-subnav button {
+  padding: .45rem .8rem;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  color: #444;
+}
+.catalog-subnav button[aria-current="page"] {
+  border-color: #123b68;
+  background: #123b68;
+  color: #fff;
+}
+.catalog-content { padding: 1.25rem 1.5rem; }
+.catalog-tools { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+.catalog-tools h2 { margin: 0; font-size: 1.1rem; }
+.catalog-tools input { width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid #aaa; border-radius: 4px; }
+.catalog-message { padding: 1rem 0; color: #666; }
+.catalog-page .table-wrap { overflow-x: auto; }
+
 #actStatus, #status {
   color: #666;
   white-space: pre-wrap;
@@ -225,6 +252,11 @@ td { overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .tab-nav { overflow-x: auto; padding: 0 .5rem; }
   .tab-nav a { white-space: nowrap; }
+  .catalog-subnav { overflow-x: auto; padding: .65rem .75rem; }
+  .catalog-subnav button { white-space: nowrap; }
+  .catalog-content { padding: 1rem; }
+  .catalog-tools { align-items: stretch; flex-direction: column; }
+  .catalog-tools input { width: 100%; }
   .app-header, .custom-entities-page > header {
     align-items: flex-start;
     flex-direction: column;

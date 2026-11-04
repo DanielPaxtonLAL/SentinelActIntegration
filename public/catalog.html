@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EMS Catalog</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main id="app" class="catalog-page" v-cloak>
+    <div class="dev-disclaimer">DEVELOPMENT - NOT LIVE</div>
+    <header class="app-header">
+      <h1>Catalog</h1>
+      <div class="header-actions">
+        <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
+        <button type="button" @click="loadItems" :disabled="loading">Reload</button>
+        <button type="button" @click="logout" :disabled="loading">Log out</button>
+      </div>
+    </header>
+    <nav class="tab-nav" aria-label="Main navigation">
+      <a href="#" onclick="event.preventDefault()">Home</a>
+      <a href="/catalog.html" aria-current="page">Catalog</a>
+      <a href="/entitlements.html">Entitlements</a>
+      <a href="/">Customers</a>
+      <a href="#" onclick="event.preventDefault()">Reports</a>
+      <a href="#" onclick="event.preventDefault()">Administration</a>
+      <a href="/custom-entities.html">Developer</a>
+    </nav>
+    <nav class="catalog-subnav" aria-label="Catalog sections">
+      <button v-for="tab in tabs" :key="tab.id" type="button"
+        :aria-current="activeTab === tab.id ? 'page' : null"
+        @click="selectTab(tab.id)">
+        {{ tab.label }}
+      </button>
+    </nav>
+    <section class="catalog-content">
+      <div class="catalog-tools">
+        <h2>{{ activeTabLabel }}</h2>
+        <input v-model.trim="filter" type="search" :placeholder="'Filter ' + activeTabLabel.toLowerCase()"
+          :aria-label="'Filter ' + activeTabLabel">
+      </div>
+      <div v-if="loading" class="catalog-message" role="status">Loading {{ activeTabLabel.toLowerCase() }} from EMS…</div>
+      <div v-else-if="error" class="catalog-message form-error" role="alert">{{ error }}</div>
+      <div v-else-if="!filteredItems.length" class="catalog-message">
+        {{ items.length ? 'No matching items.' : 'No ' + activeTabLabel.toLowerCase() + ' found in EMS.' }}
+      </div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr><th v-for="column in columns" :key="column">{{ columnLabel(column) }}</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, index) in filteredItems" :key="item.productId || item.featureId || item.memoryId || index">
+              <td v-for="column in columns" :key="column">{{ displayValue(item[column]) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          tabs: [
+            { id: 'products', label: 'Products' },
+            { id: 'features', label: 'Features' },
+            { id: 'dynamicMemory', label: 'Dynamic Memory' },
+          ],
+          activeTab: 'products',
+          items: [],
+          filter: '',
+          loading: false,
+          error: '',
+        };
+      },
+      computed: {
+        activeTabLabel() {
+          return this.tabs.find((tab) => tab.id === this.activeTab).label;
+        },
+        columns() {
+          const firstItem = this.filteredItems[0] || this.items[0];
+          return firstItem && typeof firstItem === 'object' ? Object.keys(firstItem) : [];
+        },
+        filteredItems() {
+          const query = this.filter.toLowerCase();
+          if (!query) return this.items;
+          return this.items.filter((item) =>
+            Object.values(item).some((value) => this.displayValue(value).toLowerCase().includes(query))
+          );
+        },
+        status() {
+          if (this.loading) return `Loading ${this.activeTabLabel.toLowerCase()}…`;
+          if (this.error) return this.error;
+          return `${this.filteredItems.length} ${this.activeTabLabel.toLowerCase()}`;
+        },
+      },
+      methods: {
+        async selectTab(tab) {
+          this.activeTab = tab;
+          this.filter = '';
+          await this.loadItems();
+        },
+        async loadItems() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch(`/api/catalog/${this.activeTab}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid catalog list');
+            this.items = data;
+          } catch (err) {
+            this.items = [];
+            this.error = `Failed to load ${this.activeTabLabel.toLowerCase()}: ${err.message}`;
+          } finally {
+            this.loading = false;
+          }
+        },
+        columnLabel(value) {
+          return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/^./, (letter) => letter.toUpperCase());
+        },
+        displayValue(value) {
+          if (value === null || value === undefined || value === '') return '—';
+          if (typeof value === 'object') return JSON.stringify(value);
+          return String(value);
+        },
+        async logout() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            window.location.replace('/login.html');
+          } catch (err) {
+            this.error = 'Log out failed: ' + err.message;
+            this.loading = false;
+          }
+        },
+      },
+      mounted() {
+        this.loadItems();
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

@@ -86,6 +86,25 @@ app.get('/api/entitlements', async (req, res) => {
   }
 });
 
+app.get('/api/catalog/:category', async (req, res) => {
+  const categories = new Set(['products', 'features', 'dynamicMemory']);
+  if (!categories.has(req.params.category)) {
+    return res.status(404).json({ error: 'Unknown catalog category' });
+  }
+  try {
+    res.json(await withSession(() =>
+      ems.listCatalog(req.params.category, process.env.EMS_VENDOR_ID || '2')
+    ));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.post('/api/entitlements', express.json(), async (req, res) => {
   const {
     customerId,
