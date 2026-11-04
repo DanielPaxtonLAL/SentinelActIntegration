@@ -106,6 +106,40 @@
         </div>
       </form>
     </section>
+    <section v-else-if="selectedEntitlement" class="entitlement-details">
+      <div class="create-entitlement-toolbar">
+        <h2>Entitlement details</h2>
+        <button type="button" @click="closeEntitlementDetails">Back to entitlements</button>
+      </div>
+      <p v-if="detailLoading" role="status">Loading entitlement details…</p>
+      <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
+      <template v-if="!detailLoading && !detailError">
+        <dl class="entitlement-detail-fields">
+          <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customer) }}</dd>
+          <dt>Status</dt><dd>{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</dd>
+          <dt>Created</dt><dd>{{ displayValue(selectedEntitlement.createDate) }}</dd>
+          <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
+          <dt>End date</dt><dd>{{ displayValue(selectedEntitlement.endDate) }}</dd>
+          <dt>Description</dt><dd>{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</dd>
+        </dl>
+        <h3>Products</h3>
+        <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
+        <div v-else class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Type</th><th>Product</th><th>Product ID</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(product, index) in selectedEntitlement.products" :key="`${product.productId}-${index}`">
+                <td>{{ displayValue(product.lineItemType) }}</td>
+                <td>{{ displayValue(product.productName) }}</td>
+                <td>{{ displayValue(product.productId) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </section>
     <section v-else class="table-wrap">
       <table v-if="entitlements.length">
         <thead>
@@ -119,7 +153,12 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(entitlement, index) in entitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index">
+          <tr v-for="(entitlement, index) in entitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index"
+              class="entitlement-row" role="button" tabindex="0"
+              :aria-label="'View entitlement ' + displayValue(entitlement.id)"
+              @click="openEntitlementDetails(entitlement)"
+              @keydown.enter.prevent="openEntitlementDetails(entitlement)"
+              @keydown.space.prevent="openEntitlementDetails(entitlement)">
             <td>{{ displayValue(entitlement.type) }}</td>
             <td class="date-cell" :title="displayValue(entitlement.activationDate)">{{ displayValue(entitlement.activationDate) }}</td>
             <td>{{ displayValue(entitlement.createDate) }}</td>
@@ -140,6 +179,9 @@
         return {
           entitlements: [],
           customers: [],
+          selectedEntitlement: null,
+          detailLoading: false,
+          detailError: '',
           loading: false,
           customersLoading: false,
           error: '',
@@ -151,6 +193,7 @@
       },
       computed: {
         status() {
+          if (this.detailLoading) return 'Loading entitlement details…';
           if (this.loading) return this.createEntitlementOpen ? 'Saving entitlement…' : 'Loading entitlements…';
           if (this.error) return this.error;
           if (this.notice) return this.notice;
@@ -179,8 +222,31 @@
           this.error = '';
           this.notice = '';
           this.customerError = '';
+          this.selectedEntitlement = null;
+          this.detailError = '';
           this.createEntitlementOpen = true;
           if (!this.customers.length && !this.customersLoading) this.loadCustomers();
+        },
+        async openEntitlementDetails(entitlement) {
+          this.createEntitlementOpen = false;
+          this.detailError = '';
+          this.selectedEntitlement = { ...entitlement, products: [] };
+          this.detailLoading = true;
+          try {
+            const response = await fetch(`/api/entitlements/${encodeURIComponent(entitlement.id)}`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data.products)) throw new Error('The server returned invalid entitlement details');
+            this.selectedEntitlement = data;
+          } catch (err) {
+            this.detailError = 'Failed to load entitlement details: ' + err.message;
+          } finally {
+            this.detailLoading = false;
+          }
+        },
+        closeEntitlementDetails() {
+          this.selectedEntitlement = null;
+          this.detailError = '';
         },
         closeCreateEntitlement() {
           this.createEntitlementOpen = false;

@@ -87,6 +87,22 @@ app.get('/api/entitlements', async (req, res) => {
   }
 });
 
+app.get('/api/entitlements/:id', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
+  }
+  try {
+    res.json(await withSession(() => ems.getEntitlementDetails(req.params.id)));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.get('/api/catalog/:category', async (req, res) => {
   const categories = new Set(['products', 'features', 'dynamicMemory']);
   if (!categories.has(req.params.category)) {

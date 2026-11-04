@@ -121,6 +121,33 @@ class EmsClient {
     return Array.isArray(inst) ? inst : [inst];
   }
 
+  async getEntitlementDetails(id) {
+    const xml = await this.getEntitlement(id);
+    const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
+    const entitlement = parsed?.entitlement;
+    if (!entitlement || typeof entitlement !== 'object') {
+      throw new Error('EMS returned an invalid entitlement detail');
+    }
+
+    const items = entitlement.entitlementItem ?? [];
+    const entitlementItems = Array.isArray(items) ? items : [items];
+    const products = entitlementItems.flatMap((item) => {
+      const itemProducts = item?.itemProduct ?? [];
+      const productList = Array.isArray(itemProducts) ? itemProducts : [itemProducts];
+      return productList.filter((product) => product && typeof product === 'object').map((product) => ({
+        lineItemType: item.lineItemType,
+        productId: product.productId,
+        productName: product.product?.productName ?? product.productName,
+      }));
+    });
+
+    return {
+      ...entitlement,
+      id: String(id),
+      products,
+    };
+  }
+
   async listCatalog(category, vendorId = '2') {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
 
