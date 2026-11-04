@@ -8,6 +8,7 @@ class EmsClient {
   constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false }) {
     if (!baseUrl) throw new Error('baseUrl is required');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.apiVersion = apiVersion;
     this.apiRoot = `${this.baseUrl}/ems/${apiVersion}/ws`;
     this.username = username;
     this.password = password;
@@ -74,6 +75,34 @@ class EmsClient {
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
     const inst = parsed?.listResponse?.instance ?? [];
     return Array.isArray(inst) ? inst : [inst];
+  }
+
+  // Creates a customer via PUT /customer.ws with an XML body; returns the Location header.
+  async createCustomer({ name, vendorId, reference = '', description = '', phone = '' }) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (!name) throw new Error('Customer name is required.');
+    if (!vendorId) throw new Error('EMS vendor ID is required (set EMS_VENDOR_ID in .env).');
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const xml =
+      '<customer>' +
+      '<type>org</type><enabled>true</enabled>' +
+      `<name>${esc(name)}</name><description>${esc(description)}</description>` +
+      `<crmId>${esc(reference)}</crmId><refId>${esc(reference)}</refId>` +
+      `<phone>${esc(phone)}</phone><vendorId>${esc(vendorId)}</vendorId>` +
+      '</customer>';
+    const res = await this._fetch(`${this.apiRoot}/customer.ws`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
+      body: xml,
+    });
+    const text = await res.text();
+    if (res.status !== 201) {
+      const err = new Error(`EMS PUT /customer.ws failed: ${res.status} ${res.statusText}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
+    }
+    return res.headers.get('location');
   }
 
   // Lists entitlements (XML). The server returns XML even for .json requests.

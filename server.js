@@ -36,7 +36,7 @@ async function withSession(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (err.status === 401 || err.status === 403 || err.status === 404) {
+    if (err.status === 401) {
       ems.authenticated = false;
       ems.cookies.clear();
       await ems.authenticate();
@@ -111,6 +111,38 @@ app.get('/api/act/companies', async (req, res) => {
     if (err.status === 401) act.token = null;
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({ error: err.status === 401 ? 'Act! session expired, log in again' : err.message });
+  }
+});
+
+app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
+  if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
+  try {
+    const company = await act.getCompany(req.params.id);
+    if (!company || typeof company.name !== 'string' || !company.name.trim()) {
+      return res.status(502).json({ error: 'Act! returned a company without a name' });
+    }
+
+    const reference = String(company.id || req.params.id);
+    const existing = await withSession(() => ems.listCustomers());
+    if (existing.some((c) => String(c.refId1 ?? '').trim().toLowerCase() === reference.toLowerCase())) {
+      return res.status(409).json({ error: 'This ACT company already exists in EMS' });
+    }
+
+    const location = await withSession(() => ems.createCustomer({
+      name: company.name.trim(),
+      reference,
+      vendorId: process.env.EMS_VENDOR_ID || 1,
+      phone: company.businessPhone || company.phone || '',
+    }));
+    res.status(201).json({ location });
+  } catch (err) {
+    if (err.status === 401) act.token = null;
+    console.error(err.message);
+    res.status(err.status === 401 ? 401 : 502).json({
+      error: err.status === 401
+        ? 'Act! session expired, log in again'
+        : `${err.message}${err.body ? `: ${typeof err.body === 'string' ? err.body : JSON.stringify(err.body)}` : ''}`,
+    });
   }
 });
 
