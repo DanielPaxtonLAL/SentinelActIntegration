@@ -108,10 +108,24 @@
     </section>
     <section v-else class="table-wrap">
       <table v-if="entitlements.length">
-        <thead><tr><th v-for="column in columns" :key="column">{{ column }}</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Date</th>
+            <th>Created</th>
+            <th>Customer name</th>
+            <th>Ref ID 1</th>
+            <th>Status</th>
+          </tr>
+        </thead>
         <tbody>
           <tr v-for="(entitlement, index) in entitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index">
-            <td v-for="column in columns" :key="column">{{ formatValue(cellValue(entitlement, column)) }}</td>
+            <td>{{ displayValue(entitlement.type) }}</td>
+            <td class="date-cell" :title="displayValue(entitlement.activationDate)">{{ displayValue(entitlement.activationDate) }}</td>
+            <td>{{ displayValue(entitlement.createDate) }}</td>
+            <td>{{ displayValue(entitlement.customer) }}</td>
+            <td>{{ displayValue(entitlement.refId1) }}</td>
+            <td>{{ displayValue(entitlement.state) }}</td>
           </tr>
         </tbody>
       </table>
@@ -141,11 +155,6 @@
           if (this.error) return this.error;
           if (this.notice) return this.notice;
           return `${this.entitlements.length} entitlements`;
-        },
-        columns() {
-          return [...new Set(this.entitlements.flatMap((item) =>
-            item && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : ['value']
-          ))];
         },
       },
       methods: {
@@ -215,11 +224,8 @@
           }
           if (!this.error) await this.loadEntitlements();
         },
-        cellValue(item, column) {
-          return column === 'value' && (item === null || typeof item !== 'object') ? item : item[column];
-        },
-        formatValue(value) {
-          return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
+        displayValue(value) {
+          return value === null || value === undefined || value === '' ? '—' : String(value);
         },
         async loadEntitlements() {
           this.loading = true;
