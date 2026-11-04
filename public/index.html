@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EMS Customers</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
+    h1 { margin-bottom: .25rem; }
+    #status { color: #666; margin-bottom: 1rem; }
+    #status.error, #actStatus.error { color: #b00020; }
+    #status, #actStatus { white-space: pre-wrap; word-break: break-word; }
+    input { padding: .4rem .6rem; width: 260px; margin-right: .5rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid #ddd; }
+    th { background: #f3f3f3; }
+    .on { color: #1b7f3b; } .off { color: #b00020; }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1>Customers</h1>
+    <h2>EMS Customers</h2>
+    <div id="status" :class="{ error: Boolean(error) }">{{ status }}</div>
+    <input v-model="filter" placeholder="Filter by name, email, city…">
+    <button type="button" @click="loadCustomers">Reload</button>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Type</th><th>Email</th><th>Contact</th><th>Phone</th><th>City</th><th>Country</th><th>Enabled</th></tr>
+      </thead>
+      <tbody>
+        <tr v-for="customer in filteredCustomers" :key="customer.customerId">
+          <td>{{ customer.customerId }}</td>
+          <td>{{ customer.name }}</td>
+          <td>{{ types[customer.type] || customer.type }}</td>
+          <td>{{ customer.defaultEmail }}</td>
+          <td>{{ customer.defaultContactName }}</td>
+          <td>{{ customer.phone }}</td>
+          <td>{{ customer.billingCity }}</td>
+          <td>{{ customer.billingCountry }}</td>
+          <td :class="String(customer.enabled) === 'true' ? 'on' : 'off'">
+            {{ String(customer.enabled) === 'true' ? 'Yes' : 'No' }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>ACT Companies</h2>
+    <div id="actStatus" :class="{ error: Boolean(actError) }">{{ actStatus }}</div>
+    <form @submit.prevent="actLogin">
+      <input v-model="actUser" placeholder="Act! username" autocomplete="username" style="width:160px">
+      <input v-model="actPass" type="password" placeholder="Act! password" autocomplete="current-password" style="width:160px">
+      <button type="submit" :disabled="actLoading">Log in</button>
+      <button type="button" @click="loadCompanies">Reload</button>
+    </form>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Phone</th><th>City</th><th>Country</th><th>Website</th></tr>
+      </thead>
+      <tbody>
+        <tr v-for="(company, i) in companies" :key="company.id || i">
+          <td>{{ company.id }}</td>
+          <td>{{ company.name }}</td>
+          <td>{{ company.businessPhone || company.phone || company.mainPhone }}</td>
+          <td>{{ company.city || (company.address && company.address.city) || company.businessAddress?.city }}</td>
+          <td>{{ company.country || (company.address && company.address.country) || company.businessAddress?.country }}</td>
+          <td>{{ company.webSite || company.website }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return {
+          customers: [],
+          companies: [],
+          actLoading: false,
+          actUser: '',
+          actPass: '',
+          actError: '',
+          filter: '',
+          loading: true,
+          error: '',
+          types: { org: 'Organisation', ind: 'Individual' },
+        };
+      },
+      computed: {
+        actStatus() {
+          if (this.actLoading) return 'Loading…';
+          if (this.actError) return this.actError;
+          return this.companies.length ? `${this.companies.length} companies` : 'Log in to load companies';
+        },
+        filteredCustomers() {
+          const query = this.filter.trim().toLowerCase();
+          return this.customers.filter((customer) =>
+            !query || Object.values(customer).join(' ').toLowerCase().includes(query)
+          );
+        },
+        status() {
+          if (this.loading) return 'Loading…';
+          if (this.error) return this.error;
+          return `${this.filteredCustomers.length} of ${this.customers.length} customers`;
+        },
+      },
+      methods: {
+        async actLogin() {
+          this.actLoading = true;
+          this.actError = '';
+          try {
+            const response = await fetch('/api/act/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: this.actUser, password: this.actPass }),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            this.actPass = '';
+          } catch (err) {
+            this.actPass = '';
+            this.actLoading = false;
+            this.actError = 'Log in failed: ' + err.message;
+            return;
+          }
+          await this.loadCompanies();
+        },
+        async loadCompanies() {
+          this.actLoading = true;
+          this.actError = '';
+          try {
+            const response = await fetch('/api/act/companies');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            this.companies = data;
+          } catch (err) {
+            this.actError = 'Failed to load companies: ' + err.message;
+          } finally {
+            this.actLoading = false;
+          }
+        },
+        async loadCustomers() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/customers');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            this.customers = data;
+          } catch (err) {
+            this.error = 'Failed to load customers: ' + err.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+      },
+      mounted() {
+        this.loadCustomers();
+      },
+    }).mount('#app');
+
+    const reloadEvents = new EventSource('/__dev/reload');
+    reloadEvents.addEventListener('reload', () => window.location.reload());
+  </script>
+</body>
+</html>
