@@ -323,10 +323,11 @@ app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
 });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Open http://localhost:${PORT}`);
+  console.log(`Local: http://localhost:${PORT}`);
   const addresses = Object.values(os.networkInterfaces())
     .flat()
     .filter((network) => network && network.family === 'IPv4' && !network.internal)
     .map((network) => `http://${network.address}:${PORT}`);
   for (const address of addresses) console.log(`Network: ${address}`);
+  console.log('Press Ctrl+C to stop the server.');
 });
