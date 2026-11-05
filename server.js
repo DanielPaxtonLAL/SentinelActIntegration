@@ -303,7 +303,7 @@ app.get('/api/act/companies/:id/divisions', async (req, res) => {
   }
 });
 
-app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
+app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) => {
   if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
     const company = await act.getCompany(req.params.id);
@@ -318,6 +318,26 @@ app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
       return res.status(409).json({ error: 'Companies with divisions cannot be added to EMS; add a division instead' });
     }
 
+    let emsName = company.name.trim();
+    if (req.body && req.body.parentId) {
+      const parentId = String(req.body.parentId);
+      if (parentId === String(company.id || req.params.id)) {
+        return res.status(400).json({ error: 'A company cannot be its own parent' });
+      }
+      const parentDivisions = await act.getCompanyDivisions(parentId);
+      if (!Array.isArray(parentDivisions) ||
+          !parentDivisions.some((division) =>
+            division && String(division.id) === String(company.id || req.params.id)
+          )) {
+        return res.status(400).json({ error: 'The specified parent does not contain this ACT company' });
+      }
+      const parent = await act.getCompany(parentId);
+      if (!parent || typeof parent.name !== 'string' || !parent.name.trim()) {
+        return res.status(502).json({ error: 'Act! returned a parent company without a name' });
+      }
+      emsName = `${parent.name.trim()} ${company.name.trim()}`;
+    }
+
     const reference = String(company.id || req.params.id);
     const existing = await withSession(() => ems.listCustomers());
     if (existing.some((c) => String(c.refId1 ?? '').trim().toLowerCase() === reference.toLowerCase())) {
@@ -325,7 +345,7 @@ app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
     }
 
     const location = await withSession(() => ems.createCustomer({
-      name: company.name.trim(),
+      name: emsName,
       reference,
       vendorId: process.env.EMS_VENDOR_ID || 2,
       phone: company.businessPhone || company.phone || '',

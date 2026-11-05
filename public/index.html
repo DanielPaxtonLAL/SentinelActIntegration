@@ -52,6 +52,15 @@
             <dt>Country</dt><dd>{{ selectedCompany.country || (selectedCompany.address && selectedCompany.address.country) || (selectedCompany.businessAddress && selectedCompany.businessAddress.country) || '—' }}</dd>
             <dt>Website</dt><dd>{{ selectedCompany.webSite || selectedCompany.website || '—' }}</dd>
           </dl>
+          <p>
+            <button type="button" class="button--constructive" @click="addCompanyToEms(selectedCompany)"
+              :disabled="!selectedCompany.id || selectedCompany.hasDivisions || inEms(selectedCompany) || (companySync[selectedCompany.id] && ['adding', 'added'].includes(companySync[selectedCompany.id].state))">
+              {{ companySync[selectedCompany.id]?.state === 'adding' ? 'Adding…' : (inEms(selectedCompany) || companySync[selectedCompany.id]?.state === 'added') ? 'In EMS' : selectedCompany.hasDivisions ? 'Add a division instead' : 'Add to EMS' }}
+            </button>
+          </p>
+          <div v-if="companySync[selectedCompany.id]?.error" class="sync-error">
+            {{ companySync[selectedCompany.id].error }}
+          </div>
         </template>
         <p v-else-if="actLoading">Loading companies…</p>
         <p v-else>Select a company from the sidebar.</p>
@@ -296,6 +305,8 @@
           try {
             const response = await fetch(`/api/act/companies/${encodeURIComponent(id)}/add-to-ems`, {
               method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ parentId: this.divisionParents[String(id)] || null }),
             });
             const data = await response.json();
             if (response.status === 401) {
