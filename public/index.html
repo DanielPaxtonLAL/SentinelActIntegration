@@ -13,7 +13,7 @@
       <h1>Customers</h1>
       <div class="header-actions">
         <div id="actStatus" :class="{ error: Boolean(actError) }">{{ actStatus }}</div>
-        <button type="button" @click="loadCompanies" :disabled="actLoading">Reload</button>
+        <button type="button" class="button--view" @click="loadCompanies" :disabled="actLoading">Reload</button>
         <button type="button" @click="logout" :disabled="actLoading">Log out</button>
       </div>
     </header>
@@ -33,7 +33,7 @@
         <p class="company-count">{{ filteredCompanies.length }} companies</p>
         <nav class="company-list" aria-label="Company list">
           <button v-for="(company, i) in filteredCompanies" :key="company.id || i"
-            type="button" class="company-item" :class="{ selected: selectedCompany === company, 'in-ems': inEms(company) }"
+            type="button" class="company-item button--view" :class="{ selected: selectedCompany === company, 'in-ems': inEms(company) }"
             @click="selectedCompany = company">
             {{ company.name || 'Unnamed company' }}
           </button>
@@ -53,7 +53,7 @@
             <dt>Website</dt><dd>{{ selectedCompany.webSite || selectedCompany.website || '—' }}</dd>
           </dl>
           <p>
-            <button type="button" @click="addCompanyToEms(selectedCompany)"
+            <button type="button" class="button--constructive" @click="addCompanyToEms(selectedCompany)"
               :disabled="!selectedCompany.id || inEms(selectedCompany) || (companySync[selectedCompany.id] && ['adding', 'added'].includes(companySync[selectedCompany.id].state))">
               {{ companySync[selectedCompany.id]?.state === 'adding' ? 'Adding…' : (inEms(selectedCompany) || companySync[selectedCompany.id]?.state === 'added') ? 'In EMS' : 'Add to EMS' }}
             </button>

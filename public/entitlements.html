@@ -13,8 +13,7 @@
       <h1>Entitlements</h1>
       <div class="header-actions">
         <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
-        <button type="button" @click="loadEntitlements" :disabled="loading">Reload</button>
-        <button type="button" @click="openCreateEntitlement" :disabled="loading">Create entitlement</button>
+        <button type="button" class="button--view" @click="loadEntitlements" :disabled="loading">Reload</button>
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
     </header>
@@ -27,10 +26,14 @@
       <a href="#" onclick="event.preventDefault()">Administration</a>
       <a href="/custom-entities.html">Developer</a>
     </nav>
+    <nav v-if="!createEntitlementOpen && !selectedEntitlement" class="catalog-subnav" aria-label="Entitlement sections">
+      <button type="button" class="button--view" aria-current="page">Manage entitlements</button>
+      <button type="button" class="button--constructive" @click="openCreateEntitlement" :disabled="loading">Create entitlement</button>
+    </nav>
     <section v-if="createEntitlementOpen" class="create-entitlement">
       <div class="create-entitlement-toolbar">
         <h2>Create entitlement</h2>
-        <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
+        <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
       </div>
       <form class="entitlement-form" @submit.prevent="createEntitlement">
         <label>
@@ -108,7 +111,7 @@
                 {{ product.productName.trim() }} ({{ product.productId }})
               </option>
             </select>
-            <button type="button" @click="addProduct" :disabled="loading || !form.productToAdd">Add</button>
+            <button type="button" class="button--constructive" @click="addProduct" :disabled="loading || !form.productToAdd">Add</button>
           </div>
           <p v-if="productError" class="form-error" role="alert">{{ productError }}</p>
           <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">All available products have been added.</p>
@@ -116,15 +119,15 @@
           <ul v-if="form.productIds.length" class="selected-products">
             <li v-for="productId in form.productIds" :key="productId">
               <span>{{ productLabel(productId) }}</span>
-              <button type="button" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+              <button type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
             </li>
           </ul>
           <p v-else class="form-hint">Add at least one product to this entitlement.</p>
         </div>
         <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
         <div class="entitlement-form-actions">
-          <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId">
+          <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -133,13 +136,13 @@
     <section v-else-if="selectedEntitlement" class="entitlement-details">
       <div class="create-entitlement-toolbar">
         <h2>Entitlement details</h2>
-        <button type="button" @click="closeEntitlementDetails">Back to entitlements</button>
+        <button type="button" class="button--view" @click="closeEntitlementDetails">Back to entitlements</button>
       </div>
       <p v-if="detailLoading" role="status">Loading entitlement details…</p>
       <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
       <template v-if="!detailLoading && !detailError">
         <dl class="entitlement-detail-fields">
-          <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customer) }}</dd>
+          <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</dd>
           <dt>Status</dt><dd>{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</dd>
           <dt>Created</dt><dd>{{ displayValue(selectedEntitlement.createDate) }}</dd>
           <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
@@ -288,7 +291,15 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data.products)) throw new Error('The server returned invalid entitlement details');
-            this.selectedEntitlement = data;
+            const customerId = data.customerId ?? entitlement.customerId;
+            const customer = this.customers.find((item) =>
+              String(item.customerId ?? item.id ?? '') === String(customerId ?? '')
+            );
+            this.selectedEntitlement = {
+              ...data,
+              customerName: customer?.name ?? customer?.customerName ??
+                data.customerName ?? data.customer ?? entitlement.customer,
+            };
           } catch (err) {
             this.detailError = 'Failed to load entitlement details: ' + err.message;
           } finally {

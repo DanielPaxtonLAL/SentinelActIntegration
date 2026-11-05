@@ -13,7 +13,7 @@
       <h1>Catalog</h1>
       <div class="header-actions">
         <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
-        <button type="button" @click="loadItems" :disabled="loading">Reload</button>
+        <button type="button" class="button--view" @click="loadItems" :disabled="loading">Reload</button>
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
     </header>
@@ -27,7 +27,7 @@
       <a href="/custom-entities.html">Developer</a>
     </nav>
     <nav class="catalog-subnav" aria-label="Catalog sections">
-      <button v-for="tab in tabs" :key="tab.id" type="button"
+      <button v-for="tab in tabs" :key="tab.id" type="button" class="button--view"
         :aria-current="activeTab === tab.id ? 'page' : null"
         @click="selectTab(tab.id)">
         {{ tab.label }}

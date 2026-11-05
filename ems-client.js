@@ -136,6 +136,10 @@ class EmsClient {
       throw new Error('EMS returned an invalid entitlement detail');
     }
 
+    const customers = await this.listCustomers();
+    const customer = customers.find((entry) =>
+      String(entry.customerId ?? entry.id ?? '') === String(entitlement.customerId ?? '')
+    );
     const items = entitlement.entitlementItem ?? [];
     const entitlementItems = Array.isArray(items) ? items : [items];
     const products = entitlementItems.flatMap((item) => {
@@ -151,6 +155,7 @@ class EmsClient {
     return {
       ...entitlement,
       id: String(id),
+      customerName: customer?.name ?? customer?.customerName ?? entitlement.customer,
       products,
     };
   }
