@@ -80,6 +80,23 @@ class ActClient {
     }
     return res.json();
   }
+
+  async getCompanyDivisions(companyId) {
+    const res = await this._get(`${this.baseUrl}/api/companies/${encodeURIComponent(companyId)}/divisions`, {
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const err = new Error(`Act! company divisions failed: ${res.status} ${res.statusText}\n${await res.text()}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
 }
 
 module.exports = { ActClient };

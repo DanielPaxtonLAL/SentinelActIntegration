@@ -156,7 +156,7 @@ button.button--view:hover:not(:disabled),
 
 .customers-page .layout {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   min-height: calc(100vh - 65px);
 }
 
@@ -180,41 +180,53 @@ button.button--view:hover:not(:disabled),
 }
 
 .customers-page .company-list {
-  display: grid;
-  gap: 0;
   max-height: calc(100vh - 170px);
   overflow-y: auto;
 }
 
-.customers-page .company-item {
-  padding: .35rem .6rem;
-  text-align: left;
+.customers-page .company-tree {
+  margin: 0;
+  padding-left: 1rem;
+  list-style: none;
+}
+
+.customers-page > .layout .sidebar > .company-list > .company-tree { padding-left: 0; }
+.customers-page .company-tree-node { min-width: 0; }
+
+.customers-page .company-tree-row {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+}
+
+.customers-page .company-tree-toggle {
+  display: block;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: .35rem .45rem;
   border: 0;
-  border-left: 3px solid transparent;
   border-radius: 2px;
-  background: #fff;
+  background: #f8f8f8;
   color: #222;
+  font: inherit;
   font-size: .9rem;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
-.customers-page .company-item:nth-child(even) { background: #eee; }
-
-.customers-page .company-item.in-ems {
-  border-left-color: #278345;
-  background: #e5f3e8;
-  color: #205d32;
-}
-
-.customers-page .company-item:hover { background: #ddd; }
-.customers-page .company-item.in-ems:hover { background: #d3ead8; }
-
-.customers-page .company-item.selected {
-  color: #123b68;
-  background: #e4edf7;
-  font-weight: 600;
-}
-
-.customers-page .company-item.selected.in-ems { border-left-color: #278345; }
+.customers-page .company-tree-toggle:hover { background: #ddd; }
+.customers-page .company-tree-toggle.selected { color: #123b68; background: #e4edf7; font-weight: 600; }
+.customers-page .company-tree-toggle.in-ems { box-shadow: inset 3px 0 #278345; }
+.customers-page .company-tree-toggle > span:first-child { display: inline-block; width: 1rem; text-align: center; }
+.customers-page .company-tree-toggle .company-tree-spacer { width: 1rem; }
+.customers-page .company-tree-label { cursor: default; }
+.customers-page .company-tree-status,
+.customers-page .company-tree-error { padding: .25rem .5rem .25rem 1.5rem; color: #666; font-size: .85rem; }
+.customers-page .company-tree-error { color: #9c2525; }
 
 .customers-page .company-count, .customers-page .empty-list {
   color: #666;

@@ -290,12 +290,32 @@ app.get('/api/act/companies', async (req, res) => {
   }
 });
 
+app.get('/api/act/companies/:id/divisions', async (req, res) => {
+  if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
+  try {
+    res.json(await act.getCompanyDivisions(req.params.id));
+  } catch (err) {
+    if (err.status === 401) act.token = null;
+    console.error(err.message);
+    res.status(err.status === 401 ? 401 : 502).json({
+      error: err.status === 401 ? 'Act! session expired, log in again' : err.message,
+    });
+  }
+});
+
 app.post('/api/act/companies/:id/add-to-ems', async (req, res) => {
   if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
     const company = await act.getCompany(req.params.id);
     if (!company || typeof company.name !== 'string' || !company.name.trim()) {
       return res.status(502).json({ error: 'Act! returned a company without a name' });
+    }
+    const divisions = company.hasDivisions === true ? [] : await act.getCompanyDivisions(req.params.id);
+    if (!Array.isArray(divisions)) {
+      throw new Error('Act! returned an invalid company divisions response');
+    }
+    if (company.hasDivisions === true || divisions.length > 0) {
+      return res.status(409).json({ error: 'Companies with divisions cannot be added to EMS; add a division instead' });
     }
 
     const reference = String(company.id || req.params.id);
