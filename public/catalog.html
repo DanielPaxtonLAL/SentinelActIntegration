@@ -12,7 +12,7 @@
     <header class="app-header">
       <h1>Catalog</h1>
       <div class="header-actions">
-        <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
+        <div v-if="status" id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
         <button type="button" class="button--view" @click="loadItems" :disabled="loading">Reload</button>
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
@@ -34,24 +34,68 @@
       </button>
     </nav>
     <section class="catalog-content">
-      <div class="catalog-tools">
-        <h2>{{ activeTabLabel }}</h2>
+      <div v-if="activeTab === 'dynamicMemory' || loading || error" class="catalog-tools">
+        <h2>{{ activeTabLabel }}<span v-if="activeTab === 'products' || activeTab === 'features'"> ({{ filteredItems.length }})</span></h2>
         <input v-model.trim="filter" type="search" :placeholder="'Filter ' + activeTabLabel.toLowerCase()"
           :aria-label="'Filter ' + activeTabLabel">
       </div>
       <div v-if="loading" class="catalog-message" role="status">Loading {{ activeTabLabel.toLowerCase() }} from EMS…</div>
       <div v-else-if="error" class="catalog-message form-error" role="alert">{{ error }}</div>
+      <div v-else-if="activeTab === 'products' || activeTab === 'features'" class="catalog-product-layout">
+        <div class="catalog-list-panel">
+          <div class="catalog-tools catalog-list-tools">
+            <h2>{{ activeTabLabel }} ({{ filteredItems.length }})</h2>
+            <input v-model.trim="filter" type="search" :placeholder="'Filter ' + activeTabLabel.toLowerCase()"
+              :aria-label="'Filter ' + activeTabLabel + ' across all attributes'">
+          </div>
+          <div class="table-wrap">
+            <table v-if="filteredItems.length">
+              <thead>
+                <tr><th v-for="column in columns" :key="column.key">{{ column.label }}</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="(item, index) in filteredItems" :key="catalogItemId(item) || index"
+                  class="catalog-product-row" :class="{ selected: selectedItem === item }"
+                  tabindex="0" role="button" :aria-pressed="selectedItem === item"
+                  :aria-label="'View details for ' + catalogItemName(item)"
+                  @click="selectedItem = item"
+                  @keydown.enter.prevent="selectedItem = item"
+                  @keydown.space.prevent="selectedItem = item">
+                  <td v-for="column in columns" :key="column.key">
+                    <template v-for="(part, partIndex) in highlightParts(catalogValue(item, column.key))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="catalog-message">
+              {{ items.length ? 'No matching items.' : 'No ' + activeTabLabel.toLowerCase() + ' found in EMS.' }}
+            </p>
+          </div>
+        </div>
+        <aside class="catalog-product-details" aria-live="polite">
+          <template v-if="selectedItem">
+            <h3>{{ catalogItemName(selectedItem) }}</h3>
+            <dl>
+              <template v-for="(value, key) in selectedItem" :key="key">
+                <dt>{{ columnLabel(key) }}</dt>
+                <dd>{{ displayValue(value) }}</dd>
+              </template>
+            </dl>
+          </template>
+          <p v-else>Select an item to view its details.</p>
+        </aside>
+      </div>
       <div v-else-if="!filteredItems.length" class="catalog-message">
         {{ items.length ? 'No matching items.' : 'No ' + activeTabLabel.toLowerCase() + ' found in EMS.' }}
       </div>
       <div v-else class="table-wrap">
         <table>
           <thead>
-            <tr><th v-for="column in columns" :key="column">{{ columnLabel(column) }}</th></tr>
+            <tr><th v-for="column in columns" :key="column.key">{{ column.label }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="(item, index) in filteredItems" :key="item.productId || item.featureId || item.memoryId || index">
-              <td v-for="column in columns" :key="column">{{ displayValue(item[column]) }}</td>
+              <td v-for="column in columns" :key="column.key">{{ catalogValue(item, column.key) }}</td>
             </tr>
           </tbody>
         </table>
@@ -72,6 +116,7 @@
           ],
           activeTab: 'products',
           items: [],
+          selectedItem: null,
           filter: '',
           loading: false,
           error: '',
@@ -82,25 +127,40 @@
           return this.tabs.find((tab) => tab.id === this.activeTab).label;
         },
         columns() {
+          if (this.activeTab === 'products') {
+            return [
+              { key: 'productName', label: 'Product Name' },
+              { key: 'status', label: 'Status' },
+              { key: 'type', label: 'Type' },
+            ];
+          }
+          if (this.activeTab === 'features') {
+            return [
+              { key: 'featureName', label: 'Feature Name' },
+              { key: 'featureDescription', label: 'Feature description' },
+              { key: 'deployed', label: 'Deployed' },
+            ];
+          }
           const firstItem = this.filteredItems[0] || this.items[0];
-          return firstItem && typeof firstItem === 'object' ? Object.keys(firstItem) : [];
+          return firstItem && typeof firstItem === 'object'
+            ? Object.keys(firstItem).map((key) => ({ key, label: this.columnLabel(key) }))
+            : [];
         },
         filteredItems() {
-          const query = this.filter.toLowerCase();
+          const query = this.filter.trim().toLocaleLowerCase();
           if (!query) return this.items;
-          return this.items.filter((item) =>
-            Object.values(item).some((value) => this.displayValue(value).toLowerCase().includes(query))
-          );
+          return this.items.filter((item) => this.catalogItemMatchesFilter(item, query));
         },
         status() {
           if (this.loading) return `Loading ${this.activeTabLabel.toLowerCase()}…`;
           if (this.error) return this.error;
-          return `${this.filteredItems.length} ${this.activeTabLabel.toLowerCase()}`;
+          return '';
         },
       },
       methods: {
         async selectTab(tab) {
           this.activeTab = tab;
+          this.selectedItem = null;
           this.filter = '';
           await this.loadItems();
         },
@@ -112,9 +172,14 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data)) throw new Error('The server returned an invalid catalog list');
+            const selectedItemId = this.selectedItem ? this.catalogItemId(this.selectedItem) : null;
             this.items = data;
+            this.selectedItem = this.activeTab === 'products' || this.activeTab === 'features'
+              ? data.find((item) => String(this.catalogItemId(item)) === String(selectedItemId)) || data[0] || null
+              : null;
           } catch (err) {
             this.items = [];
+            this.selectedItem = null;
             this.error = `Failed to load ${this.activeTabLabel.toLowerCase()}: ${err.message}`;
           } finally {
             this.loading = false;
@@ -123,6 +188,51 @@
         columnLabel(value) {
           return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
             .replace(/^./, (letter) => letter.toUpperCase());
+        },
+        catalogItemId(item) {
+          if (this.activeTab === 'products') return item.productId;
+          if (this.activeTab === 'features') return item.featureId ?? item.id;
+          return item.memoryId ?? item.id;
+        },
+        catalogItemName(item) {
+          const nameKey = this.activeTab === 'products' ? 'productName' : 'featureName';
+          return this.catalogValue(item, nameKey).trim();
+        },
+        catalogValue(item, key) {
+          if (key === 'status') return item.deployed ? 'Deployed' : 'Not deployed';
+          if (key === 'deployed') return item.deployed ? 'Deployed' : 'Not deployed';
+          if (key === 'type') return String(item.productType) === '1' ? 'Base' : this.displayValue(item.productType);
+          if (key === 'productName') return this.displayValue(item.productName).trim();
+          if (key === 'featureName') return this.displayValue(item.featureName ?? item.name);
+          if (key === 'featureDescription') return this.displayValue(item.featureDescription ?? item.description ?? item.featureDescr ?? item.descr);
+          return this.displayValue(item[key]);
+        },
+        catalogItemMatchesFilter(item, query) {
+          return Object.values(item).some((value) => {
+            if (value !== null && typeof value === 'object') {
+              return this.catalogItemMatchesFilter(value, query);
+            }
+            return this.displayValue(value).toLocaleLowerCase().includes(query);
+          });
+        },
+        highlightParts(value) {
+          const text = this.displayValue(value);
+          const query = this.filter.trim();
+          if (!query) return [{ text, highlighted: false }];
+
+          const lowerText = text.toLocaleLowerCase();
+          const lowerQuery = query.toLocaleLowerCase();
+          const parts = [];
+          let cursor = 0;
+          let matchIndex = lowerText.indexOf(lowerQuery, cursor);
+          while (matchIndex !== -1) {
+            if (matchIndex > cursor) parts.push({ text: text.slice(cursor, matchIndex), highlighted: false });
+            parts.push({ text: text.slice(matchIndex, matchIndex + query.length), highlighted: true });
+            cursor = matchIndex + query.length;
+            matchIndex = lowerText.indexOf(lowerQuery, cursor);
+          }
+          if (cursor < text.length) parts.push({ text: text.slice(cursor), highlighted: false });
+          return parts.length ? parts : [{ text, highlighted: false }];
         },
         displayValue(value) {
           if (value === null || value === undefined || value === '') return '—';

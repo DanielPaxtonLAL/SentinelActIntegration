@@ -12,7 +12,7 @@
     <header class="app-header">
       <h1>Entitlements</h1>
       <div class="header-actions">
-        <div id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
+        <div v-if="status" id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
         <button type="button" class="button--view" @click="loadEntitlements" :disabled="loading">Reload</button>
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
@@ -26,7 +26,7 @@
       <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Administration</a>
       <a href="/custom-entities.html">Developer</a>
     </nav>
-    <nav v-if="!createEntitlementOpen && !selectedEntitlement" class="catalog-subnav" aria-label="Entitlement sections">
+    <nav v-if="!createEntitlementOpen" class="catalog-subnav" aria-label="Entitlement sections">
       <button type="button" class="button--view" aria-current="page">Manage entitlements</button>
       <button type="button" class="button--constructive" @click="openCreateEntitlement" :disabled="loading">Create entitlement</button>
     </nav>
@@ -133,68 +133,80 @@
         </div>
       </form>
     </section>
-    <section v-else-if="selectedEntitlement" class="entitlement-details">
-      <div class="create-entitlement-toolbar">
-        <h2>Entitlement details</h2>
-        <button type="button" class="button--view" @click="closeEntitlementDetails">Back to entitlements</button>
-      </div>
-      <p v-if="detailLoading" role="status">Loading entitlement details…</p>
-      <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
-      <template v-if="!detailLoading && !detailError">
-        <dl class="entitlement-detail-fields">
-          <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</dd>
-          <dt>Status</dt><dd>{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</dd>
-          <dt>Created</dt><dd>{{ displayValue(selectedEntitlement.createDate) }}</dd>
-          <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
-          <dt>End date</dt><dd>{{ displayValue(selectedEntitlement.endDate) }}</dd>
-          <dt>Description</dt><dd>{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</dd>
-        </dl>
-        <h3>Products</h3>
-        <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
-        <div v-else class="table-wrap">
-          <table>
+    <section v-else class="entitlements-layout">
+      <div class="entitlement-list-panel">
+        <div class="entitlements-subheading">
+          <h2>Entitlements ({{ filteredEntitlements.length }})</h2>
+          <input v-model.trim="filter" class="entitlement-filter" type="search"
+            placeholder="Filter entitlements" aria-label="Filter entitlements across all attributes">
+        </div>
+        <div class="table-wrap entitlement-list">
+          <table v-if="filteredEntitlements.length">
             <thead>
-              <tr><th>Type</th><th>Product</th><th>Product ID</th></tr>
+              <tr>
+                <th>Type</th>
+                <th>Date</th>
+                <th>Created</th>
+                <th>Customer name</th>
+                <th>Ref ID 1</th>
+                <th>Status</th>
+              </tr>
             </thead>
             <tbody>
-              <tr v-for="(product, index) in selectedEntitlement.products" :key="`${product.productId}-${index}`">
-                <td>{{ displayValue(product.lineItemType) }}</td>
-                <td>{{ displayValue(product.productName) }}</td>
-                <td>{{ displayValue(product.productId) }}</td>
+              <tr v-for="(entitlement, index) in filteredEntitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index"
+                  class="entitlement-row" :class="{ selected: selectedEntitlement && String(selectedEntitlement.id) === String(entitlement.id) }"
+                  role="button" tabindex="0"
+                  :aria-label="'View entitlement ' + displayValue(entitlement.id)"
+                  :aria-pressed="Boolean(selectedEntitlement && String(selectedEntitlement.id) === String(entitlement.id))"
+                  @click="openEntitlementDetails(entitlement)"
+                  @keydown.enter.prevent="openEntitlementDetails(entitlement)"
+                  @keydown.space.prevent="openEntitlementDetails(entitlement)">
+                <td><template v-for="(part, partIndex) in highlightParts(entitlement.type)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td class="date-cell" :title="displayValue(entitlement.activationDate)"><template v-for="(part, partIndex) in highlightParts(entitlement.activationDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td><template v-for="(part, partIndex) in highlightParts(entitlement.createDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
               </tr>
             </tbody>
           </table>
+          <p v-else-if="!loading && !error" class="entitlement-empty-list">{{ filter ? 'No matching entitlements.' : 'No entitlements found.' }}</p>
         </div>
-      </template>
-    </section>
-    <section v-else class="table-wrap">
-      <table v-if="entitlements.length">
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Date</th>
-            <th>Created</th>
-            <th>Customer name</th>
-            <th>Ref ID 1</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(entitlement, index) in entitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index"
-              class="entitlement-row" role="button" tabindex="0"
-              :aria-label="'View entitlement ' + displayValue(entitlement.id)"
-              @click="openEntitlementDetails(entitlement)"
-              @keydown.enter.prevent="openEntitlementDetails(entitlement)"
-              @keydown.space.prevent="openEntitlementDetails(entitlement)">
-            <td>{{ displayValue(entitlement.type) }}</td>
-            <td class="date-cell" :title="displayValue(entitlement.activationDate)">{{ displayValue(entitlement.activationDate) }}</td>
-            <td>{{ displayValue(entitlement.createDate) }}</td>
-            <td>{{ displayValue(entitlement.customer) }}</td>
-            <td>{{ displayValue(entitlement.refId1) }}</td>
-            <td>{{ displayValue(entitlement.state) }}</td>
-          </tr>
-        </tbody>
-      </table>
+      </div>
+      <section class="entitlement-details" aria-live="polite">
+        <template v-if="selectedEntitlement">
+          <h2>Entitlement details</h2>
+          <p v-if="detailLoading" role="status">Loading entitlement details…</p>
+          <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
+          <template v-if="!detailLoading && !detailError">
+            <dl class="entitlement-detail-fields">
+              <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</dd>
+              <dt>Status</dt><dd>{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</dd>
+              <dt>Created</dt><dd>{{ displayValue(selectedEntitlement.createDate) }}</dd>
+              <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
+              <dt>End date</dt><dd>{{ displayValue(selectedEntitlement.endDate) }}</dd>
+              <dt>Description</dt><dd>{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</dd>
+            </dl>
+            <h3>Products</h3>
+            <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
+            <div v-else class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Type</th><th>Product</th><th>Product ID</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(product, index) in selectedEntitlement.products" :key="`${product.productId}-${index}`">
+                    <td>{{ displayValue(product.lineItemType) }}</td>
+                    <td>{{ displayValue(product.productName) }}</td>
+                    <td>{{ displayValue(product.productId) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </template>
+        <p v-else>Select an entitlement to view its details.</p>
+      </section>
     </section>
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -221,6 +233,7 @@
           productError: '',
           enforcementError: '',
           notice: '',
+          filter: '',
           createEntitlementOpen: false,
           form: this.createEmptyForm(),
         };
@@ -231,11 +244,28 @@
           if (this.loading) return this.createEntitlementOpen ? 'Saving entitlement…' : 'Loading entitlements…';
           if (this.error) return this.error;
           if (this.notice) return this.notice;
-          return `${this.entitlements.length} entitlements`;
+          return '';
         },
         availableProducts() {
           const added = new Set(this.form.productIds);
           return this.products.filter((product) => !added.has(String(product.productId)));
+        },
+        filteredEntitlements() {
+          const query = this.filter.toLocaleLowerCase();
+          if (!query) return this.entitlements;
+          return this.entitlements.filter((entitlement) => {
+            const values = [];
+            const collectValues = (value) => {
+              if (value === null || value === undefined) return;
+              if (typeof value === 'object') {
+                Object.values(value).forEach(collectValues);
+              } else {
+                values.push(String(value));
+              }
+            };
+            collectValues(entitlement);
+            return values.some((value) => value.toLocaleLowerCase().includes(query));
+          });
         },
       },
       methods: {
@@ -325,10 +355,6 @@
             this.enforcementsLoading = false;
           }
         },
-        closeEntitlementDetails() {
-          this.selectedEntitlement = null;
-          this.detailError = '';
-        },
         closeCreateEntitlement() {
           this.createEntitlementOpen = false;
           this.error = '';
@@ -401,6 +427,25 @@
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);
         },
+        highlightParts(value) {
+          const text = this.displayValue(value);
+          const query = this.filter.trim();
+          if (!query) return [{ text, highlighted: false }];
+
+          const lowerText = text.toLocaleLowerCase();
+          const lowerQuery = query.toLocaleLowerCase();
+          const parts = [];
+          let cursor = 0;
+          let matchIndex = lowerText.indexOf(lowerQuery, cursor);
+          while (matchIndex !== -1) {
+            if (matchIndex > cursor) parts.push({ text: text.slice(cursor, matchIndex), highlighted: false });
+            parts.push({ text: text.slice(matchIndex, matchIndex + query.length), highlighted: true });
+            cursor = matchIndex + query.length;
+            matchIndex = lowerText.indexOf(lowerQuery, cursor);
+          }
+          if (cursor < text.length) parts.push({ text: text.slice(cursor), highlighted: false });
+          return parts.length ? parts : [{ text, highlighted: false }];
+        },
         async loadEntitlements() {
           this.loading = true;
           this.error = '';
@@ -410,6 +455,18 @@
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data)) throw new Error('The server returned an invalid entitlements list');
             this.entitlements = data.filter((entitlement) => entitlement.state !== 'PRODUCT_KEY_GENERATED');
+            if (!this.createEntitlementOpen) {
+              const selectedId = this.selectedEntitlement?.id ?? this.selectedEntitlement?.entitlementId;
+              const defaultEntitlement = this.entitlements.find((entitlement) =>
+                String(entitlement.id ?? entitlement.entitlementId) === String(selectedId)
+              ) || this.entitlements[0];
+              if (defaultEntitlement) {
+                await this.openEntitlementDetails(defaultEntitlement);
+              } else {
+                this.selectedEntitlement = null;
+                this.detailError = '';
+              }
+            }
           } catch (err) {
             this.error = 'Failed to load entitlements: ' + err.message;
           } finally {
