@@ -8,7 +8,7 @@
 </head>
 <body>
   <main id="app" class="catalog-page" v-cloak>
-    <div class="dev-disclaimer">DEVELOPMENT - NOT LIVE</div>
+    <div class="dev-disclaimer">Development in progress — not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
     <header class="app-header">
       <h1>Catalog</h1>
       <div class="header-actions">
@@ -18,12 +18,12 @@
       </div>
     </header>
     <nav class="tab-nav" aria-label="Main navigation">
-      <a href="#" onclick="event.preventDefault()">Home</a>
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Home</a>
       <a href="/catalog.html" aria-current="page">Catalog</a>
       <a href="/entitlements.html">Entitlements</a>
       <a href="/">Customers</a>
-      <a href="#" onclick="event.preventDefault()">Reports</a>
-      <a href="#" onclick="event.preventDefault()">Administration</a>
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Reports</a>
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Administration</a>
       <a href="/custom-entities.html">Developer</a>
     </nav>
     <nav class="catalog-subnav" aria-label="Catalog sections">

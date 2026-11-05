@@ -85,6 +85,12 @@ button.button--view:hover:not(:disabled),
 
 .tab-nav a:hover { background: #f5f5f5; }
 
+.tab-nav a.tab-nav-unavailable {
+  background: #ffeb3b;
+  color: #222;
+}
+.tab-nav a.tab-nav-unavailable:hover { background: #f4d900; }
+
 .tab-nav a[aria-current="page"] {
   color: #123b68;
   border-bottom-color: #123b68;
