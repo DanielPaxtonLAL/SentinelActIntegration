@@ -16,6 +16,7 @@ if (fs.existsSync(envFile)) {
 
 const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE } = process.env;
 const PORT = process.env.PORT || 3000;
+const COMPLETE_PRODUCT_LIFECYCLE_STAGE = '2';
 
 if (!EMS_URL || !EMS_USER || !EMS_PASS) {
   console.error('Set EMS_URL, EMS_USER and EMS_PASS in .env');
@@ -87,6 +88,21 @@ app.get('/api/entitlements', async (req, res) => {
   }
 });
 
+app.get('/api/enforcements', async (req, res) => {
+  try {
+    res.json(await withSession(() =>
+      ems.listEnforcements(process.env.EMS_VENDOR_ID || '2')
+    ));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.get('/api/entitlements/:id', async (req, res) => {
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
@@ -125,7 +141,7 @@ app.get('/api/catalog/:category', async (req, res) => {
 app.post('/api/entitlements', express.json(), async (req, res) => {
   const {
     customerId,
-    productId,
+    productIds,
     enforcementId,
     startDate,
     endDate,
@@ -147,8 +163,11 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
   const isPositiveInteger = (value) => /^\d+$/.test(String(value)) && Number(value) > 0 && Number(value) <= 999999;
   const isId = (value) => /^\d+$/.test(String(value || '')) && Number(value) > 0;
 
-  if (!isId(customerId) || !isId(productId) || !isId(enforcementId)) {
-    return res.status(400).json({ error: 'Select a customer and enter numeric product and enforcement IDs' });
+  if (!isId(customerId) || !isId(enforcementId) ||
+      !Array.isArray(productIds) || productIds.length === 0 || productIds.length > 100 ||
+      productIds.some((id) => !isId(id)) ||
+      new Set(productIds.map(String)).size !== productIds.length) {
+    return res.status(400).json({ error: 'Select a customer, add 1 to 100 unique EMS products, and enter a numeric enforcement ID' });
   }
   if (typeof neverExpires !== 'boolean' ||
       !isDate(startDate) || (!neverExpires && !isDate(endDate)) ||
@@ -190,11 +209,22 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'The selected customer is no longer in the EMS customer list. Reload customers and try again.' });
     }
 
-    if (!ems.authenticated) await ems.authenticate();
     const vendorId = process.env.EMS_VENDOR_ID || '2';
+    const products = await withSession(() => ems.listCatalog('products', vendorId));
+    const availableProductIds = new Set(products
+      .filter((product) => String(product.lifeCycleStage) === COMPLETE_PRODUCT_LIFECYCLE_STAGE)
+      .map((product) => String(product.productId)));
+    if (productIds.some((id) => !availableProductIds.has(String(id)))) {
+      return res.status(400).json({ error: 'One or more selected products are not complete in EMS. Choose complete products and try again.' });
+    }
+    const enforcements = await withSession(() => ems.listEnforcements(vendorId));
+    if (!enforcements.some((enforcement) => String(enforcement.id) === String(enforcementId))) {
+      return res.status(400).json({ error: 'Select an enforcement that exists in EMS.' });
+    }
+
     const result = await ems.createEntitlement({
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
-      productId,
+      productIds,
       enforcementId,
       vendorId,
       startDate,

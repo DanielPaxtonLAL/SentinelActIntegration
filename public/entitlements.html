@@ -43,14 +43,15 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <div class="entitlement-form-row">
+        <div class="entitlement-form-row entitlement-form-row-full">
           <label>
-            Product ID
-            <input v-model.trim="form.productId" type="number" min="1" step="1" required :disabled="loading">
-          </label>
-          <label>
-            Enforcement ID
-            <input v-model.trim="form.enforcementId" type="number" min="1" step="1" required :disabled="loading">
+            Enforcement
+            <select v-model="form.enforcementId" required :disabled="loading || enforcementsLoading || !enforcements.length">
+              <option value="" disabled>{{ enforcementsLoading ? 'Loading EMS enforcements…' : 'Select an enforcement' }}</option>
+              <option v-for="enforcement in enforcements" :key="enforcement.id" :value="String(enforcement.id)">
+                {{ enforcement.name }} ({{ enforcement.id }})
+              </option>
+            </select>
           </label>
           <label>
             Entitlement type
@@ -61,6 +62,7 @@
             </select>
           </label>
         </div>
+        <p v-if="enforcementError" class="form-error" role="alert">{{ enforcementError }}</p>
         <div class="entitlement-form-row">
           <label>
             Start date
@@ -97,10 +99,32 @@
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
+        <div class="product-picker-field">
+          <label for="product-picker">Products</label>
+          <div class="product-picker">
+            <select id="product-picker" v-model="form.productToAdd" :disabled="loading || productsLoading || !availableProducts.length">
+              <option value="" disabled>{{ productsLoading ? 'Loading EMS products…' : 'Select a product' }}</option>
+              <option v-for="product in availableProducts" :key="product.productId" :value="String(product.productId)">
+                {{ product.productName.trim() }} ({{ product.productId }})
+              </option>
+            </select>
+            <button type="button" @click="addProduct" :disabled="loading || !form.productToAdd">Add</button>
+          </div>
+          <p v-if="productError" class="form-error" role="alert">{{ productError }}</p>
+          <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">All available products have been added.</p>
+          <p v-else-if="!productsLoading && !products.length" class="form-hint">No EMS products are available.</p>
+          <ul v-if="form.productIds.length" class="selected-products">
+            <li v-for="productId in form.productIds" :key="productId">
+              <span>{{ productLabel(productId) }}</span>
+              <button type="button" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+            </li>
+          </ul>
+          <p v-else class="form-hint">Add at least one product to this entitlement.</p>
+        </div>
         <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
         <div class="entitlement-form-actions">
           <button type="button" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" :disabled="loading || customersLoading || !customers.length">
+          <button type="submit" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -172,6 +196,7 @@
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script>
+    const COMPLETE_PRODUCT_LIFECYCLE_STAGE = '2';
     const { createApp } = Vue;
 
     createApp({
@@ -179,13 +204,19 @@
         return {
           entitlements: [],
           customers: [],
+          products: [],
+          enforcements: [],
           selectedEntitlement: null,
           detailLoading: false,
           detailError: '',
           loading: false,
           customersLoading: false,
+          productsLoading: false,
+          enforcementsLoading: false,
           error: '',
           customerError: '',
+          productError: '',
+          enforcementError: '',
           notice: '',
           createEntitlementOpen: false,
           form: this.createEmptyForm(),
@@ -199,13 +230,18 @@
           if (this.notice) return this.notice;
           return `${this.entitlements.length} entitlements`;
         },
+        availableProducts() {
+          const added = new Set(this.form.productIds);
+          return this.products.filter((product) => !added.has(String(product.productId)));
+        },
       },
       methods: {
         createEmptyForm() {
           const today = new Date();
           return {
             customerId: '',
-            productId: '',
+            productToAdd: '',
+            productIds: [],
             enforcementId: '',
             startDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
             endDate: '',
@@ -226,6 +262,21 @@
           this.detailError = '';
           this.createEntitlementOpen = true;
           if (!this.customers.length && !this.customersLoading) this.loadCustomers();
+          if (!this.products.length && !this.productsLoading) this.loadProducts();
+          if (!this.enforcements.length && !this.enforcementsLoading) this.loadEnforcements();
+        },
+        addProduct() {
+          const productId = String(this.form.productToAdd);
+          if (!productId || !this.availableProducts.some((product) => String(product.productId) === productId)) return;
+          this.form.productIds.push(productId);
+          this.form.productToAdd = '';
+        },
+        removeProduct(productId) {
+          this.form.productIds = this.form.productIds.filter((id) => id !== productId);
+        },
+        productLabel(productId) {
+          const product = this.products.find((item) => String(item.productId) === productId);
+          return product ? `${product.productName.trim()} (${productId})` : productId;
         },
         async openEntitlementDetails(entitlement) {
           this.createEntitlementOpen = false;
@@ -242,6 +293,25 @@
             this.detailError = 'Failed to load entitlement details: ' + err.message;
           } finally {
             this.detailLoading = false;
+          }
+        },
+        async loadEnforcements() {
+          this.enforcementsLoading = true;
+          this.enforcementError = '';
+          try {
+            const response = await fetch('/api/enforcements');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid enforcement list');
+            this.enforcements = data.filter((enforcement) =>
+              enforcement &&
+              /^\d+$/.test(String(enforcement.id)) &&
+              typeof enforcement.name === 'string'
+            );
+          } catch (err) {
+            this.enforcementError = 'Failed to load EMS enforcements: ' + err.message;
+          } finally {
+            this.enforcementsLoading = false;
           }
         },
         closeEntitlementDetails() {
@@ -268,6 +338,26 @@
             this.customersLoading = false;
           }
         },
+        async loadProducts() {
+          this.productsLoading = true;
+          this.productError = '';
+          try {
+            const response = await fetch('/api/catalog/products');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid product list');
+            this.products = data.filter((product) =>
+              product &&
+              /^\d+$/.test(String(product.productId)) &&
+              typeof product.productName === 'string' &&
+              String(product.lifeCycleStage) === COMPLETE_PRODUCT_LIFECYCLE_STAGE
+            );
+          } catch (err) {
+            this.productError = 'Failed to load EMS products: ' + err.message;
+          } finally {
+            this.productsLoading = false;
+          }
+        },
         async createEntitlement() {
           this.loading = true;
           this.error = '';
@@ -275,6 +365,7 @@
           try {
             const payload = {
               ...this.form,
+              productIds: this.form.productIds,
               haspIds: this.form.lineItemType === 'ProtectionKey_Update'
                 ? this.form.haspIds.split(';').map((id) => id.trim()).filter(Boolean)
                 : [],

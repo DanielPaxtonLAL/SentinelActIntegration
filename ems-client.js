@@ -121,6 +121,13 @@ class EmsClient {
     return Array.isArray(inst) ? inst : [inst];
   }
 
+  async listEnforcements(vendorId = '2') {
+    const xml = await this.call(`/enforcement.xml?vendorId=${encodeURIComponent(vendorId)}`);
+    const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
+    const inst = parsed?.listResponse?.instance ?? [];
+    return Array.isArray(inst) ? inst : (inst ? [inst] : []);
+  }
+
   async getEntitlementDetails(id) {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
@@ -246,6 +253,12 @@ class EmsClient {
       ? entitlement.numberOfUpdates
       : entitlement.activationsPerKey;
 
+    if (!Array.isArray(entitlement.productIds) ||
+        entitlement.productIds.length === 0 ||
+        new Set(entitlement.productIds.map(String)).size !== entitlement.productIds.length) {
+      throw new Error('At least one unique product is required.');
+    }
+
     const item = (name, value) => `<${name}>${escapeXml(value)}</${name}>`;
     const entitlementXml =
       '<entitlement>' +
@@ -273,9 +286,11 @@ class EmsClient {
         : '') +
       item('vendorId', entitlement.vendorId) +
       item('enforcementId', entitlement.enforcementId) +
-      '<itemProduct><isRevoked>false</isRevoked>' +
-      item('productId', entitlement.productId) +
-      '</itemProduct>' +
+      entitlement.productIds.map((productId) =>
+        '<itemProduct><isRevoked>false</isRevoked>' +
+        item('productId', productId) +
+        '</itemProduct>'
+      ).join('') +
       '</entitlementItem>' +
       '</entitlement>';
     const webUrl = new URL(`${this.baseUrl}/ems/addEntitlement.html`);

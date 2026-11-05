@@ -195,11 +195,21 @@ button:disabled { cursor: default; }
 .entitlements-page .create-entitlement-toolbar h2 { margin: 0; font-size: 1.1rem; }
 .entitlements-page .entitlement-form { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
 .entitlements-page .entitlement-form label { display: grid; gap: .35rem; min-width: 0; font-size: .9rem; font-weight: 600; }
+.entitlements-page .product-picker-field { display: grid; align-content: start; gap: .35rem; min-width: 0; }
+.entitlements-page .product-picker-field > label { font-size: .9rem; font-weight: 600; }
+.entitlements-page .product-picker { display: flex; align-items: center; gap: .5rem; }
+.entitlements-page .product-picker select,
+.entitlements-page .product-picker button { box-sizing: border-box; height: 2.5rem; }
+.entitlements-page .product-picker select { flex: 1; }
+.entitlements-page .product-picker button { padding: 0 .75rem; }
+.entitlements-page .selected-products { display: grid; gap: .4rem; margin: .25rem 0 0; padding: 0; list-style: none; }
+.entitlements-page .selected-products li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem .65rem; border: 1px solid #ddd; border-radius: 4px; background: #f8f8f8; }
+.entitlements-page .selected-products li span { overflow-wrap: anywhere; }
 .entitlements-page .entitlement-form input:not([type="checkbox"]),
 .entitlements-page .entitlement-form select,
 .entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid #aaa; border-radius: 4px; font: inherit; font-weight: 400; }
 .entitlements-page .entitlement-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.entitlements-page .entitlement-form-row:first-of-type { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.entitlements-page .entitlement-form-row-full { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .entitlements-page .entitlement-form .entitlement-checkbox { display: flex; align-items: center; align-self: end; gap: .5rem; min-height: 2.5rem; }
 .entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
 .entitlements-page .form-hint { color: #666; }
