@@ -191,7 +191,9 @@ test('loads modification products and required base memory for creation', async 
         { productId: '12', productName: 'Update' },
         { productId: '6048', productName: 'Standalone' },
         { productId: '6049', productName: 'Link' },
-      ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }] }
+        { productId: '6051', productName: 'Pivot' },
+      ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }],
+      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }] }
       : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
   });
   await app.loadProducts();
@@ -210,16 +212,41 @@ test('access checkboxes allow either or both and do not duplicate dropdown produ
   app.products = [{ productId: '6048' }, { productId: '6049' }, { productId: '12' }];
   assert.equal(app.availableProducts.length, 1);
   assert.equal(app.hasAccessProduct, false);
-  app.setAccessProduct('6048', true);
+  app.setCheckboxProduct('6048', true);
   await new Promise(setImmediate);
   assert.equal(app.hasAccessProduct, true);
   assert.deepEqual(Array.from(app.displayedMemoryProductIds), ['60']);
-  app.setAccessProduct('6049', true);
+  app.setCheckboxProduct('6049', true);
   await new Promise(setImmediate);
-  app.setAccessProduct('6048', false);
+  app.setCheckboxProduct('6048', false);
   assert.equal(app.hasAccessProduct, true);
-  app.setAccessProduct('6049', false);
+  app.setCheckboxProduct('6049', false);
   assert.equal(app.hasAccessProduct, false);
+});
+
+test('Pivot is optional, excluded from the dropdown, and loads and removes memory', async () => {
+  const requests = [];
+  const app = entitlementApp(async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
+  });
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.accessProducts = [{ id: '6048', label: 'Standalone' }];
+  app.optionalProducts = [{ id: '6051', label: 'Pivot', available: true }];
+  app.products = [{ productId: '6048' }, { productId: '6051' }, { productId: '12' }];
+  assert.equal(app.availableProducts.length, 1);
+  app.setCheckboxProduct('6051', true);
+  assert.equal(app.hasAccessProduct, false);
+  assert.equal(app.productMemoryReady, false);
+  await new Promise(setImmediate);
+  assert.equal(requests[0], '/api/catalog/products/6051/read-only-memory');
+  assert.equal(app.productMemoryReady, true);
+  assert.equal(app.productMemory['6051'].files[0].segments[0].value, '0000');
+  assert.ok(app.displayedMemoryProductIds.includes('6051'));
+  app.setCheckboxProduct('6051', false);
+  assert.equal(app.form.productIds.length, 0);
+  assert.equal(app.productMemory['6051'], undefined);
 });
 
 test('form blocks saving while memory is unavailable or dynamic SAOT is unsupported', async () => {

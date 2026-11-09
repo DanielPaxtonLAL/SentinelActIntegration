@@ -55,9 +55,19 @@
           <p class="form-hint">Select Link, Standalone, or both.</p>
           <label v-for="product in accessProducts" :key="product.id" class="access-product-option">
             <input type="checkbox" :checked="form.productIds.includes(product.id)"
-              @change="setAccessProduct(product.id, $event.target.checked)"
+              @change="setCheckboxProduct(product.id, $event.target.checked)"
               :disabled="loading || productsLoading || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
             {{ product.label }}
+          </label>
+        </fieldset>
+        <fieldset class="access-products">
+          <legend>Optional products</legend>
+          <label v-for="product in optionalProducts" :key="product.id" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(product.id)"
+              @change="setCheckboxProduct(product.id, $event.target.checked)"
+              :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+            {{ product.label }}
+            <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
           </label>
         </fieldset>
         <div class="product-picker-field">
@@ -83,7 +93,7 @@
               <div class="selected-product-heading">
                 <span v-if="productId !== baseProductId">{{ productLabel(productId) }}</span>
                 <span v-else>Required memory values</span>
-                <button v-if="productId !== baseProductId && !isAccessProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+                <button v-if="productId !== baseProductId && !isCheckboxProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
               </div>
               <div class="product-memory" aria-live="polite">
                 <h3>Read-only memory segments</h3>
@@ -229,6 +239,7 @@
           customers: [],
           products: [],
           accessProducts: [],
+          optionalProducts: [],
           baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
@@ -256,7 +267,7 @@
         },
         availableProducts() {
           const added = new Set(this.form.productIds);
-          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isAccessProduct(String(product.productId)));
+          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isCheckboxProduct(String(product.productId)));
         },
         hasAccessProduct() {
           return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
@@ -266,7 +277,7 @@
         },
         displayedMemoryProductIds() {
           return this.memoryProductIds.filter((id) => {
-            if (!this.isAccessProduct(id)) return true;
+            if (!this.isCheckboxProduct(id)) return true;
             const state = this.productMemory[id];
             return !state || state.loading || state.error || state.files.some((file) => file.segments.length);
           });
@@ -323,11 +334,12 @@
           this.form.productToAdd = '';
           this.loadProductMemory(productId);
         },
-        isAccessProduct(productId) {
-          return this.accessProducts.some((product) => product.id === productId);
+        isCheckboxProduct(productId) {
+          return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
         },
-        setAccessProduct(productId, checked) {
-          if (!this.isAccessProduct(productId)) return;
+        setCheckboxProduct(productId, checked) {
+          if (!this.isCheckboxProduct(productId)) return;
+          if (checked && this.optionalProducts.some((product) => product.id === productId && !product.available)) return;
           if (checked && !this.form.productIds.includes(productId)) {
             if (this.form.productIds.length >= 99) {
               this.error = 'A maximum of 99 modification products can be added.';
@@ -423,8 +435,12 @@
             if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
                 !Array.isArray(data.modifications) ||
                 !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
+                !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 1 ||
                 data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
+                data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || typeof product.available !== 'boolean' ||
+                  (product.available && !data.modifications.some((item) => String(item.productId) === String(product.id)))) ||
                 data.modifications.some((product) => !product || !/^[1-9]\d*$/.test(String(product.productId)) ||
                   typeof product.productName !== 'string')) {
               throw new Error('The server returned an invalid modification product list');
@@ -432,6 +448,7 @@
             this.baseProductId = String(data.baseProductId);
             this.products = data.modifications;
             this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
+            this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
             await this.loadProductMemory(this.baseProductId);
           } catch (err) {
             this.productError = 'Failed to load EMS products: ' + err.message;

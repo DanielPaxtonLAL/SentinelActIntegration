@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = []) {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true) {
   let handler;
   let saved;
   class EmsClient {
@@ -18,6 +18,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       assert.equal(id, '60');
       return [{ productId: '6048', productName: '01 ADD Standalone', lifeCycleStage: 'Commit' },
         { productId: '6049', productName: '02 ADD Link', lifeCycleStage: 'Commit' },
+        { productId: '6051', productName: '04 ADD Pivot', lifeCycleStage: pivotAvailable ? 'Commit' : 'Draft' },
         { productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
@@ -77,6 +78,12 @@ test('entitlement creation always sends Sentinel LDK even if a different ID is s
   }
 });
 
+test('unavailable optional Pivot does not prevent creation without it', async () => {
+  const route = () => createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), [], false);
+  assert.equal((await route().submit({ productIds: ['6048'] })).res.statusCode, 201);
+  assert.equal((await route().submit({ productIds: ['6048', '6051'] })).res.statusCode, 400);
+});
+
 test('uses the server local date and always creates a never-expiring entitlement', async () => {
   for (const overrides of [
     {},
@@ -115,12 +122,12 @@ test('entitlement creation always uses Product Key with one key and one activati
 });
 
 test('requires Link or Standalone and includes the base product', async () => {
-  for (const productIds of [['6048'], ['6049'], ['6048', '6049'], ['6049', '12']]) {
+  for (const productIds of [['6048'], ['6049'], ['6048', '6049'], ['6049', '12'], ['6048', '6051']]) {
     const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
     assert.equal(res.statusCode, 201);
     assert.deepEqual(Array.from(saved.productIds), ['60', ...productIds]);
   }
-  for (const productIds of [[], ['12'], ['60'], ['13'], ['99'], ['6048', '6048']]) {
+  for (const productIds of [[], ['12'], ['6051'], ['60'], ['13'], ['99'], ['6048', '6048']]) {
     const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
     assert.equal(res.statusCode, 400);
     assert.equal(saved, undefined);

@@ -23,6 +23,9 @@ const ENTITLEMENT_ACCESS_PRODUCTS = [
   { id: '6048', name: '01 ADD Standalone', label: 'Standalone' },
   { id: '6049', name: '02 ADD Link', label: 'Link' },
 ];
+const ENTITLEMENT_OPTIONAL_PRODUCTS = [
+  { id: '6051', name: '04 ADD Pivot', label: 'Pivot' },
+];
 
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
@@ -39,10 +42,18 @@ async function getEntitlementProducts() {
       throw new Error(`Required ${required.label} modification product ${required.id} is missing, renamed, or not complete in EMS`);
     }
   }
+  const optionalProducts = ENTITLEMENT_OPTIONAL_PRODUCTS.map((optional) => ({
+    id: optional.id,
+    label: optional.label,
+    available: complete.some((product) => String(product.productId) === optional.id &&
+      typeof product.productName === 'string' &&
+      product.productName.trim().toLowerCase() === optional.name.toLowerCase()),
+  }));
   return {
     baseProductId: String(base.id),
     modifications: complete,
     accessProducts: ENTITLEMENT_ACCESS_PRODUCTS.map(({ id, label }) => ({ id, label })),
+    optionalProducts,
   };
 }
 
@@ -247,9 +258,10 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     }
 
     const vendorId = process.env.EMS_VENDOR_ID || '2';
-    const { baseProductId, modifications } = await getEntitlementProducts();
+    const { baseProductId, modifications, optionalProducts } = await getEntitlementProducts();
     const availableProductIds = new Set(modifications.map((product) => String(product.productId)));
-    if (productIds.some((id) => !availableProductIds.has(String(id)))) {
+    if (productIds.some((id) => !availableProductIds.has(String(id)) ||
+        optionalProducts.some((product) => product.id === String(id) && !product.available))) {
       return res.status(400).json({ error: 'One or more selected products are not complete modifications of the required base product.' });
     }
     if (!ENTITLEMENT_ACCESS_PRODUCTS.some((product) => productIds.map(String).includes(product.id))) {
