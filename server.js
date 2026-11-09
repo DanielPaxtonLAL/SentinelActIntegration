@@ -4,6 +4,7 @@ const os = require('os');
 const express = require('express');
 const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
+const { validateMemoryValues } = require('./entitlement-memory');
 
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) {
@@ -170,6 +171,7 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     description,
     refId1 = '',
     refId2 = '',
+    memoryValues = [],
   } = req.body || {};
   const isDate = (value) => {
     if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -237,6 +239,11 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     if (!enforcements.some((enforcement) => String(enforcement.id) === String(enforcementId))) {
       return res.status(400).json({ error: 'Select an enforcement that exists in EMS.' });
     }
+    const productFiles = Object.fromEntries(await Promise.all(productIds.map(async (productId) => [
+      String(productId),
+      await withSession(() => ems.getProductReadOnlyMemory(productId)),
+    ])));
+    const memorySegments = validateMemoryValues(productIds, productFiles, memoryValues);
 
     const result = await ems.createEntitlement({
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
@@ -253,6 +260,7 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       description,
       refId1,
       refId2,
+      memorySegments,
     });
     res.status(201).json(result);
   } catch (err) {

@@ -144,7 +144,22 @@
                             <td>{{ displayValue(segment.description) }}</td>
                             <td>{{ displayValue(segment.offset) }}</td>
                             <td>{{ displayValue(segment.size) }}</td>
-                            <td>{{ displayValue(segment.content) }}</td>
+                            <td>
+                              <template v-if="segment.saot && file.kind === 'product'">
+                                <label>
+                                  <span class="form-hint">Set at entitlement time ({{ segment.size }} bytes)</span>
+                                  <input v-model.trim="segment.value" type="text" required :disabled="loading"
+                                    :pattern="'[0-9A-Fa-f]{' + (Number(segment.size) * 2) + '}'"
+                                    :maxlength="Number(segment.size) * 2"
+                                    :aria-label="'Hex content for ' + displayValue(segment.name)"
+                                    :title="'Enter exactly ' + (Number(segment.size) * 2) + ' hexadecimal characters'">
+                                </label>
+                              </template>
+                              <template v-else>
+                                {{ displayValue(segment.content) }}
+                                <p v-if="segment.saot" class="form-error">SAOT dynamic memory must be set in EMS; saving here is unavailable.</p>
+                              </template>
+                            </td>
                           </tr>
                         </tbody>
                       </table>
@@ -159,7 +174,7 @@
         <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId || !productMemoryReady">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -283,6 +298,13 @@
           const added = new Set(this.form.productIds);
           return this.products.filter((product) => !added.has(String(product.productId)));
         },
+        productMemoryReady() {
+          return this.form.productIds.every((id) => {
+            const state = this.productMemory[id];
+            return state && !state.loading && !state.error &&
+              !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
+          });
+        },
         filteredEntitlements() {
           const query = this.filter.toLocaleLowerCase();
           if (!query) return this.entitlements;
@@ -350,7 +372,13 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data)) throw new Error('The server returned an invalid memory list');
-            state.files = data;
+            state.files = data.map((file) => ({
+              ...file,
+              segments: file.segments.map((segment) => ({
+                ...segment,
+                value: segment.content ?? '',
+              })),
+            }));
           } catch (err) {
             state.error = 'Failed to load read-only memory segments: ' + err.message;
           } finally {
@@ -453,6 +481,17 @@
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
+              memoryValues: this.form.productIds.flatMap((productId) =>
+                this.productMemory[productId].files.flatMap((file) =>
+                  file.kind === 'product'
+                    ? file.segments.filter((segment) => segment.saot).map((segment) => ({
+                      productId,
+                      segmentId: segment.id,
+                      content: segment.value,
+                    }))
+                    : []
+                )
+              ),
               haspIds: this.form.lineItemType === 'ProtectionKey_Update'
                 ? this.form.haspIds.split(';').map((id) => id.trim()).filter(Boolean)
                 : [],

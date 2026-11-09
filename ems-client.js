@@ -143,9 +143,15 @@ class EmsClient {
     if (!product || typeof product !== 'object') throw new Error('EMS returned invalid product details');
 
     const asList = (value) => value === undefined || value === '' ? [] : (Array.isArray(value) ? value : [value]);
-    const segmentFields = ({ name, description, offset, size, content, text }) => ({
-      name, description, offset, size, content: content ?? text,
-    });
+    const segmentFields = ({ id, name, description, offset, size, content, text, saot }) => {
+      if (!['true', 'false', '1', '0'].includes(String(saot).toLowerCase())) {
+        throw new Error('EMS returned a memory segment without a valid SAOT flag');
+      }
+      return {
+        id, name, description, offset, size, content: content ?? text,
+        saot: ['true', '1'].includes(String(saot).toLowerCase()),
+      };
+    };
     const staticSegments = asList(product.memorySegment).filter((segment) => {
       if (!segment || typeof segment !== 'object') throw new Error('EMS returned an invalid product memory segment');
       const types = asList(segment.memoryType);
@@ -359,6 +365,14 @@ class EmsClient {
         item('productId', productId) +
         '</itemProduct>'
       ).join('') +
+      (entitlement.memorySegments?.length
+        ? '<memorySegments>' + entitlement.memorySegments.map((segment) =>
+          '<segment><lineItemMemorySegmentID></lineItemMemorySegmentID>' +
+          item('prdMemorySegmentId', segment.id) +
+          '<prdSuiteLineItemId></prdSuiteLineItemId>' +
+          item('data', segment.content) + '</segment>'
+        ).join('') + '</memorySegments>'
+        : '') +
       '</entitlementItem>' +
       '</entitlement>';
     const webUrl = new URL(`${this.baseUrl}/ems/addEntitlement.html`);

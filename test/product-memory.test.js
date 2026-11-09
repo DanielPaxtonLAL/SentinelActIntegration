@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { EmsClient } = require('../ems-client');
+const { validateMemoryValues } = require('../entitlement-memory');
 
 function clientWithResponses(responses) {
   const client = new EmsClient({ baseUrl: 'https://ems.example' });
@@ -18,15 +19,15 @@ test('lists product-specific segments only for read-only memory files', async ()
   const client = clientWithResponses({
     '/product/12.ws': `<product><dynamicMemoriesRef>
       <dynamicMemory><memoryId>1</memoryId><memories>
-        <memorySegment><name>First</name><offset>0x0001</offset><size>2</size><content>000A</content></memorySegment>
-        <memorySegment><name>Second</name><offset>0x0003</offset><size>1</size><content>00</content></memorySegment>
+        <memorySegment><name>First</name><offset>0x0001</offset><size>2</size><content>000A</content><saot>true</saot></memorySegment>
+        <memorySegment><name>Second</name><offset>0x0003</offset><size>1</size><content>00</content><saot>false</saot></memorySegment>
       </memories></dynamicMemory>
       <dynamicMemory><memoryId>2</memoryId></dynamicMemory>
       <dynamicMemory><memoryId>3</memoryId></dynamicMemory>
     </dynamicMemoriesRef></product>`,
     '/dynamicMemory/1.ws': '<dynamicMemory><memoryName>Read only</memoryName><fileId>4</fileId><memoryType>2</memoryType><memories><memorySegment><name>Default</name></memorySegment></memories></dynamicMemory>',
     '/dynamicMemory/2.ws': '<dynamicMemory><memoryName>Read write</memoryName><memoryType>1</memoryType></dynamicMemory>',
-    '/dynamicMemory/3.ws': '<dynamicMemory><memoryName>Other</memoryName><fileId>5</fileId><memoryType>2</memoryType><memories><memorySegment><name>Default</name><content>0000</content></memorySegment></memories></dynamicMemory>',
+    '/dynamicMemory/3.ws': '<dynamicMemory><memoryName>Other</memoryName><fileId>5</fileId><memoryType>2</memoryType><memories><memorySegment><name>Default</name><content>0000</content><saot>false</saot></memorySegment></memories></dynamicMemory>',
   });
   const files = await client.getProductReadOnlyMemory('12');
   assert.equal(files.length, 2);
@@ -35,6 +36,8 @@ test('lists product-specific segments only for read-only memory files', async ()
     { name: 'Second', content: '00', offset: '0x0003' },
   ]);
   assert.equal(files[1].segments[0].content, '0000');
+  assert.equal(files[0].segments[0].saot, true);
+  assert.equal(files[0].segments[1].saot, false);
 });
 
 test('handles no references, empty segment lists, and invalid EMS data explicitly', async () => {
@@ -54,7 +57,7 @@ test('handles no references, empty segment lists, and invalid EMS data explicitl
 test('lists read-only product memory segments separately from dynamic memory', async () => {
   const client = clientWithResponses({
     '/product/4.ws': `<product>
-      <memorySegment><name>Static RO</name><text>000F</text><offset>0x0000</offset><memoryType><id>2</id></memoryType></memorySegment>
+      <memorySegment><id>45</id><name>Static RO</name><text>000F</text><offset>0x0000</offset><saot>true</saot><memoryType><id>2</id></memoryType></memorySegment>
       <memorySegment><name>Static RW</name><memoryType><id>1</id></memoryType></memorySegment>
     </product>`,
   });
@@ -64,9 +67,42 @@ test('lists read-only product memory segments separately from dynamic memory', a
   assert.equal(files[0].segments.length, 1);
   assert.equal(files[0].segments[0].name, 'Static RO');
   assert.equal(files[0].segments[0].content, '000F');
+  assert.equal(files[0].segments[0].id, '45');
+  assert.equal(files[0].segments[0].saot, true);
   await assert.rejects(() => clientWithResponses({
     '/product/1.ws': '<product><memorySegment><name>Unknown</name></memorySegment></product>',
   }).getProductReadOnlyMemory(1), /valid memory type/);
+});
+
+test('validates all SAOT values against current EMS metadata', () => {
+  const files = { '4': [{ kind: 'product', segments: [
+    { id: '45', name: 'Segment', size: '2', saot: true },
+    { id: '46', size: '1', saot: false },
+  ] }] };
+  assert.deepEqual(validateMemoryValues(['4'], files, [{ productId: '4', segmentId: '45', content: '00af' }]),
+    [{ id: '45', content: '00AF' }]);
+  assert.throws(() => validateMemoryValues(['4'], files, []), /every SAOT/);
+  assert.throws(() => validateMemoryValues(['4'], files, [{ productId: '4', segmentId: '45', content: 'abc' }]), /exactly 2 bytes/);
+  assert.throws(() => validateMemoryValues(['4'], files, [{ productId: '4', segmentId: '46', content: '00' }]), /Unexpected/);
+  assert.throws(() => validateMemoryValues(['4'], { '4': [{ kind: 'dynamic', segments: [{ saot: true }] }] }, []), /not supported/);
+});
+
+test('serializes SAOT static values in EMS entitlement memory segments', async () => {
+  const client = new EmsClient({ baseUrl: 'https://ems.example' });
+  client.authenticated = true;
+  client.webSessionUrl = 'https://ems.example/ems/homePage';
+  let body;
+  client._fetch = async (_url, options) => {
+    body = options.body;
+    return { status: 200, ok: true, text: async () => '{"saved":true}' };
+  };
+  await client.createEntitlement({
+    lineItemType: 'Hardware_Key', productIds: ['4'], customerId: '1', vendorId: '2',
+    enforcementId: '1', startDate: '2026-01-01', endDate: '2500-12-31',
+    activationsPerKey: 1, description: '', refId1: '', refId2: '',
+    memorySegments: [{ id: '45', content: '00AF' }],
+  });
+  assert.match(body.get('entitlementXML'), /<memorySegments><segment><lineItemMemorySegmentID><\/lineItemMemorySegmentID><prdMemorySegmentId>45<\/prdMemorySegmentId><prdSuiteLineItemId><\/prdSuiteLineItemId><data>00AF<\/data><\/segment><\/memorySegments>/);
 });
 
 test('reports an EMS login redirect as an expired session', async () => {
@@ -86,6 +122,7 @@ function entitlementApp(fetch) {
   const app = { ...definition.methods };
   Object.assign(app, definition.data.call(app));
   Object.defineProperty(app, 'availableProducts', { get: () => definition.computed.availableProducts.call(app) });
+  Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
 
@@ -119,4 +156,37 @@ test('memory lookup failures are visible and can be retried', async () => {
   await app.loadProductMemory('12');
   assert.equal(app.productMemory['12'].error, '');
   assert.equal(app.productMemory['12'].files.length, 0);
+});
+
+test('form blocks saving while memory is unavailable or dynamic SAOT is unsupported', async () => {
+  const app = entitlementApp(async () => ({
+    ok: true, json: async () => [{ kind: 'dynamic', segments: [{ saot: true }] }],
+  }));
+  app.form.productIds = ['12'];
+  assert.equal(app.productMemoryReady, false);
+  await app.loadProductMemory('12');
+  assert.equal(app.productMemoryReady, false);
+  app.productMemory['12'].files[0].segments[0].saot = false;
+  assert.equal(app.productMemoryReady, true);
+});
+
+test('submits editable SAOT values without non-SAOT segments', async () => {
+  let submitted;
+  const app = entitlementApp(async (_url, options) => {
+    submitted = JSON.parse(options.body);
+    return { ok: true, json: async () => ({}) };
+  });
+  app.loadEntitlements = async () => {};
+  app.form.productIds = ['12'];
+  app.productMemory['12'] = { loading: false, error: '', files: [
+    { kind: 'product', segments: [
+      { id: '1', saot: true, value: '00FF' },
+      { id: '2', saot: false, content: 'AA' },
+    ] },
+  ] };
+  assert.equal(app.productMemoryReady, true);
+  await app.createEntitlement();
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
+    { productId: '12', segmentId: '1', content: '00FF' },
+  ]);
 });
