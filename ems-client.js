@@ -128,6 +128,69 @@ class EmsClient {
     return Array.isArray(inst) ? inst : (inst ? [inst] : []);
   }
 
+  async listModificationProducts(productId, vendorId = '2') {
+    if (!/^[1-9]\d*$/.test(String(productId))) throw new Error('Product ID must be a positive number');
+    if (!/^[1-9]\d*$/.test(String(vendorId))) throw new Error('Vendor ID must be a positive number');
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
+    const getXml = async (path) => {
+      try {
+        return parser.parse(await this.call(path));
+      } catch (err) {
+        if (err.status === 302) err.status = 401;
+        throw err;
+      }
+    };
+    const base = (await getXml(`/product/${productId}.ws`))?.product;
+    if (!base || typeof base !== 'object' || !/^\d+$/.test(String(base.productIdentifier))) {
+      throw new Error('EMS returned invalid base product details');
+    }
+
+    const pageSize = 100;
+    const candidates = [];
+    const seenIds = new Set();
+    for (let page = 1; ; page++) {
+      const path = `/vendor/${vendorId}/product.ws?identifier=${encodeURIComponent(base.productIdentifier)}&pageIndex=${page}&pageSize=${pageSize}`;
+      const list = (await getXml(path))?.listResponse;
+      if (!list || typeof list !== 'object') throw new Error('EMS returned an invalid product search result');
+      const instances = list.instance === undefined || list.instance === ''
+        ? [] : (Array.isArray(list.instance) ? list.instance : [list.instance]);
+      if (instances.some((entry) => !entry || typeof entry !== 'object' ||
+          !/^[1-9]\d*$/.test(String(entry.id)) || typeof entry.type !== 'string' ||
+          !/^\d+$/.test(String(entry.identifier)))) {
+        throw new Error('EMS returned an invalid product search entry');
+      }
+      for (const entry of instances) {
+        if (seenIds.has(String(entry.id))) throw new Error('EMS returned duplicate products while paging');
+        seenIds.add(String(entry.id));
+      }
+      candidates.push(...instances.filter((entry) =>
+        entry.type.toUpperCase() === 'MODIFICATION' &&
+        String(entry.identifier) === String(base.productIdentifier)
+      ));
+      if (instances.length < pageSize) break;
+    }
+
+    const matches = [];
+    for (let i = 0; i < candidates.length; i += 10) {
+      const batch = await Promise.all(candidates.slice(i, i + 10).map(async (entry) => {
+        const detail = (await getXml(`/product/${entry.id}.ws`))?.product;
+        if (!detail || typeof detail !== 'object' || !/^\d+$/.test(String(detail.baseProductId))) {
+          throw new Error(`EMS returned invalid details for modification product ${entry.id}`);
+        }
+        return String(detail.baseProductId) === String(productId) ? {
+          productId: entry.id,
+          productName: entry.name,
+          productIdentifier: entry.identifier,
+          lifeCycleStage: entry.lifeCycleStage,
+          deployed: entry.deployed,
+          description: entry.descr,
+        } : null;
+      }));
+      matches.push(...batch.filter(Boolean));
+    }
+    return matches;
+  }
+
   async getProductReadOnlyMemory(id) {
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Product ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });

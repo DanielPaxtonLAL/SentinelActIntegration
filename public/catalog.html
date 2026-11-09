@@ -58,9 +58,9 @@
                   class="catalog-product-row" :class="{ selected: selectedItem === item }"
                   tabindex="0" role="button" :aria-pressed="selectedItem === item"
                   :aria-label="'View details for ' + catalogItemName(item)"
-                  @click="selectedItem = item"
-                  @keydown.enter.prevent="selectedItem = item"
-                  @keydown.space.prevent="selectedItem = item">
+                  @click="selectItem(item)"
+                  @keydown.enter.prevent="selectItem(item)"
+                  @keydown.space.prevent="selectItem(item)">
                   <td v-for="column in columns" :key="column.key">
                     <template v-for="(part, partIndex) in highlightParts(catalogValue(item, column.key))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template>
                   </td>
@@ -81,6 +81,29 @@
                 <dd>{{ displayValue(value) }}</dd>
               </template>
             </dl>
+            <section v-if="activeTab === 'products'" class="catalog-modifications">
+              <h4>Modification products</h4>
+              <p v-if="modificationsLoading" role="status">Loading modification products…</p>
+              <div v-else-if="modificationsError">
+                <p class="form-error" role="alert">{{ modificationsError }}</p>
+                <button type="button" class="button--view" @click="loadModifications(selectedItem)">Retry</button>
+              </div>
+              <p v-else-if="!modifications.length">No modification products found.</p>
+              <ul v-else>
+                <li v-for="modification in modifications" :key="modification.productId">
+                  <details>
+                    <summary>{{ displayValue(modification.productName) }} ({{ displayValue(modification.productId) }})</summary>
+                    <dl>
+                      <dt>Product ID</dt><dd>{{ displayValue(modification.productId) }}</dd>
+                      <dt>Identifier</dt><dd>{{ displayValue(modification.productIdentifier) }}</dd>
+                      <dt>Lifecycle stage</dt><dd>{{ displayValue(modification.lifeCycleStage) }}</dd>
+                      <dt>Deployed</dt><dd>{{ String(modification.deployed).toLowerCase() === 'true' ? 'Yes' : 'No' }}</dd>
+                      <dt>Description</dt><dd>{{ displayValue(modification.description) }}</dd>
+                    </dl>
+                  </details>
+                </li>
+              </ul>
+            </section>
           </template>
           <p v-else>Select an item to view its details.</p>
         </aside>
@@ -117,6 +140,10 @@
           activeTab: 'products',
           items: [],
           selectedItem: null,
+          modifications: [],
+          modificationsLoading: false,
+          modificationsError: '',
+          modificationsRequest: 0,
           filter: '',
           loading: false,
           error: '',
@@ -161,12 +188,20 @@
         async selectTab(tab) {
           this.activeTab = tab;
           this.selectedItem = null;
+          this.modificationsRequest++;
+          this.modifications = [];
+          this.modificationsLoading = false;
+          this.modificationsError = '';
           this.filter = '';
           await this.loadItems();
         },
         async loadItems() {
           this.loading = true;
           this.error = '';
+          this.modificationsRequest++;
+          this.modifications = [];
+          this.modificationsLoading = false;
+          this.modificationsError = '';
           try {
             const response = await fetch(`/api/catalog/${this.activeTab}`);
             const data = await response.json();
@@ -177,12 +212,34 @@
             this.selectedItem = this.activeTab === 'products' || this.activeTab === 'features'
               ? data.find((item) => String(this.catalogItemId(item)) === String(selectedItemId)) || data[0] || null
               : null;
+            if (this.activeTab === 'products' && this.selectedItem) this.loadModifications(this.selectedItem);
           } catch (err) {
             this.items = [];
             this.selectedItem = null;
             this.error = `Failed to load ${this.activeTabLabel.toLowerCase()}: ${err.message}`;
           } finally {
             this.loading = false;
+          }
+        },
+        selectItem(item) {
+          this.selectedItem = item;
+          if (this.activeTab === 'products') this.loadModifications(item);
+        },
+        async loadModifications(item) {
+          const request = ++this.modificationsRequest;
+          this.modifications = [];
+          this.modificationsError = '';
+          this.modificationsLoading = true;
+          try {
+            const response = await fetch(`/api/catalog/products/${encodeURIComponent(item.productId)}/modifications`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid modification product list');
+            if (request === this.modificationsRequest) this.modifications = data;
+          } catch (err) {
+            if (request === this.modificationsRequest) this.modificationsError = 'Failed to load modification products: ' + err.message;
+          } finally {
+            if (request === this.modificationsRequest) this.modificationsLoading = false;
           }
         },
         columnLabel(value) {

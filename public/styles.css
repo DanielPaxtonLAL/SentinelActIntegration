@@ -143,6 +143,13 @@ button.button--view:hover:not(:disabled),
 .catalog-product-details dl { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: .55rem 1rem; margin: 0; }
 .catalog-product-details dt { color: #555; font-weight: 600; }
 .catalog-product-details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.catalog-modifications { margin-top: 1.25rem; border-top: 1px solid #ddd; }
+.catalog-modifications h4 { margin: 1rem 0 .5rem; }
+.catalog-modifications p { margin: .5rem 0; }
+.catalog-modifications ul { margin: 0; padding: 0; list-style: none; }
+.catalog-modifications li { border-bottom: 1px solid #ddd; padding: .5rem 0; }
+.catalog-modifications summary { cursor: pointer; overflow-wrap: anywhere; }
+.catalog-modifications details dl { margin: .75rem 0 0 1rem; }
 
 #actStatus, #status {
   color: #666;
