@@ -25,7 +25,9 @@ const ENTITLEMENT_ACCESS_PRODUCTS = [
 ];
 const ENTITLEMENT_OPTIONAL_PRODUCTS = [
   { id: '6051', name: '04 ADD Pivot', label: 'Pivot' },
+  { id: '6050', name: '03 Lease version - fill out Expiry Date', label: 'Lease' },
 ];
+const LEASE_PRODUCT_ID = '6050';
 
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
@@ -276,7 +278,27 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       String(productId),
       await withSession(() => ems.getProductReadOnlyMemory(productId)),
     ])));
-    const memorySegments = validateMemoryValues(allProductIds, productFiles, memoryValues);
+    if (!Array.isArray(memoryValues)) {
+      return res.status(400).json({ error: 'Memory segment values must be a list.' });
+    }
+    const expirySegments = productFiles[baseProductId]
+      .filter((file) => file.kind === 'product')
+      .flatMap((file) => file.segments)
+      .filter((segment) => segment.saot && typeof segment.name === 'string' &&
+        segment.name.trim().toLowerCase() === 'expiry date');
+    const leaseSelected = productIds.map(String).includes(LEASE_PRODUCT_ID);
+    if (expirySegments.length > 1 || (leaseSelected && expirySegments.length !== 1)) {
+      return res.status(400).json({ error: 'EMS must provide exactly one editable base product Expiry Date segment for Lease.' });
+    }
+    let resolvedMemoryValues = memoryValues;
+    if (expirySegments.length && !leaseSelected) {
+      const expiry = expirySegments[0];
+      resolvedMemoryValues = memoryValues.filter((value) =>
+        !value || String(value.productId) !== baseProductId || String(value.segmentId) !== String(expiry.id)
+      );
+      resolvedMemoryValues.push({ productId: baseProductId, segmentId: expiry.id, content: expiry.content });
+    }
+    const memorySegments = validateMemoryValues(allProductIds, productFiles, resolvedMemoryValues);
 
     const today = new Date();
     const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;

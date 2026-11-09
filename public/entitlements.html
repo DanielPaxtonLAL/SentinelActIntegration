@@ -62,13 +62,34 @@
         </fieldset>
         <fieldset class="access-products">
           <legend>Optional products</legend>
-          <label v-for="product in optionalProducts" :key="product.id" class="access-product-option">
+          <label v-for="product in otherOptionalProducts" :key="product.id" class="access-product-option">
             <input type="checkbox" :checked="form.productIds.includes(product.id)"
               @change="setCheckboxProduct(product.id, $event.target.checked)"
               :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
             {{ product.label }}
             <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
           </label>
+        </fieldset>
+        <fieldset class="access-products">
+          <legend>Lease</legend>
+          <label v-if="leaseProduct" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(leaseProduct.id)"
+              @change="setCheckboxProduct(leaseProduct.id, $event.target.checked)"
+              :disabled="loading || productsLoading || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
+            {{ leaseProduct.label }}
+            <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
+          </label>
+          <div v-if="leaseSelected" class="lease-options">
+            <label v-if="baseExpirySegment">
+              Lease expiry date (hex, {{ baseExpirySegment.size }} bytes)
+              <input v-model.trim="baseExpirySegment.value" type="text" required :disabled="loading"
+                :pattern="'[0-9A-Fa-f]{' + (Number(baseExpirySegment.size) * 2) + '}'"
+                :maxlength="Number(baseExpirySegment.size) * 2"
+                :title="'Enter exactly ' + (Number(baseExpirySegment.size) * 2) + ' hexadecimal characters'">
+            </label>
+            <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
+            <p v-else class="form-error" role="alert">Unable to find a unique editable base product expiry date. Reload its memory before saving.</p>
+          </div>
         </fieldset>
         <div class="product-picker-field">
           <label for="product-picker">Additional modification products (optional)</label>
@@ -112,28 +133,30 @@
                       <table>
                         <thead><tr><th>Name</th><th>Description</th><th>Offset</th><th>Size (bytes)</th><th>Content (hex)</th></tr></thead>
                         <tbody>
-                          <tr v-for="(segment, index) in file.segments" :key="index">
-                            <td>{{ displayValue(segment.name) }}</td>
-                            <td>{{ displayValue(segment.description) }}</td>
-                            <td>{{ displayValue(segment.offset) }}</td>
-                            <td>{{ displayValue(segment.size) }}</td>
-                            <td>
-                              <template v-if="segment.saot && file.kind === 'product'">
-                                <label>
-                                  <span class="form-hint">Set at entitlement time ({{ segment.size }} bytes)</span>
-                                  <input v-model.trim="segment.value" type="text" required :disabled="loading"
-                                    :pattern="'[0-9A-Fa-f]{' + (Number(segment.size) * 2) + '}'"
-                                    :maxlength="Number(segment.size) * 2"
-                                    :aria-label="'Hex content for ' + displayValue(segment.name)"
-                                    :title="'Enter exactly ' + (Number(segment.size) * 2) + ' hexadecimal characters'">
-                                </label>
-                              </template>
-                              <template v-else>
-                                {{ displayValue(segment.content) }}
-                                <p v-if="segment.saot" class="form-error">SAOT dynamic memory must be set in EMS; saving here is unavailable.</p>
-                              </template>
-                            </td>
-                          </tr>
+                          <template v-for="(segment, index) in file.segments" :key="index">
+                            <tr v-if="!isBaseExpirySegment(productId, file, segment)">
+                              <td>{{ displayValue(segment.name) }}</td>
+                              <td>{{ displayValue(segment.description) }}</td>
+                              <td>{{ displayValue(segment.offset) }}</td>
+                              <td>{{ displayValue(segment.size) }}</td>
+                              <td>
+                                <template v-if="segment.saot && file.kind === 'product'">
+                                  <label>
+                                    <span class="form-hint">Set at entitlement time ({{ segment.size }} bytes)</span>
+                                    <input v-model.trim="segment.value" type="text" required :disabled="loading"
+                                      :pattern="'[0-9A-Fa-f]{' + (Number(segment.size) * 2) + '}'"
+                                      :maxlength="Number(segment.size) * 2"
+                                      :aria-label="'Hex content for ' + displayValue(segment.name)"
+                                      :title="'Enter exactly ' + (Number(segment.size) * 2) + ' hexadecimal characters'">
+                                  </label>
+                                </template>
+                                <template v-else>
+                                  {{ displayValue(segment.content) }}
+                                  <p v-if="segment.saot" class="form-error">SAOT dynamic memory must be set in EMS; saving here is unavailable.</p>
+                                </template>
+                              </td>
+                            </tr>
+                          </template>
                         </tbody>
                       </table>
                     </div>
@@ -272,6 +295,23 @@
         hasAccessProduct() {
           return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
         },
+        leaseProduct() {
+          return this.optionalProducts.find((product) => product.label === 'Lease');
+        },
+        otherOptionalProducts() {
+          return this.optionalProducts.filter((product) => product !== this.leaseProduct);
+        },
+        leaseSelected() {
+          return Boolean(this.leaseProduct && this.form.productIds.includes(this.leaseProduct.id));
+        },
+        baseExpirySegment() {
+          const files = this.productMemory[this.baseProductId]?.files || [];
+          const segments = files.filter((file) => file.kind === 'product')
+            .flatMap((file) => file.segments)
+            .filter((segment) => segment.saot && typeof segment.name === 'string' &&
+              segment.name.trim().toLowerCase() === 'expiry date');
+          return segments.length === 1 ? segments[0] : null;
+        },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
         },
@@ -283,7 +323,7 @@
           });
         },
         productMemoryReady() {
-          return Boolean(this.baseProductId) && this.memoryProductIds.every((id) => {
+          return Boolean(this.baseProductId) && (!this.leaseSelected || Boolean(this.baseExpirySegment)) && this.memoryProductIds.every((id) => {
             const state = this.productMemory[id];
             return state && !state.loading && !state.error &&
               !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
@@ -337,6 +377,10 @@
         isCheckboxProduct(productId) {
           return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
         },
+        isBaseExpirySegment(productId, file, segment) {
+          return productId === this.baseProductId && file.kind === 'product' && segment.saot &&
+            typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'expiry date';
+        },
         setCheckboxProduct(productId, checked) {
           if (!this.isCheckboxProduct(productId)) return;
           if (checked && this.optionalProducts.some((product) => product.id === productId && !product.available)) return;
@@ -367,7 +411,7 @@
               ...file,
               segments: file.segments.map((segment) => ({
                 ...segment,
-                value: segment.content ?? '',
+                value: this.isBaseExpirySegment(productId, file, segment) ? '' : (segment.content ?? ''),
               })),
             }));
           } catch (err) {
@@ -435,7 +479,7 @@
             if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
                 !Array.isArray(data.modifications) ||
                 !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
-                !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 1 ||
+                !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 2 ||
                 data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
                 data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||

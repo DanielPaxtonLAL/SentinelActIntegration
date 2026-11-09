@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true) {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true) {
   let handler;
   let saved;
   class EmsClient {
@@ -19,6 +19,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       return [{ productId: '6048', productName: '01 ADD Standalone', lifeCycleStage: 'Commit' },
         { productId: '6049', productName: '02 ADD Link', lifeCycleStage: 'Commit' },
         { productId: '6051', productName: '04 ADD Pivot', lifeCycleStage: pivotAvailable ? 'Commit' : 'Draft' },
+        { productId: '6050', productName: '03 Lease version - fill out Expiry Date', lifeCycleStage: leaseAvailable ? 'Commit' : 'Draft' },
         { productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
@@ -76,6 +77,52 @@ test('entitlement creation always sends Sentinel LDK even if a different ID is s
     assert.equal(res.statusCode, 201);
     assert.equal(saved.enforcementId, '1');
   }
+});
+
+test('lease requires the base expiry value and non-lease uses the EMS default', async () => {
+  const memory = [{ kind: 'product', segments: [
+    { id: '90', size: '4', name: 'Expiry Date', content: '00000000', saot: true },
+  ] }];
+  const route = () => createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), memory);
+  const noLease = await route().submit({
+    productIds: ['6048'], memoryValues: [{ productId: '60', segmentId: '90', content: 'FFFFFFFF' }],
+  });
+  assert.equal(noLease.res.statusCode, 201);
+  assert.equal(noLease.saved.memorySegments[0].content, '00000000');
+  const missing = await route().submit({ productIds: ['6048', '6050'] });
+  assert.equal(missing.res.statusCode, 400);
+  const invalid = await route().submit({
+    productIds: ['6048', '6050'], memoryValues: [{ productId: '60', segmentId: '90', content: 'invalid' }],
+  });
+  assert.equal(invalid.res.statusCode, 400);
+  const valid = await route().submit({
+    productIds: ['6048', '6050'], memoryValues: [{ productId: '60', segmentId: '90', content: '1234abcd' }],
+  });
+  assert.equal(valid.res.statusCode, 201);
+  assert.equal(valid.saved.memorySegments[0].content, '1234ABCD');
+  assert.deepEqual(Array.from(valid.saved.productIds), ['60', '6048', '6050']);
+  const absent = await createRoute([{ id: '1' }]).submit({ productIds: ['6048', '6050'] });
+  assert.equal(absent.res.statusCode, 400);
+  assert.match(absent.res.body.error, /Expiry Date/);
+  const ambiguous = await createRoute([{ id: '1' }], new Date(), [{ kind: 'product', segments: [
+    ...memory[0].segments, { id: '91', size: '4', name: 'Expiry Date', content: '00000000', saot: true },
+  ] }]).submit({ productIds: ['6048', '6050'] });
+  assert.equal(ambiguous.res.statusCode, 400);
+  assert.match(ambiguous.res.body.error, /exactly one.*Expiry Date/);
+  const invalidDefault = await createRoute([{ id: '1' }], new Date(), [{ kind: 'product', segments: [
+    { ...memory[0].segments[0], content: '' },
+  ] }]).submit();
+  assert.equal(invalidDefault.res.statusCode, 400);
+  assert.match(invalidDefault.res.body.error, /Expiry Date/);
+  const noAccess = await route().submit({ productIds: ['6050'] });
+  assert.equal(noAccess.res.statusCode, 400);
+  assert.match(noAccess.res.body.error, /Link, Standalone/);
+});
+
+test('unavailable Lease does not prevent creation without it', async () => {
+  const route = () => createRoute([{ id: '1' }], new Date(), [], true, false);
+  assert.equal((await route().submit({ productIds: ['6048'] })).res.statusCode, 201);
+  assert.equal((await route().submit({ productIds: ['6048', '6050'] })).res.statusCode, 400);
 });
 
 test('unavailable optional Pivot does not prevent creation without it', async () => {

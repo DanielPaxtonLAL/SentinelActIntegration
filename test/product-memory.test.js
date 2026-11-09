@@ -145,6 +145,10 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'availableProducts', { get: () => definition.computed.availableProducts.call(app) });
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
   Object.defineProperty(app, 'hasAccessProduct', { get: () => definition.computed.hasAccessProduct.call(app) });
+  Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
+  Object.defineProperty(app, 'otherOptionalProducts', { get: () => definition.computed.otherOptionalProducts.call(app) });
+  Object.defineProperty(app, 'leaseSelected', { get: () => definition.computed.leaseSelected.call(app) });
+  Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'displayedMemoryProductIds', { get: () => definition.computed.displayedMemoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
@@ -192,8 +196,9 @@ test('loads modification products and required base memory for creation', async 
         { productId: '6048', productName: 'Standalone' },
         { productId: '6049', productName: 'Link' },
         { productId: '6051', productName: 'Pivot' },
+        { productId: '6050', productName: 'Lease' },
       ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }],
-      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }] }
+      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', available: true }] }
       : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
   });
   await app.loadProducts();
@@ -202,6 +207,47 @@ test('loads modification products and required base memory for creation', async 
   assert.equal(app.availableProducts[0].productId, '12');
   assert.equal(app.productMemoryReady, true);
   assert.equal(app.productMemory['60'].files[0].segments[0].value, '0000');
+});
+
+test('lease checkbox controls the base expiry value and loads lease memory', async () => {
+  const app = entitlementApp(async (url) => ({ ok: true, json: async () =>
+    url.includes('/60/') ? [{ kind: 'product', segments: [
+      { id: '90', name: 'Expiry Date', size: '4', saot: true, content: '00000000' },
+      { id: '91', name: 'Serial Number', size: '4', saot: true, content: '00000000' },
+    ] }] : [] }));
+  app.baseProductId = '60';
+  await app.loadProductMemory('60');
+  const file = app.productMemory['60'].files[0];
+  const segment = file.segments[0];
+  assert.equal(segment.value, '');
+  assert.equal(file.segments[1].value, '00000000');
+  app.optionalProducts = [
+    { id: '6051', label: 'Pivot', available: true },
+    { id: '6050', label: 'Lease', available: true },
+  ];
+  assert.equal(app.leaseProduct.id, '6050');
+  assert.deepEqual(Array.from(app.otherOptionalProducts, (product) => product.id), ['6051']);
+  app.products = [{ productId: '6050', productName: 'Lease' }];
+  assert.equal(app.availableProducts.length, 0);
+  assert.equal(app.leaseSelected, false);
+  assert.equal(app.isBaseExpirySegment('60', file, segment), true);
+  assert.equal(app.isBaseExpirySegment('60', file, file.segments[1]), false);
+  app.setCheckboxProduct('6050', true);
+  await new Promise(setImmediate);
+  assert.equal(app.leaseSelected, true);
+  assert.equal(app.baseExpirySegment, segment);
+  assert.equal(app.productMemoryReady, true);
+  app.setCheckboxProduct('6050', false);
+  assert.equal(app.leaseSelected, false);
+  assert.equal(app.productMemory['6050'], undefined);
+});
+
+test('hidden base expiry input is removed from form validation', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
+  assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
+  assert.match(html, /<tr v-if="!isBaseExpirySegment\(productId, file, segment\)">/);
+  assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
 });
 
 test('access checkboxes allow either or both and do not duplicate dropdown products', async () => {
