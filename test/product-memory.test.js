@@ -105,6 +105,27 @@ test('serializes SAOT static values in EMS entitlement memory segments', async (
   assert.match(body.get('entitlementXML'), /<memorySegments><segment><lineItemMemorySegmentID><\/lineItemMemorySegmentID><prdMemorySegmentId>45<\/prdMemorySegmentId><prdSuiteLineItemId><\/prdSuiteLineItemId><data>00AF<\/data><\/segment><\/memorySegments>/);
 });
 
+test('serializes Product Key type and counts in EMS requests', async () => {
+  const client = new EmsClient({ baseUrl: 'https://ems.example' });
+  client.authenticated = true;
+  client.webSessionUrl = 'https://ems.example/ems/homePage';
+  let body;
+  client._fetch = async (_url, options) => {
+    body = options.body;
+    return { status: 200, ok: true, text: async () => '{"saved":true}' };
+  };
+  await client.createEntitlement({
+    lineItemType: 'Product_Key', productIds: ['4'], customerId: '1', vendorId: '2',
+    enforcementId: '1', startDate: '2026-01-01', endDate: '2500-12-31',
+    numberOfKeys: 3, activationsPerKey: 2, description: '', refId1: '', refId2: '',
+    memorySegments: [],
+  });
+  assert.match(body.get('entitlementXML'), /<lineItemType>Product_Key<\/lineItemType>/);
+  assert.match(body.get('entitlementXML'), /<numActivationPerProductKey>2<\/numActivationPerProductKey>/);
+  assert.match(body.get('entitlementXML'), /<numProductKeys>3<\/numProductKeys>/);
+  assert.equal(body.get('lineItemTypeForProdPush'), 'Product_Key');
+});
+
 test('reports an EMS login redirect as an expired session', async () => {
   const client = clientWithResponses({});
   client.call = async () => { const error = new Error('Redirect'); error.status = 302; throw error; };
@@ -186,6 +207,13 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   ] };
   assert.equal(app.productMemoryReady, true);
   await app.createEntitlement();
+  assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
+  assert.equal(Object.hasOwn(submitted, 'lineItemType'), false);
+  assert.equal(Object.hasOwn(submitted, 'startDate'), false);
+  assert.equal(Object.hasOwn(submitted, 'neverExpires'), false);
+  assert.equal(Object.hasOwn(submitted, 'endDate'), false);
+  assert.equal(Object.hasOwn(submitted, 'numberOfKeys'), false);
+  assert.equal(Object.hasOwn(submitted, 'activationsPerKey'), false);
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);

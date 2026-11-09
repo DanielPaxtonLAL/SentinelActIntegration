@@ -18,6 +18,7 @@ if (fs.existsSync(envFile)) {
 const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE } = process.env;
 const PORT = process.env.PORT || 3000;
 const COMPLETE_PRODUCT_LIFECYCLE_STAGE = '2';
+const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 
 if (!EMS_URL || !EMS_USER || !EMS_PASS) {
   console.error('Set EMS_URL, EMS_USER and EMS_PASS in .env');
@@ -177,57 +178,18 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
   const {
     customerId,
     productIds,
-    enforcementId,
-    startDate,
-    endDate,
-    neverExpires,
-    numberOfKeys,
-    activationsPerKey,
-    numberOfUpdates,
-    haspIds,
-    lineItemType,
     description,
     refId1 = '',
     refId2 = '',
     memoryValues = [],
   } = req.body || {};
-  const isDate = (value) => {
-    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    const date = new Date(`${value}T00:00:00Z`);
-    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-  };
-  const isPositiveInteger = (value) => /^\d+$/.test(String(value)) && Number(value) > 0 && Number(value) <= 999999;
   const isId = (value) => /^\d+$/.test(String(value || '')) && Number(value) > 0;
 
-  if (!isId(customerId) || !isId(enforcementId) ||
+  if (!isId(customerId) ||
       !Array.isArray(productIds) || productIds.length === 0 || productIds.length > 100 ||
       productIds.some((id) => !isId(id)) ||
       new Set(productIds.map(String)).size !== productIds.length) {
-    return res.status(400).json({ error: 'Select a customer, add 1 to 100 unique EMS products, and enter a numeric enforcement ID' });
-  }
-  if (typeof neverExpires !== 'boolean' ||
-      !isDate(startDate) || (!neverExpires && !isDate(endDate)) ||
-      (!neverExpires && endDate < startDate)) {
-    return res.status(400).json({ error: 'Enter a valid start date and an end date on or after it' });
-  }
-  const validLineItemTypes = new Set(['Hardware_Key', 'Product_Key', 'ProtectionKey_Update']);
-  if (!validLineItemTypes.has(lineItemType)) {
-    return res.status(400).json({ error: 'Unsupported line item type' });
-  }
-  if (lineItemType === 'Product_Key' &&
-      (!isPositiveInteger(numberOfKeys) || !isPositiveInteger(activationsPerKey))) {
-    return res.status(400).json({ error: 'Number of product keys and activations per key must be between 1 and 999999' });
-  }
-  if (lineItemType === 'Hardware_Key' && !isPositiveInteger(activationsPerKey)) {
-    return res.status(400).json({ error: 'Number of keys must be between 1 and 999999' });
-  }
-  if (lineItemType === 'ProtectionKey_Update' &&
-      (!isPositiveInteger(numberOfUpdates) ||
-       !Array.isArray(haspIds) ||
-       haspIds.length === 0 ||
-       haspIds.length > 100 ||
-       haspIds.some((id) => typeof id !== 'string' || !id.trim() || id.length > 250))) {
-    return res.status(400).json({ error: 'Enter 1 to 100 protection key IDs (250 characters each maximum) and a valid number of updates' });
+    return res.status(400).json({ error: 'Select a customer and add 1 to 100 unique EMS products' });
   }
   if (typeof description !== 'string' || description.length > 510 ||
       typeof refId1 !== 'string' || refId1.length > 250 ||
@@ -254,8 +216,8 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       return res.status(400).json({ error: 'One or more selected products are not complete in EMS. Choose complete products and try again.' });
     }
     const enforcements = await withSession(() => ems.listEnforcements(vendorId));
-    if (!enforcements.some((enforcement) => String(enforcement.id) === String(enforcementId))) {
-      return res.status(400).json({ error: 'Select an enforcement that exists in EMS.' });
+    if (!enforcements.some((enforcement) => String(enforcement.id) === SENTINEL_LDK_ENFORCEMENT_ID)) {
+      return res.status(400).json({ error: 'Sentinel LDK enforcement (1) is not available in EMS.' });
     }
     const productFiles = Object.fromEntries(await Promise.all(productIds.map(async (productId) => [
       String(productId),
@@ -263,18 +225,18 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     ])));
     const memorySegments = validateMemoryValues(productIds, productFiles, memoryValues);
 
+    const today = new Date();
+    const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const result = await ems.createEntitlement({
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
       productIds,
-      enforcementId,
+      enforcementId: SENTINEL_LDK_ENFORCEMENT_ID,
       vendorId,
       startDate,
-      endDate: neverExpires ? '2500-12-31' : endDate,
-      numberOfKeys,
-      activationsPerKey,
-      numberOfUpdates,
-      haspIds,
-      lineItemType,
+      endDate: '2500-12-31',
+      numberOfKeys: 1,
+      activationsPerKey: 1,
+      lineItemType: 'Product_Key',
       description,
       refId1,
       refId2,

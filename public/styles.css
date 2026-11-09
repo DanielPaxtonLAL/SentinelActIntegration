@@ -302,9 +302,6 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .entitlement-form input:not([type="checkbox"]),
 .entitlements-page .entitlement-form select,
 .entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid #aaa; border-radius: 4px; font: inherit; font-weight: 400; }
-.entitlements-page .entitlement-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.entitlements-page .entitlement-form-row-full { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.entitlements-page .entitlement-form .entitlement-checkbox { display: flex; align-items: center; align-self: end; gap: .5rem; min-height: 2.5rem; }
 .entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
 .entitlements-page .form-hint { color: #666; }
 .entitlements-page .form-error { color: #b00020; }
@@ -383,11 +380,8 @@ td { overflow-wrap: anywhere; }
   .customers-page .details { padding: 1.25rem; }
   .entitlements-page { padding: 0; }
   .custom-entities-page main { padding: 1rem; }
-  .entitlements-page .entitlement-form-row,
-  .entitlements-page .entitlement-form-row:first-of-type { grid-template-columns: 1fr; }
   .entitlements-page .entitlements-subheading { align-items: stretch; flex-direction: column; }
   .entitlements-page .entitlement-filter { width: 100%; }
-  .entitlements-page .entitlement-form .entitlement-checkbox { align-self: auto; }
 }
 
 @media (max-width: 600px) {

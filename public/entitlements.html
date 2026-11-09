@@ -46,58 +46,6 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <div class="entitlement-form-row entitlement-form-row-full">
-          <label>
-            Enforcement
-            <select v-model="form.enforcementId" required :disabled="loading || enforcementsLoading || !enforcements.length">
-              <option value="" disabled>{{ enforcementsLoading ? 'Loading EMS enforcements…' : 'Select an enforcement' }}</option>
-              <option v-for="enforcement in enforcements" :key="enforcement.id" :value="String(enforcement.id)">
-                {{ enforcement.name }} ({{ enforcement.id }})
-              </option>
-            </select>
-          </label>
-          <label>
-            Entitlement type
-            <select v-model="form.lineItemType" :disabled="loading">
-              <option value="Hardware_Key">Hardware Key</option>
-              <option value="Product_Key">Product Key</option>
-              <option value="ProtectionKey_Update">Protection Key Update</option>
-            </select>
-          </label>
-        </div>
-        <p v-if="enforcementError" class="form-error" role="alert">{{ enforcementError }}</p>
-        <div class="entitlement-form-row">
-          <label>
-            Start date
-            <input v-model="form.startDate" type="date" required :disabled="loading">
-          </label>
-          <label class="entitlement-checkbox">
-            <input v-model="form.neverExpires" type="checkbox" :disabled="loading">
-            Never expires
-          </label>
-          <label v-if="!form.neverExpires">
-            End date
-            <input v-model="form.endDate" type="date" :min="form.startDate" required :disabled="loading">
-          </label>
-        </div>
-        <div class="entitlement-form-row">
-          <label v-if="form.lineItemType === 'Product_Key'">
-            Number of product keys
-            <input v-model.number="form.numberOfKeys" type="number" min="1" max="999999" step="1" required :disabled="loading">
-          </label>
-          <label v-if="form.lineItemType !== 'ProtectionKey_Update'">
-            {{ form.lineItemType === 'Product_Key' ? 'Activations per product key' : 'Number of keys' }}
-            <input v-model.number="form.activationsPerKey" type="number" min="1" max="999999" step="1" required :disabled="loading">
-          </label>
-          <label v-if="form.lineItemType === 'ProtectionKey_Update'">
-            Number of updates
-            <input v-model.number="form.numberOfUpdates" type="number" min="1" max="999999" step="1" required :disabled="loading">
-          </label>
-          <label v-if="form.lineItemType === 'ProtectionKey_Update'">
-            Protection key IDs
-            <input v-model.trim="form.haspIds" required :disabled="loading" placeholder="Separate multiple IDs with semicolons">
-          </label>
-        </div>
         <label>
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
@@ -171,10 +119,10 @@
           </ul>
           <p v-else class="form-hint">Add at least one product to this entitlement.</p>
         </div>
-        <p class="form-hint">Product and enforcement IDs must match in EMS. Saving creates a draft entitlement.</p>
+        <p class="form-hint">Products must use Sentinel LDK enforcement. Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || enforcementsLoading || !customers.length || !form.productIds.length || !form.enforcementId || !productMemoryReady">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || !customers.length || !form.productIds.length || !productMemoryReady">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -268,18 +216,15 @@
           customers: [],
           products: [],
           productMemory: {},
-          enforcements: [],
           selectedEntitlement: null,
           detailLoading: false,
           detailError: '',
           loading: false,
           customersLoading: false,
           productsLoading: false,
-          enforcementsLoading: false,
           error: '',
           customerError: '',
           productError: '',
-          enforcementError: '',
           notice: '',
           filter: '',
           createEntitlementOpen: false,
@@ -325,20 +270,10 @@
       },
       methods: {
         createEmptyForm() {
-          const today = new Date();
           return {
             customerId: '',
             productToAdd: '',
             productIds: [],
-            enforcementId: '',
-            startDate: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
-            endDate: '',
-            neverExpires: true,
-            numberOfKeys: 1,
-            activationsPerKey: 1,
-            numberOfUpdates: 1,
-            haspIds: '',
-            lineItemType: 'Hardware_Key',
             description: '',
           };
         },
@@ -351,7 +286,6 @@
           this.createEntitlementOpen = true;
           if (!this.customers.length && !this.customersLoading) this.loadCustomers();
           if (!this.products.length && !this.productsLoading) this.loadProducts();
-          if (!this.enforcements.length && !this.enforcementsLoading) this.loadEnforcements();
         },
         addProduct() {
           const productId = String(this.form.productToAdd);
@@ -414,25 +348,6 @@
             this.detailLoading = false;
           }
         },
-        async loadEnforcements() {
-          this.enforcementsLoading = true;
-          this.enforcementError = '';
-          try {
-            const response = await fetch('/api/enforcements');
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || response.statusText);
-            if (!Array.isArray(data)) throw new Error('The server returned an invalid enforcement list');
-            this.enforcements = data.filter((enforcement) =>
-              enforcement &&
-              /^\d+$/.test(String(enforcement.id)) &&
-              typeof enforcement.name === 'string'
-            );
-          } catch (err) {
-            this.enforcementError = 'Failed to load EMS enforcements: ' + err.message;
-          } finally {
-            this.enforcementsLoading = false;
-          }
-        },
         closeCreateEntitlement() {
           this.createEntitlementOpen = false;
           this.error = '';
@@ -492,9 +407,6 @@
                     : []
                 )
               ),
-              haspIds: this.form.lineItemType === 'ProtectionKey_Update'
-                ? this.form.haspIds.split(';').map((id) => id.trim()).filter(Boolean)
-                : [],
             };
             const response = await fetch('/api/entitlements', {
               method: 'POST',
