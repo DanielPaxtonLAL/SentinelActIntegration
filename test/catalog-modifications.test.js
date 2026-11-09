@@ -58,6 +58,17 @@ test('rejects invalid EMS data and identifies expired sessions', async () => {
   await assert.rejects(() => client.listModificationProducts(1), { status: 401 });
 });
 
+test('resolves base products by identifier, rejecting missing or ambiguous matches', async () => {
+  const search = '/vendor/2/product.ws?identifier=12345&pageIndex=1&pageSize=100';
+  const instance = '<instance id="60" identifier="12345" type="BASE" lifeCycleStage="Commit"/>';
+  assert.equal((await clientWithResponses({
+    [search]: `<listResponse>${instance}<instance id="61" identifier="12345" type="MODIFICATION"/></listResponse>`,
+  }).findBaseProductByIdentifier('12345')).id, '60');
+  for (const response of ['<listResponse count="0"/>', `<listResponse>${instance}<instance id="62" identifier="12345" type="BASE"/></listResponse>`]) {
+    await assert.rejects(() => clientWithResponses({ [search]: response }).findBaseProductByIdentifier('12345'), /Expected one base product/);
+  }
+});
+
 function catalogApp(fetch) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'catalog.html'), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];

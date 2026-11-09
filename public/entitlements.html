@@ -51,24 +51,29 @@
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
         <div class="product-picker-field">
-          <label for="product-picker">Products</label>
+          <label for="product-picker">Modification products (optional)</label>
           <div class="product-picker">
             <select id="product-picker" v-model="form.productToAdd" :disabled="loading || productsLoading || !availableProducts.length">
-              <option value="" disabled>{{ productsLoading ? 'Loading EMS products…' : 'Select a product' }}</option>
+              <option value="" disabled>{{ productsLoading ? 'Loading modification products…' : 'Select a modification product' }}</option>
               <option v-for="product in availableProducts" :key="product.productId" :value="String(product.productId)">
                 {{ product.productName.trim() }} ({{ product.productId }})
               </option>
             </select>
-            <button type="button" class="button--constructive" @click="addProduct" :disabled="loading || !form.productToAdd">Add</button>
+            <button type="button" class="button--constructive" @click="addProduct" :disabled="loading || !form.productToAdd || form.productIds.length >= 99">Add</button>
           </div>
-          <p v-if="productError" class="form-error" role="alert">{{ productError }}</p>
+          <div v-if="productError">
+            <p class="form-error" role="alert">{{ productError }}</p>
+            <button type="button" class="button--view" @click="loadProducts" :disabled="loading || productsLoading">Retry</button>
+          </div>
           <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">All available products have been added.</p>
-          <p v-else-if="!productsLoading && !products.length" class="form-hint">No EMS products are available.</p>
-          <ul v-if="form.productIds.length" class="selected-products">
-            <li v-for="productId in form.productIds" :key="productId">
+          <p v-else-if="!productsLoading && !products.length" class="form-hint">No complete modification products are available.</p>
+          <p v-if="form.productIds.length >= 99" class="form-hint">A maximum of 99 modification products can be added.</p>
+          <ul v-if="memoryProductIds.length" class="selected-products">
+            <li v-for="productId in memoryProductIds" :key="productId">
               <div class="selected-product-heading">
-                <span>{{ productLabel(productId) }}</span>
-                <button type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+                <span v-if="productId !== baseProductId">{{ productLabel(productId) }}</span>
+                <span v-else>Required memory values</span>
+                <button v-if="productId !== baseProductId" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
               </div>
               <div class="product-memory" aria-live="polite">
                 <h3>Read-only memory segments</h3>
@@ -117,12 +122,11 @@
               </div>
             </li>
           </ul>
-          <p v-else class="form-hint">Add at least one product to this entitlement.</p>
         </div>
         <p class="form-hint">Products must use Sentinel LDK enforcement. Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || !customers.length || !form.productIds.length || !productMemoryReady">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !productMemoryReady">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -206,7 +210,6 @@
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script>
-    const COMPLETE_PRODUCT_LIFECYCLE_STAGE = '2';
     const { createApp } = Vue;
 
     createApp({
@@ -215,6 +218,7 @@
           entitlements: [],
           customers: [],
           products: [],
+          baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
           detailLoading: false,
@@ -243,8 +247,11 @@
           const added = new Set(this.form.productIds);
           return this.products.filter((product) => !added.has(String(product.productId)));
         },
+        memoryProductIds() {
+          return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
+        },
         productMemoryReady() {
-          return this.form.productIds.every((id) => {
+          return Boolean(this.baseProductId) && this.memoryProductIds.every((id) => {
             const state = this.productMemory[id];
             return state && !state.loading && !state.error &&
               !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
@@ -285,11 +292,12 @@
           this.detailError = '';
           this.createEntitlementOpen = true;
           if (!this.customers.length && !this.customersLoading) this.loadCustomers();
-          if (!this.products.length && !this.productsLoading) this.loadProducts();
+          if (!this.baseProductId && !this.productsLoading) this.loadProducts();
+          else if (this.baseProductId && !this.productMemory[this.baseProductId]) this.loadProductMemory(this.baseProductId);
         },
         addProduct() {
           const productId = String(this.form.productToAdd);
-          if (!productId || !this.availableProducts.some((product) => String(product.productId) === productId)) return;
+          if (!productId || this.form.productIds.length >= 99 || !this.availableProducts.some((product) => String(product.productId) === productId)) return;
           this.form.productIds.push(productId);
           this.form.productToAdd = '';
           this.loadProductMemory(productId);
@@ -372,16 +380,18 @@
           this.productsLoading = true;
           this.productError = '';
           try {
-            const response = await fetch('/api/catalog/products');
+            const response = await fetch('/api/entitlement-products');
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
-            if (!Array.isArray(data)) throw new Error('The server returned an invalid product list');
-            this.products = data.filter((product) =>
-              product &&
-              /^\d+$/.test(String(product.productId)) &&
-              typeof product.productName === 'string' &&
-              String(product.lifeCycleStage) === COMPLETE_PRODUCT_LIFECYCLE_STAGE
-            );
+            if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
+                !Array.isArray(data.modifications) ||
+                data.modifications.some((product) => !product || !/^[1-9]\d*$/.test(String(product.productId)) ||
+                  typeof product.productName !== 'string')) {
+              throw new Error('The server returned an invalid modification product list');
+            }
+            this.baseProductId = String(data.baseProductId);
+            this.products = data.modifications;
+            await this.loadProductMemory(this.baseProductId);
           } catch (err) {
             this.productError = 'Failed to load EMS products: ' + err.message;
           } finally {
@@ -396,7 +406,7 @@
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
-              memoryValues: this.form.productIds.flatMap((productId) =>
+              memoryValues: this.memoryProductIds.flatMap((productId) =>
                 this.productMemory[productId].files.flatMap((file) =>
                   file.kind === 'product'
                     ? file.segments.filter((segment) => segment.saot).map((segment) => ({

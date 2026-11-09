@@ -17,8 +17,21 @@ if (fs.existsSync(envFile)) {
 
 const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE } = process.env;
 const PORT = process.env.PORT || 3000;
-const COMPLETE_PRODUCT_LIFECYCLE_STAGE = '2';
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
+const ENTITLEMENT_BASE_PRODUCT_IDENTIFIER = '12345';
+
+async function getEntitlementProducts() {
+  const vendorId = process.env.EMS_VENDOR_ID || '2';
+  const base = await withSession(() => ems.findBaseProductByIdentifier(ENTITLEMENT_BASE_PRODUCT_IDENTIFIER, vendorId));
+  if (String(base.lifeCycleStage).toLowerCase() !== 'commit') {
+    throw new Error(`Base product ${ENTITLEMENT_BASE_PRODUCT_IDENTIFIER} is not complete in EMS`);
+  }
+  const modifications = await withSession(() => ems.listModificationProducts(base.id, vendorId));
+  return {
+    baseProductId: String(base.id),
+    modifications: modifications.filter((product) => String(product.lifeCycleStage).toLowerCase() === 'commit'),
+  };
+}
 
 if (!EMS_URL || !EMS_USER || !EMS_PASS) {
   console.error('Set EMS_URL, EMS_USER and EMS_PASS in .env');
@@ -174,6 +187,19 @@ app.get('/api/catalog/products/:id/modifications', async (req, res) => {
   }
 });
 
+app.get('/api/entitlement-products', async (req, res) => {
+  try {
+    res.json(await getEntitlementProducts());
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.post('/api/entitlements', express.json(), async (req, res) => {
   const {
     customerId,
@@ -186,10 +212,10 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
   const isId = (value) => /^\d+$/.test(String(value || '')) && Number(value) > 0;
 
   if (!isId(customerId) ||
-      !Array.isArray(productIds) || productIds.length === 0 || productIds.length > 100 ||
+      !Array.isArray(productIds) || productIds.length > 99 ||
       productIds.some((id) => !isId(id)) ||
       new Set(productIds.map(String)).size !== productIds.length) {
-    return res.status(400).json({ error: 'Select a customer and add 1 to 100 unique EMS products' });
+    return res.status(400).json({ error: 'Select a customer and up to 99 unique modification products' });
   }
   if (typeof description !== 'string' || description.length > 510 ||
       typeof refId1 !== 'string' || refId1.length > 250 ||
@@ -208,28 +234,27 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     }
 
     const vendorId = process.env.EMS_VENDOR_ID || '2';
-    const products = await withSession(() => ems.listCatalog('products', vendorId));
-    const availableProductIds = new Set(products
-      .filter((product) => String(product.lifeCycleStage) === COMPLETE_PRODUCT_LIFECYCLE_STAGE)
-      .map((product) => String(product.productId)));
+    const { baseProductId, modifications } = await getEntitlementProducts();
+    const availableProductIds = new Set(modifications.map((product) => String(product.productId)));
     if (productIds.some((id) => !availableProductIds.has(String(id)))) {
-      return res.status(400).json({ error: 'One or more selected products are not complete in EMS. Choose complete products and try again.' });
+      return res.status(400).json({ error: 'One or more selected products are not complete modifications of the required base product.' });
     }
+    const allProductIds = [baseProductId, ...productIds.map(String)];
     const enforcements = await withSession(() => ems.listEnforcements(vendorId));
     if (!enforcements.some((enforcement) => String(enforcement.id) === SENTINEL_LDK_ENFORCEMENT_ID)) {
       return res.status(400).json({ error: 'Sentinel LDK enforcement (1) is not available in EMS.' });
     }
-    const productFiles = Object.fromEntries(await Promise.all(productIds.map(async (productId) => [
+    const productFiles = Object.fromEntries(await Promise.all(allProductIds.map(async (productId) => [
       String(productId),
       await withSession(() => ems.getProductReadOnlyMemory(productId)),
     ])));
-    const memorySegments = validateMemoryValues(productIds, productFiles, memoryValues);
+    const memorySegments = validateMemoryValues(allProductIds, productFiles, memoryValues);
 
     const today = new Date();
     const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const result = await ems.createEntitlement({
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
-      productIds,
+      productIds: allProductIds,
       enforcementId: SENTINEL_LDK_ENFORCEMENT_ID,
       vendorId,
       startDate,

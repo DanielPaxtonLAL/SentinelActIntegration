@@ -4,15 +4,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12)) {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = []) {
   let handler;
   let saved;
   class EmsClient {
     constructor() { this.authenticated = true; }
     async listCustomers() { return [{ customerId: '5' }]; }
-    async listCatalog() { return [{ productId: '12', lifeCycleStage: '2' }]; }
+    async findBaseProductByIdentifier(identifier) {
+      assert.equal(identifier, '12345');
+      return { id: '60', lifeCycleStage: 'Commit' };
+    }
+    async listModificationProducts(id) {
+      assert.equal(id, '60');
+      return [{ productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
+        { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
+    }
     async listEnforcements() { return enforcements; }
-    async getProductReadOnlyMemory() { return []; }
+    async getProductReadOnlyMemory(id) { return String(id) === '60' ? baseMemory : []; }
     async createEntitlement(data) { saved = data; return { saved: true }; }
   }
   const app = {
@@ -102,4 +110,31 @@ test('entitlement creation always uses Product Key with one key and one activati
     assert.equal(saved.numberOfKeys, 1);
     assert.equal(saved.activationsPerKey, 1);
   }
+});
+
+test('automatically includes the base product and restricts selected modifications', async () => {
+  for (const productIds of [[], ['12']]) {
+    const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
+    assert.equal(res.statusCode, 201);
+    assert.deepEqual(Array.from(saved.productIds), ['60', ...productIds]);
+  }
+  for (const productIds of [['60'], ['13'], ['99'], ['12', '12']]) {
+    const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
+    assert.equal(res.statusCode, 400);
+    assert.equal(saved, undefined);
+  }
+});
+
+test('requires and forwards the automatically included base product SAOT values', async () => {
+  const baseMemory = [{ kind: 'product', segments: [{ id: '90', size: '2', name: 'Serial', saot: true }] }];
+  const route = () => createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), baseMemory);
+  const missing = await route().submit({ productIds: [] });
+  assert.equal(missing.res.statusCode, 400);
+  assert.match(missing.res.body.error, /every SAOT/);
+  const valid = await route().submit({
+    productIds: [], memoryValues: [{ productId: '60', segmentId: '90', content: '00ab' }],
+  });
+  assert.equal(valid.res.statusCode, 201);
+  assert.equal(valid.saved.memorySegments[0].id, '90');
+  assert.equal(valid.saved.memorySegments[0].content, '00AB');
 });

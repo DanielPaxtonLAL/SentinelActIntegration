@@ -128,9 +128,50 @@ class EmsClient {
     return Array.isArray(inst) ? inst : (inst ? [inst] : []);
   }
 
+  async listProductsByIdentifier(identifier, vendorId = '2') {
+    if (!/^\d+$/.test(String(identifier))) throw new Error('Product identifier must be numeric');
+    if (!/^[1-9]\d*$/.test(String(vendorId))) throw new Error('Vendor ID must be a positive number');
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
+    const pageSize = 100;
+    const products = [];
+    const seenIds = new Set();
+    for (let page = 1; ; page++) {
+      const path = `/vendor/${vendorId}/product.ws?identifier=${encodeURIComponent(identifier)}&pageIndex=${page}&pageSize=${pageSize}`;
+      let xml;
+      try {
+        xml = await this.call(path);
+      } catch (err) {
+        if (err.status === 302) err.status = 401;
+        throw err;
+      }
+      const list = parser.parse(xml)?.listResponse;
+      if (!list || typeof list !== 'object') throw new Error('EMS returned an invalid product search result');
+      const instances = list.instance === undefined || list.instance === ''
+        ? [] : (Array.isArray(list.instance) ? list.instance : [list.instance]);
+      if (instances.some((entry) => !entry || typeof entry !== 'object' ||
+          !/^[1-9]\d*$/.test(String(entry.id)) || typeof entry.type !== 'string' ||
+          !/^\d+$/.test(String(entry.identifier)))) {
+        throw new Error('EMS returned an invalid product search entry');
+      }
+      for (const entry of instances) {
+        if (seenIds.has(String(entry.id))) throw new Error('EMS returned duplicate products while paging');
+        seenIds.add(String(entry.id));
+      }
+      products.push(...instances.filter((entry) => String(entry.identifier) === String(identifier)));
+      if (instances.length < pageSize) break;
+    }
+    return products;
+  }
+
+  async findBaseProductByIdentifier(identifier, vendorId = '2') {
+    const products = await this.listProductsByIdentifier(identifier, vendorId);
+    const bases = products.filter((entry) => entry.type.toUpperCase() === 'BASE');
+    if (bases.length !== 1) throw new Error(`Expected one base product with identifier ${identifier} in EMS; found ${bases.length}`);
+    return bases[0];
+  }
+
   async listModificationProducts(productId, vendorId = '2') {
     if (!/^[1-9]\d*$/.test(String(productId))) throw new Error('Product ID must be a positive number');
-    if (!/^[1-9]\d*$/.test(String(vendorId))) throw new Error('Vendor ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
     const getXml = async (path) => {
       try {
@@ -144,31 +185,8 @@ class EmsClient {
     if (!base || typeof base !== 'object' || !/^\d+$/.test(String(base.productIdentifier))) {
       throw new Error('EMS returned invalid base product details');
     }
-
-    const pageSize = 100;
-    const candidates = [];
-    const seenIds = new Set();
-    for (let page = 1; ; page++) {
-      const path = `/vendor/${vendorId}/product.ws?identifier=${encodeURIComponent(base.productIdentifier)}&pageIndex=${page}&pageSize=${pageSize}`;
-      const list = (await getXml(path))?.listResponse;
-      if (!list || typeof list !== 'object') throw new Error('EMS returned an invalid product search result');
-      const instances = list.instance === undefined || list.instance === ''
-        ? [] : (Array.isArray(list.instance) ? list.instance : [list.instance]);
-      if (instances.some((entry) => !entry || typeof entry !== 'object' ||
-          !/^[1-9]\d*$/.test(String(entry.id)) || typeof entry.type !== 'string' ||
-          !/^\d+$/.test(String(entry.identifier)))) {
-        throw new Error('EMS returned an invalid product search entry');
-      }
-      for (const entry of instances) {
-        if (seenIds.has(String(entry.id))) throw new Error('EMS returned duplicate products while paging');
-        seenIds.add(String(entry.id));
-      }
-      candidates.push(...instances.filter((entry) =>
-        entry.type.toUpperCase() === 'MODIFICATION' &&
-        String(entry.identifier) === String(base.productIdentifier)
-      ));
-      if (instances.length < pageSize) break;
-    }
+    const candidates = (await this.listProductsByIdentifier(base.productIdentifier, vendorId))
+      .filter((entry) => entry.type.toUpperCase() === 'MODIFICATION');
 
     const matches = [];
     for (let i = 0; i < candidates.length; i += 10) {

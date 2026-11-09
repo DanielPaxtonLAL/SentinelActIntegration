@@ -143,6 +143,7 @@ function entitlementApp(fetch) {
   const app = { ...definition.methods };
   Object.assign(app, definition.data.call(app));
   Object.defineProperty(app, 'availableProducts', { get: () => definition.computed.availableProducts.call(app) });
+  Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
@@ -179,11 +180,29 @@ test('memory lookup failures are visible and can be retried', async () => {
   assert.equal(app.productMemory['12'].files.length, 0);
 });
 
+test('loads modification products and required base memory for creation', async () => {
+  const requests = [];
+  const app = entitlementApp(async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => url === '/api/entitlement-products'
+      ? { baseProductId: '60', modifications: [{ productId: '12', productName: 'Update' }] }
+      : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
+  });
+  await app.loadProducts();
+  assert.deepEqual(requests, ['/api/entitlement-products', '/api/catalog/products/60/read-only-memory']);
+  assert.equal(app.baseProductId, '60');
+  assert.equal(app.availableProducts[0].productId, '12');
+  assert.equal(app.productMemoryReady, true);
+  assert.equal(app.productMemory['60'].files[0].segments[0].value, '0000');
+});
+
 test('form blocks saving while memory is unavailable or dynamic SAOT is unsupported', async () => {
   const app = entitlementApp(async () => ({
     ok: true, json: async () => [{ kind: 'dynamic', segments: [{ saot: true }] }],
   }));
   app.form.productIds = ['12'];
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [] };
   assert.equal(app.productMemoryReady, false);
   await app.loadProductMemory('12');
   assert.equal(app.productMemoryReady, false);
@@ -199,6 +218,10 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   });
   app.loadEntitlements = async () => {};
   app.form.productIds = ['12'];
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [
+    { kind: 'product', segments: [{ id: '3', saot: true, value: '00AA' }] },
+  ] };
   app.productMemory['12'] = { loading: false, error: '', files: [
     { kind: 'product', segments: [
       { id: '1', saot: true, value: '00FF' },
@@ -215,6 +238,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   assert.equal(Object.hasOwn(submitted, 'numberOfKeys'), false);
   assert.equal(Object.hasOwn(submitted, 'activationsPerKey'), false);
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
+    { productId: '60', segmentId: '3', content: '00AA' },
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
 });
