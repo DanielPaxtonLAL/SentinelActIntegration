@@ -50,8 +50,18 @@
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
+        <fieldset class="access-products">
+          <legend>Product options</legend>
+          <p class="form-hint">Select Link, Standalone, or both.</p>
+          <label v-for="product in accessProducts" :key="product.id" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(product.id)"
+              @change="setAccessProduct(product.id, $event.target.checked)"
+              :disabled="loading || productsLoading || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+            {{ product.label }}
+          </label>
+        </fieldset>
         <div class="product-picker-field">
-          <label for="product-picker">Modification products (optional)</label>
+          <label for="product-picker">Additional modification products (optional)</label>
           <div class="product-picker">
             <select id="product-picker" v-model="form.productToAdd" :disabled="loading || productsLoading || !availableProducts.length">
               <option value="" disabled>{{ productsLoading ? 'Loading modification products…' : 'Select a modification product' }}</option>
@@ -65,15 +75,15 @@
             <p class="form-error" role="alert">{{ productError }}</p>
             <button type="button" class="button--view" @click="loadProducts" :disabled="loading || productsLoading">Retry</button>
           </div>
-          <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">All available products have been added.</p>
+          <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">No additional modification products are available to add.</p>
           <p v-else-if="!productsLoading && !products.length" class="form-hint">No complete modification products are available.</p>
           <p v-if="form.productIds.length >= 99" class="form-hint">A maximum of 99 modification products can be added.</p>
-          <ul v-if="memoryProductIds.length" class="selected-products">
-            <li v-for="productId in memoryProductIds" :key="productId">
+          <ul v-if="displayedMemoryProductIds.length" class="selected-products">
+            <li v-for="productId in displayedMemoryProductIds" :key="productId">
               <div class="selected-product-heading">
                 <span v-if="productId !== baseProductId">{{ productLabel(productId) }}</span>
                 <span v-else>Required memory values</span>
-                <button v-if="productId !== baseProductId" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+                <button v-if="productId !== baseProductId && !isAccessProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
               </div>
               <div class="product-memory" aria-live="polite">
                 <h3>Read-only memory segments</h3>
@@ -126,7 +136,7 @@
         <p class="form-hint">Products must use Sentinel LDK enforcement. Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !productMemoryReady">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -218,6 +228,7 @@
           entitlements: [],
           customers: [],
           products: [],
+          accessProducts: [],
           baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
@@ -245,10 +256,20 @@
         },
         availableProducts() {
           const added = new Set(this.form.productIds);
-          return this.products.filter((product) => !added.has(String(product.productId)));
+          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isAccessProduct(String(product.productId)));
+        },
+        hasAccessProduct() {
+          return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
         },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
+        },
+        displayedMemoryProductIds() {
+          return this.memoryProductIds.filter((id) => {
+            if (!this.isAccessProduct(id)) return true;
+            const state = this.productMemory[id];
+            return !state || state.loading || state.error || state.files.some((file) => file.segments.length);
+          });
         },
         productMemoryReady() {
           return Boolean(this.baseProductId) && this.memoryProductIds.every((id) => {
@@ -301,6 +322,22 @@
           this.form.productIds.push(productId);
           this.form.productToAdd = '';
           this.loadProductMemory(productId);
+        },
+        isAccessProduct(productId) {
+          return this.accessProducts.some((product) => product.id === productId);
+        },
+        setAccessProduct(productId, checked) {
+          if (!this.isAccessProduct(productId)) return;
+          if (checked && !this.form.productIds.includes(productId)) {
+            if (this.form.productIds.length >= 99) {
+              this.error = 'A maximum of 99 modification products can be added.';
+              return;
+            }
+            this.form.productIds.push(productId);
+            this.loadProductMemory(productId);
+          } else if (!checked) {
+            this.removeProduct(productId);
+          }
         },
         removeProduct(productId) {
           this.form.productIds = this.form.productIds.filter((id) => id !== productId);
@@ -385,12 +422,16 @@
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
                 !Array.isArray(data.modifications) ||
+                !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
+                data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
                 data.modifications.some((product) => !product || !/^[1-9]\d*$/.test(String(product.productId)) ||
                   typeof product.productName !== 'string')) {
               throw new Error('The server returned an invalid modification product list');
             }
             this.baseProductId = String(data.baseProductId);
             this.products = data.modifications;
+            this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
             await this.loadProductMemory(this.baseProductId);
           } catch (err) {
             this.productError = 'Failed to load EMS products: ' + err.message;

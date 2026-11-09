@@ -19,6 +19,10 @@ const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYP
 const PORT = process.env.PORT || 3000;
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 const ENTITLEMENT_BASE_PRODUCT_IDENTIFIER = '12345';
+const ENTITLEMENT_ACCESS_PRODUCTS = [
+  { id: '6048', name: '01 ADD Standalone', label: 'Standalone' },
+  { id: '6049', name: '02 ADD Link', label: 'Link' },
+];
 
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
@@ -27,9 +31,18 @@ async function getEntitlementProducts() {
     throw new Error(`Base product ${ENTITLEMENT_BASE_PRODUCT_IDENTIFIER} is not complete in EMS`);
   }
   const modifications = await withSession(() => ems.listModificationProducts(base.id, vendorId));
+  const complete = modifications.filter((product) => String(product.lifeCycleStage).toLowerCase() === 'commit');
+  for (const required of ENTITLEMENT_ACCESS_PRODUCTS) {
+    if (!complete.some((product) => String(product.productId) === required.id &&
+        typeof product.productName === 'string' &&
+        product.productName.trim().toLowerCase() === required.name.toLowerCase())) {
+      throw new Error(`Required ${required.label} modification product ${required.id} is missing, renamed, or not complete in EMS`);
+    }
+  }
   return {
     baseProductId: String(base.id),
-    modifications: modifications.filter((product) => String(product.lifeCycleStage).toLowerCase() === 'commit'),
+    modifications: complete,
+    accessProducts: ENTITLEMENT_ACCESS_PRODUCTS.map(({ id, label }) => ({ id, label })),
   };
 }
 
@@ -238,6 +251,9 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     const availableProductIds = new Set(modifications.map((product) => String(product.productId)));
     if (productIds.some((id) => !availableProductIds.has(String(id)))) {
       return res.status(400).json({ error: 'One or more selected products are not complete modifications of the required base product.' });
+    }
+    if (!ENTITLEMENT_ACCESS_PRODUCTS.some((product) => productIds.map(String).includes(product.id))) {
+      return res.status(400).json({ error: 'Select Link, Standalone, or both.' });
     }
     const allProductIds = [baseProductId, ...productIds.map(String)];
     const enforcements = await withSession(() => ems.listEnforcements(vendorId));

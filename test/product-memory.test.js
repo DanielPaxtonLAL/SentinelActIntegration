@@ -144,6 +144,8 @@ function entitlementApp(fetch) {
   Object.assign(app, definition.data.call(app));
   Object.defineProperty(app, 'availableProducts', { get: () => definition.computed.availableProducts.call(app) });
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
+  Object.defineProperty(app, 'hasAccessProduct', { get: () => definition.computed.hasAccessProduct.call(app) });
+  Object.defineProperty(app, 'displayedMemoryProductIds', { get: () => definition.computed.displayedMemoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
@@ -185,7 +187,11 @@ test('loads modification products and required base memory for creation', async 
   const app = entitlementApp(async (url) => {
     requests.push(url);
     return { ok: true, json: async () => url === '/api/entitlement-products'
-      ? { baseProductId: '60', modifications: [{ productId: '12', productName: 'Update' }] }
+      ? { baseProductId: '60', modifications: [
+        { productId: '12', productName: 'Update' },
+        { productId: '6048', productName: 'Standalone' },
+        { productId: '6049', productName: 'Link' },
+      ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }] }
       : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
   });
   await app.loadProducts();
@@ -194,6 +200,26 @@ test('loads modification products and required base memory for creation', async 
   assert.equal(app.availableProducts[0].productId, '12');
   assert.equal(app.productMemoryReady, true);
   assert.equal(app.productMemory['60'].files[0].segments[0].value, '0000');
+});
+
+test('access checkboxes allow either or both and do not duplicate dropdown products', async () => {
+  const app = entitlementApp(async () => ({ ok: true, json: async () => [] }));
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.accessProducts = [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }];
+  app.products = [{ productId: '6048' }, { productId: '6049' }, { productId: '12' }];
+  assert.equal(app.availableProducts.length, 1);
+  assert.equal(app.hasAccessProduct, false);
+  app.setAccessProduct('6048', true);
+  await new Promise(setImmediate);
+  assert.equal(app.hasAccessProduct, true);
+  assert.deepEqual(Array.from(app.displayedMemoryProductIds), ['60']);
+  app.setAccessProduct('6049', true);
+  await new Promise(setImmediate);
+  app.setAccessProduct('6048', false);
+  assert.equal(app.hasAccessProduct, true);
+  app.setAccessProduct('6049', false);
+  assert.equal(app.hasAccessProduct, false);
 });
 
 test('form blocks saving while memory is unavailable or dynamic SAOT is unsupported', async () => {

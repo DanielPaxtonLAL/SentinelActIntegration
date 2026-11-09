@@ -16,7 +16,9 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     }
     async listModificationProducts(id) {
       assert.equal(id, '60');
-      return [{ productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
+      return [{ productId: '6048', productName: '01 ADD Standalone', lifeCycleStage: 'Commit' },
+        { productId: '6049', productName: '02 ADD Link', lifeCycleStage: 'Commit' },
+        { productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
     async listEnforcements() { return enforcements; }
@@ -53,7 +55,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   return {
     async submit(overrides = {}) {
       const req = { body: {
-        customerId: '5', productIds: ['12'],
+        customerId: '5', productIds: ['6048'],
         description: '', ...overrides,
       } };
       const res = {
@@ -112,13 +114,13 @@ test('entitlement creation always uses Product Key with one key and one activati
   }
 });
 
-test('automatically includes the base product and restricts selected modifications', async () => {
-  for (const productIds of [[], ['12']]) {
+test('requires Link or Standalone and includes the base product', async () => {
+  for (const productIds of [['6048'], ['6049'], ['6048', '6049'], ['6049', '12']]) {
     const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
     assert.equal(res.statusCode, 201);
     assert.deepEqual(Array.from(saved.productIds), ['60', ...productIds]);
   }
-  for (const productIds of [['60'], ['13'], ['99'], ['12', '12']]) {
+  for (const productIds of [[], ['12'], ['60'], ['13'], ['99'], ['6048', '6048']]) {
     const { res, saved } = await createRoute([{ id: '1' }]).submit({ productIds });
     assert.equal(res.statusCode, 400);
     assert.equal(saved, undefined);
@@ -128,11 +130,11 @@ test('automatically includes the base product and restricts selected modificatio
 test('requires and forwards the automatically included base product SAOT values', async () => {
   const baseMemory = [{ kind: 'product', segments: [{ id: '90', size: '2', name: 'Serial', saot: true }] }];
   const route = () => createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), baseMemory);
-  const missing = await route().submit({ productIds: [] });
+  const missing = await route().submit({ productIds: ['6048'] });
   assert.equal(missing.res.statusCode, 400);
   assert.match(missing.res.body.error, /every SAOT/);
   const valid = await route().submit({
-    productIds: [], memoryValues: [{ productId: '60', segmentId: '90', content: '00ab' }],
+    productIds: ['6048'], memoryValues: [{ productId: '60', segmentId: '90', content: '00ab' }],
   });
   assert.equal(valid.res.statusCode, 201);
   assert.equal(valid.saved.memorySegments[0].id, '90');
