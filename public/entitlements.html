@@ -118,8 +118,40 @@
           <p v-else-if="!productsLoading && !products.length" class="form-hint">No EMS products are available.</p>
           <ul v-if="form.productIds.length" class="selected-products">
             <li v-for="productId in form.productIds" :key="productId">
-              <span>{{ productLabel(productId) }}</span>
-              <button type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+              <div class="selected-product-heading">
+                <span>{{ productLabel(productId) }}</span>
+                <button type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+              </div>
+              <div class="product-memory" aria-live="polite">
+                <h3>Read-only memory segments</h3>
+                <p v-if="productMemory[productId]?.loading" class="form-hint" role="status">Loading memory segments…</p>
+                <div v-else-if="productMemory[productId]?.error">
+                  <p class="form-error" role="alert">{{ productMemory[productId].error }}</p>
+                  <button type="button" class="button--view" @click="loadProductMemory(productId)">Retry</button>
+                </div>
+                <template v-else-if="productMemory[productId]">
+                  <p v-if="!productMemory[productId].files.length" class="form-hint">No read-only memory segments are associated with this product.</p>
+                  <section v-for="file in productMemory[productId].files" :key="file.kind + '-' + (file.memoryId || '')" class="product-memory-file">
+                    <h4 v-if="file.kind === 'product'">Product memory</h4>
+                    <h4 v-else>{{ displayValue(file.memoryName) }} (Memory ID {{ file.memoryId }}, File ID {{ displayValue(file.fileId) }})</h4>
+                    <p v-if="!file.segments.length" class="form-hint">No segments are defined for this memory file.</p>
+                    <div v-else class="table-wrap">
+                      <table>
+                        <thead><tr><th>Name</th><th>Description</th><th>Offset</th><th>Size (bytes)</th><th>Content (hex)</th></tr></thead>
+                        <tbody>
+                          <tr v-for="(segment, index) in file.segments" :key="index">
+                            <td>{{ displayValue(segment.name) }}</td>
+                            <td>{{ displayValue(segment.description) }}</td>
+                            <td>{{ displayValue(segment.offset) }}</td>
+                            <td>{{ displayValue(segment.size) }}</td>
+                            <td>{{ displayValue(segment.content) }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </template>
+              </div>
             </li>
           </ul>
           <p v-else class="form-hint">Add at least one product to this entitlement.</p>
@@ -220,6 +252,7 @@
           entitlements: [],
           customers: [],
           products: [],
+          productMemory: {},
           enforcements: [],
           selectedEntitlement: null,
           detailLoading: false,
@@ -303,9 +336,26 @@
           if (!productId || !this.availableProducts.some((product) => String(product.productId) === productId)) return;
           this.form.productIds.push(productId);
           this.form.productToAdd = '';
+          this.loadProductMemory(productId);
         },
         removeProduct(productId) {
           this.form.productIds = this.form.productIds.filter((id) => id !== productId);
+          delete this.productMemory[productId];
+        },
+        async loadProductMemory(productId) {
+          this.productMemory[productId] = { loading: true, error: '', files: [] };
+          const state = this.productMemory[productId];
+          try {
+            const response = await fetch(`/api/catalog/products/${encodeURIComponent(productId)}/read-only-memory`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid memory list');
+            state.files = data;
+          } catch (err) {
+            state.error = 'Failed to load read-only memory segments: ' + err.message;
+          } finally {
+            state.loading = false;
+          }
         },
         productLabel(productId) {
           const product = this.products.find((item) => String(item.productId) === productId);
@@ -416,6 +466,7 @@
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.createEntitlementOpen = false;
             this.form = this.createEmptyForm();
+            this.productMemory = {};
             this.notice = 'Entitlement saved as a draft.';
           } catch (err) {
             this.error = 'Failed to create entitlement: ' + err.message;

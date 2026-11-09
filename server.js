@@ -138,6 +138,22 @@ app.get('/api/catalog/:category', async (req, res) => {
   }
 });
 
+app.get('/api/catalog/products/:id/read-only-memory', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Product ID must be a positive number' });
+  }
+  try {
+    res.json(await withSession(() => ems.getProductReadOnlyMemory(req.params.id)));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.post('/api/entitlements', express.json(), async (req, res) => {
   const {
     customerId,

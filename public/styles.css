@@ -286,8 +286,12 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .product-picker select { flex: 1; }
 .entitlements-page .product-picker button { padding: 0 .75rem; }
 .entitlements-page .selected-products { display: grid; gap: .4rem; margin: .25rem 0 0; padding: 0; list-style: none; }
-.entitlements-page .selected-products li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .5rem .65rem; border: 1px solid #ddd; border-radius: 4px; background: #f8f8f8; }
+.entitlements-page .selected-products > li { min-width: 0; padding: .5rem .65rem; border: 1px solid #ddd; border-radius: 4px; background: #f8f8f8; }
+.entitlements-page .selected-product-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .entitlements-page .selected-products li span { overflow-wrap: anywhere; }
+.entitlements-page .product-memory h3 { margin: .75rem 0 .4rem; font-size: 1rem; }
+.entitlements-page .product-memory h4 { margin: .6rem 0 .35rem; font-size: .9rem; }
+.entitlements-page .product-memory td { overflow-wrap: anywhere; }
 .entitlements-page .entitlement-form input:not([type="checkbox"]),
 .entitlements-page .entitlement-form select,
 .entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid #aaa; border-radius: 4px; font: inherit; font-weight: 400; }

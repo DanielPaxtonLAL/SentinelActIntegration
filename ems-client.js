@@ -128,6 +128,69 @@ class EmsClient {
     return Array.isArray(inst) ? inst : (inst ? [inst] : []);
   }
 
+  async getProductReadOnlyMemory(id) {
+    if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Product ID must be a positive number');
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
+    const getXml = async (path) => {
+      try {
+        return await this.call(path);
+      } catch (err) {
+        if (err.status === 302) err.status = 401;
+        throw err;
+      }
+    };
+    const product = parser.parse(await getXml(`/product/${id}.ws`))?.product;
+    if (!product || typeof product !== 'object') throw new Error('EMS returned invalid product details');
+
+    const asList = (value) => value === undefined || value === '' ? [] : (Array.isArray(value) ? value : [value]);
+    const segmentFields = ({ name, description, offset, size, content, text }) => ({
+      name, description, offset, size, content: content ?? text,
+    });
+    const staticSegments = asList(product.memorySegment).filter((segment) => {
+      if (!segment || typeof segment !== 'object') throw new Error('EMS returned an invalid product memory segment');
+      const types = asList(segment.memoryType);
+      if (!types.length || types.some((type) => !type || !['1', '2'].includes(String(type.id)))) {
+        throw new Error('EMS returned a product memory segment without a valid memory type');
+      }
+      return types.some((type) => String(type.id) === '2');
+    }).map(segmentFields);
+    const staticFiles = staticSegments.length ? [{ kind: 'product', segments: staticSegments }] : [];
+    const references = asList(product.dynamicMemoriesRef);
+    const memories = references.flatMap((refs) => {
+      if (!refs || typeof refs !== 'object') throw new Error('EMS returned invalid product memory references');
+      return asList(refs.dynamicMemory);
+    });
+
+    const files = await Promise.all(memories.map(async (reference) => {
+      if (!reference || typeof reference !== 'object' || !/^[1-9]\d*$/.test(String(reference.memoryId))) {
+        throw new Error('EMS returned an invalid product memory ID');
+      }
+      const memory = parser.parse(await getXml(`/dynamicMemory/${reference.memoryId}.ws`))?.dynamicMemory;
+      if (!memory || typeof memory !== 'object' || !['1', '2'].includes(String(memory.memoryType))) {
+        throw new Error(`EMS returned invalid details for memory ${reference.memoryId}`);
+      }
+      if (String(memory.memoryType) !== '2') return null;
+
+      const container = reference.memories === undefined ? memory.memories : reference.memories;
+      if (container !== undefined && container !== '' && (!container || typeof container !== 'object')) {
+        throw new Error(`EMS returned invalid segments for memory ${reference.memoryId}`);
+      }
+      const segments = container && container.memorySegment;
+      const segmentList = asList(segments);
+      if (segmentList.some((segment) => !segment || typeof segment !== 'object')) {
+        throw new Error(`EMS returned invalid segments for memory ${reference.memoryId}`);
+      }
+      return {
+        kind: 'dynamic',
+        memoryId: String(reference.memoryId),
+        memoryName: memory.memoryName,
+        fileId: memory.fileId,
+        segments: segmentList.map(segmentFields),
+      };
+    }));
+    return [...staticFiles, ...files.filter(Boolean)];
+  }
+
   async getEntitlementDetails(id) {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
