@@ -148,6 +148,7 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
   Object.defineProperty(app, 'otherOptionalProducts', { get: () => definition.computed.otherOptionalProducts.call(app) });
   Object.defineProperty(app, 'leaseSelected', { get: () => definition.computed.leaseSelected.call(app) });
+  Object.defineProperty(app, 'selectedVersionId', { get: () => definition.computed.selectedVersionId.call(app) });
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'displayedMemoryProductIds', { get: () => definition.computed.displayedMemoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
@@ -197,8 +198,10 @@ test('loads modification products and required base memory for creation', async 
         { productId: '6049', productName: 'Link' },
         { productId: '6051', productName: 'Pivot' },
         { productId: '6050', productName: 'Lease' },
+        { productId: '6052', productName: 'Version 23' },
       ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }],
-      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', available: true }] }
+      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', available: true }],
+      versionProducts: [{ id: '6052', label: 'Version 23', available: true }] }
       : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
   });
   await app.loadProducts();
@@ -207,6 +210,35 @@ test('loads modification products and required base memory for creation', async 
   assert.equal(app.availableProducts[0].productId, '12');
   assert.equal(app.productMemoryReady, true);
   assert.equal(app.productMemory['60'].files[0].segments[0].value, '0000');
+});
+
+test('version radios select one modification and leave as is removes it', async () => {
+  const requests = [];
+  const app = entitlementApp(async (url) => {
+    requests.push(url);
+    return { ok: true, json: async () => [{ kind: 'product', segments: [{ id: '4', saot: true, content: '0000' }] }] };
+  });
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.versionProducts = [{ id: '6052', label: 'Version 23', available: true }];
+  app.products = [{ productId: '6052' }, { productId: '12' }];
+  assert.equal(app.selectedVersionId, '');
+  assert.deepEqual(Array.from(app.availableProducts, (product) => product.productId), ['12']);
+  app.setVersionProduct('6052');
+  assert.equal(app.selectedVersionId, '6052');
+  assert.equal(app.productMemoryReady, false);
+  await new Promise(setImmediate);
+  assert.equal(requests[0], '/api/catalog/products/6052/read-only-memory');
+  assert.equal(app.productMemoryReady, true);
+  assert.equal(app.productMemory['6052'].files[0].segments[0].value, '0000');
+  app.setVersionProduct('');
+  assert.equal(app.selectedVersionId, '');
+  assert.equal(app.productMemory['6052'], undefined);
+  app.versionProducts[0].available = false;
+  app.setVersionProduct('6052');
+  assert.equal(app.selectedVersionId, '');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  assert.match(html, /<legend>Versions<\/legend>[\s\S]*?type="radio" name="version"[\s\S]*?Version 22 \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
 });
 
 test('lease checkbox controls the base expiry value and loads lease memory', async () => {

@@ -91,6 +91,21 @@
             <p v-else class="form-error" role="alert">Unable to find a unique editable base product expiry date. Reload its memory before saving.</p>
           </div>
         </fieldset>
+        <fieldset class="access-products">
+          <legend>Versions</legend>
+          <label class="access-product-option">
+            <input type="radio" name="version" :checked="!selectedVersionId"
+              @change="setVersionProduct('')" :disabled="loading || productsLoading">
+            Version 22 (default)
+          </label>
+          <label v-for="product in versionProducts" :key="product.id" class="access-product-option">
+            <input type="radio" name="version" :checked="selectedVersionId === product.id"
+              @change="setVersionProduct(product.id)"
+              :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !selectedVersionId)">
+            {{ product.label }}
+            <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
+          </label>
+        </fieldset>
         <div class="product-picker-field">
           <label for="product-picker">Additional modification products (optional)</label>
           <div class="product-picker">
@@ -114,7 +129,7 @@
               <div class="selected-product-heading">
                 <span v-if="productId !== baseProductId">{{ productLabel(productId) }}</span>
                 <span v-else>Required memory values</span>
-                <button v-if="productId !== baseProductId && !isCheckboxProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
+                <button v-if="productId !== baseProductId && !isChoiceProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
               </div>
               <div class="product-memory" aria-live="polite">
                 <h3>Read-only memory segments</h3>
@@ -263,6 +278,7 @@
           products: [],
           accessProducts: [],
           optionalProducts: [],
+          versionProducts: [],
           baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
@@ -290,7 +306,7 @@
         },
         availableProducts() {
           const added = new Set(this.form.productIds);
-          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isCheckboxProduct(String(product.productId)));
+          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isChoiceProduct(String(product.productId)));
         },
         hasAccessProduct() {
           return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
@@ -303,6 +319,9 @@
         },
         leaseSelected() {
           return Boolean(this.leaseProduct && this.form.productIds.includes(this.leaseProduct.id));
+        },
+        selectedVersionId() {
+          return this.versionProducts.find((product) => this.form.productIds.includes(product.id))?.id || '';
         },
         baseExpirySegment() {
           const files = this.productMemory[this.baseProductId]?.files || [];
@@ -317,7 +336,7 @@
         },
         displayedMemoryProductIds() {
           return this.memoryProductIds.filter((id) => {
-            if (!this.isCheckboxProduct(id)) return true;
+            if (!this.isChoiceProduct(id)) return true;
             const state = this.productMemory[id];
             return !state || state.loading || state.error || state.files.some((file) => file.segments.length);
           });
@@ -376,6 +395,24 @@
         },
         isCheckboxProduct(productId) {
           return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
+        },
+        isChoiceProduct(productId) {
+          return this.isCheckboxProduct(productId) || this.versionProducts.some((product) => product.id === productId);
+        },
+        setVersionProduct(productId) {
+          if (productId && !this.versionProducts.some((product) => product.id === productId && product.available)) return;
+          if (productId === this.selectedVersionId) return;
+          if (productId && this.form.productIds.length >= 99 && !this.selectedVersionId) {
+            this.error = 'A maximum of 99 modification products can be added.';
+            return;
+          }
+          for (const product of this.versionProducts) {
+            if (this.form.productIds.includes(product.id)) this.removeProduct(product.id);
+          }
+          if (productId) {
+            this.form.productIds.push(productId);
+            this.loadProductMemory(productId);
+          }
         },
         isBaseExpirySegment(productId, file, segment) {
           return productId === this.baseProductId && file.kind === 'product' && segment.saot &&
@@ -480,9 +517,13 @@
                 !Array.isArray(data.modifications) ||
                 !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
                 !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 2 ||
+                !Array.isArray(data.versionProducts) || data.versionProducts.length !== 1 ||
                 data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
                 data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || typeof product.available !== 'boolean' ||
+                  (product.available && !data.modifications.some((item) => String(item.productId) === String(product.id)))) ||
+                data.versionProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || typeof product.available !== 'boolean' ||
                   (product.available && !data.modifications.some((item) => String(item.productId) === String(product.id)))) ||
                 data.modifications.some((product) => !product || !/^[1-9]\d*$/.test(String(product.productId)) ||
@@ -493,6 +534,7 @@
             this.products = data.modifications;
             this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
             this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
+            this.versionProducts = data.versionProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
             await this.loadProductMemory(this.baseProductId);
           } catch (err) {
             this.productError = 'Failed to load EMS products: ' + err.message;

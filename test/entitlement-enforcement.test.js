@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true) {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true) {
   let handler;
   let saved;
   class EmsClient {
@@ -20,6 +20,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         { productId: '6049', productName: '02 ADD Link', lifeCycleStage: 'Commit' },
         { productId: '6051', productName: '04 ADD Pivot', lifeCycleStage: pivotAvailable ? 'Commit' : 'Draft' },
         { productId: '6050', productName: '03 Lease version - fill out Expiry Date', lifeCycleStage: leaseAvailable ? 'Commit' : 'Draft' },
+        { productId: '6052', productName: versionAvailable ? '05 Set VERSION 23' : 'Different product', lifeCycleStage: 'Commit' },
         { productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
@@ -123,6 +124,17 @@ test('unavailable Lease does not prevent creation without it', async () => {
   const route = () => createRoute([{ id: '1' }], new Date(), [], true, false);
   assert.equal((await route().submit({ productIds: ['6048'] })).res.statusCode, 201);
   assert.equal((await route().submit({ productIds: ['6048', '6050'] })).res.statusCode, 400);
+});
+
+test('version selection forwards the modification and rejects an unavailable version', async () => {
+  const normal = await createRoute([{ id: '1' }]).submit();
+  assert.deepEqual(Array.from(normal.saved.productIds), ['60', '6048']);
+  const selected = await createRoute([{ id: '1' }]).submit({ productIds: ['6048', '6052'] });
+  assert.equal(selected.res.statusCode, 201);
+  assert.deepEqual(Array.from(selected.saved.productIds), ['60', '6048', '6052']);
+  const route = () => createRoute([{ id: '1' }], new Date(), [], true, true, false);
+  assert.equal((await route().submit()).res.statusCode, 201);
+  assert.equal((await route().submit({ productIds: ['6048', '6052'] })).res.statusCode, 400);
 });
 
 test('unavailable optional Pivot does not prevent creation without it', async () => {

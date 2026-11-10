@@ -27,6 +27,9 @@ const ENTITLEMENT_OPTIONAL_PRODUCTS = [
   { id: '6051', name: '04 ADD Pivot', label: 'Pivot' },
   { id: '6050', name: '03 Lease version - fill out Expiry Date', label: 'Lease' },
 ];
+const ENTITLEMENT_VERSION_PRODUCTS = [
+  { id: '6052', name: '05 Set VERSION 23', label: 'Version 23' },
+];
 const LEASE_PRODUCT_ID = '6050';
 
 async function getEntitlementProducts() {
@@ -44,18 +47,19 @@ async function getEntitlementProducts() {
       throw new Error(`Required ${required.label} modification product ${required.id} is missing, renamed, or not complete in EMS`);
     }
   }
-  const optionalProducts = ENTITLEMENT_OPTIONAL_PRODUCTS.map((optional) => ({
-    id: optional.id,
-    label: optional.label,
-    available: complete.some((product) => String(product.productId) === optional.id &&
+  const availability = (products) => products.map((option) => ({
+    id: option.id,
+    label: option.label,
+    available: complete.some((product) => String(product.productId) === option.id &&
       typeof product.productName === 'string' &&
-      product.productName.trim().toLowerCase() === optional.name.toLowerCase()),
+      product.productName.trim().toLowerCase() === option.name.toLowerCase()),
   }));
   return {
     baseProductId: String(base.id),
     modifications: complete,
     accessProducts: ENTITLEMENT_ACCESS_PRODUCTS.map(({ id, label }) => ({ id, label })),
-    optionalProducts,
+    optionalProducts: availability(ENTITLEMENT_OPTIONAL_PRODUCTS),
+    versionProducts: availability(ENTITLEMENT_VERSION_PRODUCTS),
   };
 }
 
@@ -260,11 +264,14 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     }
 
     const vendorId = process.env.EMS_VENDOR_ID || '2';
-    const { baseProductId, modifications, optionalProducts } = await getEntitlementProducts();
+    const { baseProductId, modifications, optionalProducts, versionProducts } = await getEntitlementProducts();
     const availableProductIds = new Set(modifications.map((product) => String(product.productId)));
     if (productIds.some((id) => !availableProductIds.has(String(id)) ||
-        optionalProducts.some((product) => product.id === String(id) && !product.available))) {
+        [...optionalProducts, ...versionProducts].some((product) => product.id === String(id) && !product.available))) {
       return res.status(400).json({ error: 'One or more selected products are not complete modifications of the required base product.' });
+    }
+    if (productIds.filter((id) => versionProducts.some((product) => product.id === String(id))).length > 1) {
+      return res.status(400).json({ error: 'Select at most one version.' });
     }
     if (!ENTITLEMENT_ACCESS_PRODUCTS.some((product) => productIds.map(String).includes(product.id))) {
       return res.status(400).json({ error: 'Select Link, Standalone, or both.' });
