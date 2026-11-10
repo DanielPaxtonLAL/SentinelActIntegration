@@ -18,13 +18,8 @@
       </div>
     </header>
     <nav class="tab-nav" aria-label="Main navigation">
-      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Home</a>
-      <a href="/catalog.html">Catalog</a>
       <a href="/entitlements.html" aria-current="page">Entitlements</a>
       <a href="/">Customers</a>
-      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Reports</a>
-      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Administration</a>
-      <a href="/custom-entities.html">Developer</a>
     </nav>
     <section class="create-entitlement">
       <form class="entitlement-form" @submit.prevent="createEntitlement">
