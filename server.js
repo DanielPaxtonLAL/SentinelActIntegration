@@ -1,4 +1,4 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const express = require('express');
@@ -232,7 +232,11 @@ app.get('/api/entitlement-products', async (req, res) => {
   }
 });
 
-app.post('/api/entitlements', express.json(), async (req, res) => {
+const saveEntitlement = async (req, res) => {
+  const existingId = req.params?.id;
+  if (existingId !== undefined && !/^[1-9]\d*$/.test(existingId)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
+  }
   const {
     customerId,
     productIds,
@@ -309,15 +313,23 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     }
     const memorySegments = validateMemoryValues(allProductIds, productFiles, resolvedMemoryValues);
 
+    let existing = null;
+    if (existingId) {
+      existing = await withSession(() => ems.getEntitlementDetails(existingId));
+      if (String(existing.entState).toUpperCase() !== 'DRAFT') {
+        return res.status(400).json({ error: 'Only draft entitlements can be edited.' });
+      }
+    }
     const today = new Date();
-    const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const result = await ems.createEntitlement({
+    const startDate = existing?.startDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const entitlementData = {
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
       productIds: allProductIds,
       enforcementId: SENTINEL_LDK_ENFORCEMENT_ID,
       vendorId,
       startDate,
-      endDate: '2500-12-31',
+      endDate: existing?.endDate ?? '2500-12-31',
+      eid: existing?.eid,
       numberOfKeys: 1,
       activationsPerKey: 1,
       lineItemType: 'Product_Key',
@@ -325,8 +337,11 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
       refId1,
       refId2,
       memorySegments,
-    });
-    res.status(201).json(result);
+    };
+    const result = existingId
+      ? await ems.updateEntitlement(existingId, entitlementData)
+      : await ems.createEntitlement(entitlementData);
+    res.status(existingId ? 200 : 201).json(result);
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -335,7 +350,9 @@ app.post('/api/entitlements', express.json(), async (req, res) => {
     console.error(err.message);
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
   }
-});
+};
+app.post('/api/entitlements', express.json(), saveEntitlement);
+app.put('/api/entitlements/:id', express.json(), saveEntitlement);
 
 const { ACT_URL, ACT_DATABASE } = process.env;
 const act = new ActClient({

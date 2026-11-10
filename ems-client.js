@@ -291,6 +291,7 @@ class EmsClient {
       String(entry.customerId ?? entry.id ?? '') === String(entitlement.customerId ?? '')
     );
     const items = entitlement.entitlementItem ?? [];
+    const asList = (value) => value === undefined || value === '' ? [] : (Array.isArray(value) ? value : [value]);
     const entitlementItems = Array.isArray(items) ? items : [items];
     const products = entitlementItems.flatMap((item) => {
       const itemProducts = item?.itemProduct ?? [];
@@ -299,6 +300,15 @@ class EmsClient {
         lineItemType: item.lineItemType,
         productId: product.productId,
         productName: product.product?.productName ?? product.productName,
+        memorySegments: asList(product.product?.memorySegment)
+          .filter((segment) => segment && typeof segment === 'object')
+          .map((segment) => ({
+            id: String(segment.id),
+            name: segment.name,
+            saot: String(segment.saot) === 'true',
+            size: segment.size,
+            text: segment.text === undefined || segment.text === null ? '' : String(segment.text),
+          })),
       }));
     });
 
@@ -396,8 +406,7 @@ class EmsClient {
     return data.items;
   }
 
-  async createEntitlement(entitlement) {
-    if (!this.authenticated) throw new Error('Call authenticate() first.');
+  buildEntitlementXml(entitlement) {
     const lineItemType = entitlement.lineItemType;
     if (!['Hardware_Key', 'Product_Key', 'ProtectionKey_Update'].includes(lineItemType)) {
       throw new Error('Unsupported entitlement line item type.');
@@ -417,6 +426,7 @@ class EmsClient {
     const item = (name, value) => `<${name}>${escapeXml(value)}</${name}>`;
     const entitlementXml =
       '<entitlement>' +
+      (entitlement.eid ? item('eid', entitlement.eid) : '') +
       '<enabled>true</enabled><action>Save</action><isTest>false</isTest>' +
       item('customerId', entitlement.customerId) +
       '<customerEmail></customerEmail><partnerId></partnerId><partnerEmail></partnerEmail>' +
@@ -456,6 +466,37 @@ class EmsClient {
         : '') +
       '</entitlementItem>' +
       '</entitlement>';
+    return { entitlementXml, lineItemType };
+  }
+
+  // Saves changes to an existing entitlement; returns the same shape as createEntitlement.
+  async updateEntitlement(id, entitlement) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (!/^[1-9]\d*$/.test(String(id)) || !entitlement.eid) throw new Error('Entitlement id and eid are required.');
+    const { entitlementXml } = this.buildEntitlementXml(entitlement);
+    const response = await this._fetch(`${this.apiRoot}/entitlement/${id}.ws`, {
+      method: 'POST',
+      headers: { Accept: 'application/xml, application/json', 'Content-Type': 'application/xml' },
+      body: entitlementXml,
+    });
+    const text = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while updating the entitlement. Please retry.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS entitlement update failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = text;
+      throw error;
+    }
+    return { saved: true, entId: String(id), Eid: entitlement.eid };
+  }
+
+  async createEntitlement(entitlement) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    const { entitlementXml, lineItemType } = this.buildEntitlementXml(entitlement);
     const webUrl = new URL(`${this.baseUrl}/ems/addEntitlement.html`);
     const sessionUrl = new URL(this.webSessionUrl);
     if (sessionUrl.searchParams.has('ET')) {

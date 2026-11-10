@@ -481,3 +481,6 @@ td { overflow-wrap: anywhere; }
 .entitlements-page .entitlement-create-button { margin-left: auto; white-space: nowrap; }
 .entitlements-page .entitlement-form-actions .button--destructive { margin-right: auto; }
 .entitlements-page .entitlement-form h2 { margin: 0; font-size: 1.1rem; }
+
+.entitlement-actions { white-space: nowrap; }
+.entitlement-actions button + button { margin-left: 0.4rem; }

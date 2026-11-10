@@ -7,6 +7,7 @@ const CURRENT_AREA = {
   '/index.html': 'customers',
   '/entitlements.html': 'entitlements',
   '/create-entitlement-form.html': 'entitlements',
+  '/update-entitlement-form.html': 'entitlements',
 };
 
 function renderPage(html, partialsDir, requestPath) {

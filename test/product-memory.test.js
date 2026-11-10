@@ -1,4 +1,4 @@
-const test = require('node:test');
+﻿const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -142,7 +142,8 @@ function entitlementApp(fetch) {
   let definition;
   vm.runInNewContext(script, {
     fetch,
-    window: { location: { assign() {} } },
+    URLSearchParams,
+    window: { location: { assign() {}, search: '' } },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const app = { ...definition.methods };

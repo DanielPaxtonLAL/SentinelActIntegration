@@ -33,6 +33,7 @@
                 <th>Customer name</th>
                 <th>Ref ID 1</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -49,6 +50,10 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td class="entitlement-actions" @click.stop @keydown.stop>
+                  <button type="button" class="button--view" @click="openEditEntitlement(entitlement)">Edit</button>
+                  <button type="button">More options</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -178,6 +183,9 @@
             this.customersLoading = false;
           }
         },
+        openEditEntitlement(entitlement) {
+          window.location.assign('/update-entitlement-form.html?id=' + encodeURIComponent(entitlement.id));
+        },
         openCreateEntitlement() {
           window.location.assign('/create-entitlement-form.html');
         },
@@ -248,6 +256,7 @@
       },
       mounted() {
         if (new URLSearchParams(window.location.search).has('created')) this.notice = 'Entitlement saved as a draft.';
+        else if (new URLSearchParams(window.location.search).has('updated')) this.notice = 'Entitlement updated.';
         this.loadEntitlements();
         this.loadCustomers();
       },

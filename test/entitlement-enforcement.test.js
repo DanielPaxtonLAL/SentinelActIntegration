@@ -31,6 +31,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   const app = {
     get() {},
     post(route, ...handlers) { if (route === '/api/entitlements') handler = handlers.at(-1); },
+    put() {},
     use() {},
     listen() {},
   };
