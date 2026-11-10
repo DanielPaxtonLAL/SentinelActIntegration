@@ -44,6 +44,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
     if (name === './entitlement-memory') return require('../entitlement-memory');
+    if (name === './page-includes') return require('../page-includes');
     return require(name);
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {

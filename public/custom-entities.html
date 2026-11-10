@@ -1,14 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- include: head -->
   <title>ACT Custom Entities</title>
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/theme.js"></script>
 </head>
 <body class="custom-entities-page">
-  <div class="dev-disclaimer">Development in progress — not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
+  <!-- include: disclaimer -->
   <header>
     <h1>ACT Custom Entities</h1>
     <div class="header-actions">
@@ -16,10 +13,7 @@
       <button type="button" @click="logout" :disabled="loading">Log out</button>
     </div>
   </header>
-  <nav class="tab-nav" aria-label="Main navigation">
-    <a href="/entitlements.html">Entitlements</a>
-    <a href="/">Customers</a>
-  </nav>
+  <!-- include: nav -->
   <main id="app" v-cloak>
     <form @submit.prevent="loadEntities">
       <label>

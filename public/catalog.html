@@ -1,15 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- include: head -->
   <title>EMS Catalog</title>
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/theme.js"></script>
 </head>
 <body>
   <main id="app" class="catalog-page" v-cloak>
-    <div class="dev-disclaimer">Development in progress — not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
+    <!-- include: disclaimer -->
     <header class="app-header">
       <h1>Catalog</h1>
       <div class="header-actions">
@@ -18,10 +15,7 @@
         <button type="button" @click="logout" :disabled="loading">Log out</button>
       </div>
     </header>
-    <nav class="tab-nav" aria-label="Main navigation">
-      <a href="/entitlements.html">Entitlements</a>
-      <a href="/">Customers</a>
-    </nav>
+    <!-- include: nav -->
     <nav class="catalog-subnav" aria-label="Catalog sections">
       <button v-for="tab in tabs" :key="tab.id" type="button" class="button--view"
         :aria-current="activeTab === tab.id ? 'page' : null"

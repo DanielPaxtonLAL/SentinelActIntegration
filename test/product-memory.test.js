@@ -489,3 +489,16 @@ test('entitlements list links to the separate create form page', () => {
   assert.doesNotMatch(list, /class="entitlement-form"|<legend>/);
   assert.ok(fs.existsSync(path.join(dir, 'create-entitlement-form.html')));
 });
+
+test('shared head, disclaimer and nav are included into pages with the right current link', () => {
+  const { renderPage } = require('../page-includes');
+  const dir = path.join(__dirname, '..');
+  const render = (file, route) => renderPage(fs.readFileSync(path.join(dir, 'public', file), 'utf8'), path.join(dir, 'partials'), route);
+  const entitlements = render('entitlements.html', '/entitlements.html');
+  assert.doesNotMatch(entitlements, /<!-- include:/);
+  assert.match(entitlements, /<link rel="stylesheet" href="\/styles.css">\s*<script src="\/theme.js"><\/script>/);
+  assert.match(entitlements, /class="dev-disclaimer">Development in progress/);
+  assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/">Customers<\/a>/);
+  assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
+  assert.doesNotMatch(render('catalog.html', '/catalog.html'), /aria-current="page">(Entitlements|Customers)/);
+});

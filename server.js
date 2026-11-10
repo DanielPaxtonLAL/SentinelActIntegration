@@ -5,6 +5,7 @@ const express = require('express');
 const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
 const { validateMemoryValues } = require('./entitlement-memory');
+const { pageIncludes } = require('./page-includes');
 
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) {
@@ -113,6 +114,7 @@ fs.watch(publicDir, (eventType, filename) => {
   for (const client of reloadClients) client.write('event: reload\ndata: update\n\n');
 });
 
+app.use(pageIncludes(publicDir, path.join(__dirname, 'partials')));
 app.use(express.static(publicDir));
 
 app.get('/api/customers', async (req, res) => {
