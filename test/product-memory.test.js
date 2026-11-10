@@ -132,6 +132,10 @@ test('reports an EMS login redirect as an expired session', async () => {
   await assert.rejects(() => client.getProductReadOnlyMemory(1), { status: 401 });
 });
 
+function serialFile() {
+  return { kind: 'product', segments: [{ id: '91', name: 'Serial Number', size: '4', saot: true, value: '' }] };
+}
+
 function entitlementApp(fetch) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
@@ -149,6 +153,7 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'leaseSelected', { get: () => definition.computed.leaseSelected.call(app) });
   Object.defineProperty(app, 'selectedVersionId', { get: () => definition.computed.selectedVersionId.call(app) });
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
+  Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
   Object.defineProperty(app, 'displayedMemoryProductIds', { get: () => definition.computed.displayedMemoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
@@ -206,7 +211,10 @@ test('loads modification products and required base memory for creation', async 
       ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }],
       optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', available: true }],
       versionProducts: [{ id: '6052', label: 'Version 23', available: true }] }
-      : [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
+      : [{ kind: 'product', segments: [
+        { id: '90', saot: true, content: '0000' },
+        { id: '91', name: 'Serial Number', size: '4', saot: true, content: '0000' },
+      ] }] };
   });
   await app.loadProducts();
   assert.deepEqual(requests, ['/api/entitlement-products', '/api/catalog/products/60/read-only-memory']);
@@ -223,7 +231,7 @@ test('version radios select one modification and leave as is removes it', async 
     return { ok: true, json: async () => [{ kind: 'product', segments: [{ id: '4', saot: true, content: '0000' }] }] };
   });
   app.baseProductId = '60';
-  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
   app.versionProducts = [{ id: '6052', label: 'Version 23', available: true }];
   app.products = [{ productId: '6052' }, { productId: '12' }];
   assert.equal(app.selectedVersionId, '');
@@ -255,7 +263,7 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
   const file = app.productMemory['60'].files[0];
   const segment = file.segments[0];
   assert.equal(segment.value, '');
-  assert.equal(file.segments[1].value, '00000000');
+  assert.equal(file.segments[1].value, '');
   app.optionalProducts = [
     { id: '6051', label: 'Pivot', available: true },
     { id: '6050', label: 'Lease', available: true },
@@ -266,6 +274,7 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
   assert.equal(app.leaseSelected, false);
   assert.equal(app.isBaseExpirySegment('60', file, segment), true);
   assert.equal(app.isBaseExpirySegment('60', file, file.segments[1]), false);
+  assert.equal(app.isBaseSerialSegment('60', file, file.segments[1]), true);
   app.setCheckboxProduct('6050', true);
   await new Promise(setImmediate);
   assert.equal(app.leaseSelected, true);
@@ -296,7 +305,7 @@ test('hidden base expiry input is removed from form validation', () => {
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
-  assert.match(html, /<tr v-if="!isBaseExpirySegment\(productId, file, segment\)">/);
+  assert.match(html, /<tr v-if="!isBaseExpirySegment\(productId, file, segment\) && !isBaseSerialSegment\(productId, file, segment\)">/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
 });
 
@@ -323,16 +332,27 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   app.form.productIds = ['6050'];
   app.productMemory['60'] = { loading: false, error: '', files: [{ kind: 'product', segments: [
     { id: '90', name: 'Expiry Date', size: '4', saot: true, value: '' },
-    { id: '91', name: 'Serial Number', size: '4', saot: true, value: '12345678' },
+    { id: '91', name: 'Serial Number', size: '4', saot: true, value: '' },
   ] }] };
   app.productMemory['6050'] = { loading: false, error: '', files: [] };
   app.leaseExpiryDate = '2026-11-10';
+  app.serialNumber = '1234';
   await app.createEntitlement();
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
     { productId: '60', segmentId: '90', content: '35443641' },
-    { productId: '60', segmentId: '91', content: '12345678' },
+    { productId: '60', segmentId: '91', content: '30344432' },
   ]);
   assert.equal(app.leaseExpiryDate, '');
+  assert.equal(app.serialNumber, '');
+});
+
+test('serial numbers convert from decimal to ASCII hexadecimal digits', () => {
+  const app = entitlementApp(async () => {});
+  assert.equal(app.encodeSerialNumber('255', '4'), '30304646');
+  assert.equal(app.encodeSerialNumber('0', '2'), '3030');
+  for (const value of ['', '12a', '-1', '65536']) {
+    assert.throws(() => app.encodeSerialNumber(value, '4'), /serial number/);
+  }
 });
 
 test('invalid lease date prevents submission', async () => {
@@ -372,7 +392,7 @@ test('Pivot is optional and loads and removes memory', async () => {
     return { ok: true, json: async () => [{ kind: 'product', segments: [{ id: '90', saot: true, content: '0000' }] }] };
   });
   app.baseProductId = '60';
-  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
   app.accessProducts = [{ id: '6048', label: 'Standalone' }];
   app.optionalProducts = [{ id: '6051', label: 'Pivot', available: true }];
   app.products = [{ productId: '6048' }, { productId: '6051' }, { productId: '12' }];
@@ -395,7 +415,7 @@ test('form blocks saving while memory is unavailable or dynamic SAOT is unsuppor
   }));
   app.form.productIds = ['12'];
   app.baseProductId = '60';
-  app.productMemory['60'] = { loading: false, error: '', files: [] };
+  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
   assert.equal(app.productMemoryReady, false);
   await app.loadProductMemory('12');
   assert.equal(app.productMemoryReady, false);
@@ -413,7 +433,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   app.form.productIds = ['12'];
   app.baseProductId = '60';
   app.productMemory['60'] = { loading: false, error: '', files: [
-    { kind: 'product', segments: [{ id: '3', saot: true, value: '00AA' }] },
+    { kind: 'product', segments: [{ id: '3', saot: true, value: '00AA' }, serialFile().segments[0]] },
   ] };
   app.productMemory['12'] = { loading: false, error: '', files: [
     { kind: 'product', segments: [
@@ -422,6 +442,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
     ] },
   ] };
   assert.equal(app.productMemoryReady, true);
+  app.serialNumber = '10';
   await app.createEntitlement();
   assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
   assert.equal(Object.hasOwn(submitted, 'lineItemType'), false);
@@ -432,6 +453,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   assert.equal(Object.hasOwn(submitted, 'activationsPerKey'), false);
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
     { productId: '60', segmentId: '3', content: '00AA' },
+    { productId: '60', segmentId: '91', content: '30303041' },
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
 });

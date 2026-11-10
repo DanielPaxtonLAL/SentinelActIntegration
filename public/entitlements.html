@@ -103,6 +103,16 @@
             <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
           </label>
         </fieldset>
+        <fieldset class="access-products">
+          <legend>Serial number</legend>
+          <label v-if="baseSerialSegment">
+            Serial number (decimal)
+            <input v-model.trim="serialNumber" type="text" inputmode="numeric" pattern="\d+" required :disabled="loading">
+          </label>
+          <p v-if="baseSerialSegment" class="form-hint">Converted to {{ Number(baseSerialSegment.size) }} hexadecimal digits and stored as ASCII characters.</p>
+          <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment…</p>
+          <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
+        </fieldset>
         <div>
           <div v-if="productError">
             <p class="form-error" role="alert">{{ productError }}</p>
@@ -134,7 +144,7 @@
                         <thead><tr><th>Name</th><th>Description</th><th>Offset</th><th>Size (bytes)</th><th>Content (hex)</th></tr></thead>
                         <tbody>
                           <template v-for="(segment, index) in file.segments" :key="index">
-                            <tr v-if="!isBaseExpirySegment(productId, file, segment)">
+                            <tr v-if="!isBaseExpirySegment(productId, file, segment) && !isBaseSerialSegment(productId, file, segment)">
                               <td>{{ displayValue(segment.name) }}</td>
                               <td>{{ displayValue(segment.description) }}</td>
                               <td>{{ displayValue(segment.offset) }}</td>
@@ -266,6 +276,7 @@
           optionalProducts: [],
           versionProducts: [],
           leaseExpiryDate: '',
+          serialNumber: '',
           baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
@@ -314,6 +325,13 @@
               segment.name.trim().toLowerCase() === 'expiry date');
           return segments.length === 1 ? segments[0] : null;
         },
+        baseSerialSegment() {
+          const files = this.productMemory[this.baseProductId]?.files || [];
+          const segments = files.filter((file) => file.kind === 'product')
+            .flatMap((file) => file.segments)
+            .filter((segment) => this.isSerialSegment(segment));
+          return segments.length === 1 ? segments[0] : null;
+        },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
         },
@@ -325,7 +343,7 @@
           });
         },
         productMemoryReady() {
-          return Boolean(this.baseProductId) && (!this.leaseSelected || (this.baseExpirySegment && Number(this.baseExpirySegment.size) === 4)) && this.memoryProductIds.every((id) => {
+          return Boolean(this.baseProductId) && Boolean(this.baseSerialSegment) && (!this.leaseSelected || (this.baseExpirySegment && Number(this.baseExpirySegment.size) === 4)) && this.memoryProductIds.every((id) => {
             const state = this.productMemory[id];
             return state && !state.loading && !state.error &&
               !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
@@ -393,6 +411,24 @@
           return productId === this.baseProductId && file.kind === 'product' && segment.saot &&
             typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'expiry date';
         },
+        isSerialSegment(segment) {
+          return Boolean(segment.saot) && typeof segment.name === 'string' &&
+            segment.name.trim().toLowerCase() === 'serial number';
+        },
+        isBaseSerialSegment(productId, file, segment) {
+          return productId === this.baseProductId && file.kind === 'product' && this.isSerialSegment(segment);
+        },
+        encodeSerialNumber(value, size) {
+          const digitCount = Number(size);
+          if (!/^\d+$/.test(value) || !Number.isInteger(digitCount) || digitCount < 1) {
+            throw new Error('Enter the serial number as a decimal number.');
+          }
+          const hex = BigInt(value).toString(16).toUpperCase();
+          if (hex.length > digitCount) {
+            throw new Error(`The serial number must fit in ${digitCount} hexadecimal digits (maximum ${(16n ** BigInt(digitCount) - 1n).toString()}).`);
+          }
+          return Array.from(hex.padStart(digitCount, '0'), (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
+        },
         defaultLeaseExpiryDate(today = new Date()) {
           const year = today.getFullYear() + DEFAULT_LEASE_LENGTH_YEARS;
           const month = today.getMonth();
@@ -445,7 +481,8 @@
               ...file,
               segments: file.segments.map((segment) => ({
                 ...segment,
-                value: this.isBaseExpirySegment(productId, file, segment) ? '' : (segment.content ?? ''),
+                value: this.isBaseExpirySegment(productId, file, segment) || this.isBaseSerialSegment(productId, file, segment)
+                  ? '' : (segment.content ?? ''),
               })),
             }));
           } catch (err) {
@@ -554,8 +591,10 @@
                     ? file.segments.filter((segment) => segment.saot).map((segment) => ({
                       productId,
                       segmentId: segment.id,
-                      content: this.leaseSelected && this.isBaseExpirySegment(productId, file, segment)
-                        ? leaseExpiryContent : segment.value,
+                      content: this.isBaseSerialSegment(productId, file, segment)
+                        ? this.encodeSerialNumber(this.serialNumber, segment.size)
+                        : this.leaseSelected && this.isBaseExpirySegment(productId, file, segment)
+                          ? leaseExpiryContent : segment.value,
                     }))
                     : []
                 )
@@ -571,6 +610,7 @@
             this.createEntitlementOpen = false;
             this.form = this.createEmptyForm();
             this.leaseExpiryDate = '';
+            this.serialNumber = '';
             this.productMemory = {};
             this.notice = 'Entitlement saved as a draft.';
           } catch (err) {
