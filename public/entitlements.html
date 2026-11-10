@@ -8,7 +8,7 @@
 </head>
 <body>
   <main id="app" class="entitlements-page" v-cloak>
-    <div class="dev-disclaimer">Development in progress — not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
+    <div class="dev-disclaimer">Development in progress â€” not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
     <header class="app-header">
       <h1>Entitlements</h1>
       <div class="header-actions">
@@ -46,13 +46,21 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
+        <label v-if="baseSerialSegment">
+          Serial number (decimal)
+          <input v-model.trim="serialNumber" type="text" inputmode="numeric" pattern="\d+" required :disabled="loading">
+          <span class="form-hint">Converted to {{ Number(baseSerialSegment.size) }} hexadecimal digits and stored as ASCII characters.</span>
+        </label>
+        <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
+        <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <label>
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
+        <div class="product-grid">
         <fieldset class="access-products">
           <legend>Product options</legend>
-          <p class="form-hint">Select Link, Standalone, or both.</p>
+          <p class="form-hint">Select at least one or both.</p>
           <label v-for="product in accessProducts" :key="product.id" class="access-product-option">
             <input type="checkbox" :checked="form.productIds.includes(product.id)"
               @change="setCheckboxProduct(product.id, $event.target.checked)"
@@ -71,25 +79,8 @@
           </label>
         </fieldset>
         <fieldset class="access-products">
-          <legend>Lease</legend>
-          <label v-if="leaseProduct" class="access-product-option">
-            <input type="checkbox" :checked="form.productIds.includes(leaseProduct.id)"
-              @change="setCheckboxProduct(leaseProduct.id, $event.target.checked)"
-              :disabled="loading || productsLoading || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
-            {{ leaseProduct.label }}
-            <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
-          </label>
-          <div v-if="leaseSelected" class="lease-options">
-            <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
-              Lease expiry date
-              <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
-            </label>
-            <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
-            <p v-else class="form-error" role="alert">Unable to find a unique editable 4-byte base product expiry date. Reload its memory before saving.</p>
-          </div>
-        </fieldset>
-        <fieldset class="access-products">
           <legend>Versions</legend>
+          <p class="form-hint">Up to and including</p>
           <label class="access-product-option">
             <input type="radio" name="version" :checked="!selectedVersionId"
               @change="setVersionProduct('')" :disabled="loading || productsLoading">
@@ -104,83 +95,42 @@
           </label>
         </fieldset>
         <fieldset class="access-products">
-          <legend>Serial number</legend>
-          <label v-if="baseSerialSegment">
-            Serial number (decimal)
-            <input v-model.trim="serialNumber" type="text" inputmode="numeric" pattern="\d+" required :disabled="loading">
+          <legend>Lease</legend>
+          <label v-if="leaseProduct" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(leaseProduct.id)"
+              @change="setCheckboxProduct(leaseProduct.id, $event.target.checked)"
+              :disabled="loading || productsLoading || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
+            {{ leaseProduct.label }}
+            <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
           </label>
-          <p v-if="baseSerialSegment" class="form-hint">Converted to {{ Number(baseSerialSegment.size) }} hexadecimal digits and stored as ASCII characters.</p>
-          <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment…</p>
-          <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
+          <div v-if="leaseSelected" class="lease-options">
+            <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
+              Lease expiry date
+              <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
+            </label>
+            <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry dateâ€¦</p>
+            <p v-else class="form-error" role="alert">Unable to find a unique editable 4-byte base product expiry date. Reload its memory before saving.</p>
+          </div>
         </fieldset>
+        </div>
         <div>
           <div v-if="productError">
             <p class="form-error" role="alert">{{ productError }}</p>
             <button type="button" class="button--view" @click="loadProducts" :disabled="loading || productsLoading">Retry</button>
           </div>
           <p v-if="form.productIds.length >= 99" class="form-hint">A maximum of 99 modification products can be added.</p>
-          <ul v-if="displayedMemoryProductIds.length" class="selected-products">
-            <li v-for="productId in displayedMemoryProductIds" :key="productId">
-              <div class="selected-product-heading">
-                <span v-if="productId !== baseProductId">{{ productLabel(productId) }}</span>
-                <span v-else>Required memory values</span>
-                <button v-if="productId !== baseProductId && !isChoiceProduct(productId)" type="button" class="button--destructive" @click="removeProduct(productId)" :disabled="loading">Remove</button>
-              </div>
-              <div class="product-memory" aria-live="polite">
-                <h3>Read-only memory segments</h3>
-                <p v-if="productMemory[productId]?.loading" class="form-hint" role="status">Loading memory segments…</p>
-                <div v-else-if="productMemory[productId]?.error">
-                  <p class="form-error" role="alert">{{ productMemory[productId].error }}</p>
-                  <button type="button" class="button--view" @click="loadProductMemory(productId)">Retry</button>
-                </div>
-                <template v-else-if="productMemory[productId]">
-                  <p v-if="!productMemory[productId].files.length" class="form-hint">No read-only memory segments are associated with this product.</p>
-                  <section v-for="file in productMemory[productId].files" :key="file.kind + '-' + (file.memoryId || '')" class="product-memory-file">
-                    <h4 v-if="file.kind === 'product'">Product memory</h4>
-                    <h4 v-else>{{ displayValue(file.memoryName) }} (Memory ID {{ file.memoryId }}, File ID {{ displayValue(file.fileId) }})</h4>
-                    <p v-if="!file.segments.length" class="form-hint">No segments are defined for this memory file.</p>
-                    <div v-else class="table-wrap">
-                      <table>
-                        <thead><tr><th>Name</th><th>Description</th><th>Offset</th><th>Size (bytes)</th><th>Content (hex)</th></tr></thead>
-                        <tbody>
-                          <template v-for="(segment, index) in file.segments" :key="index">
-                            <tr v-if="!isBaseExpirySegment(productId, file, segment) && !isBaseSerialSegment(productId, file, segment)">
-                              <td>{{ displayValue(segment.name) }}</td>
-                              <td>{{ displayValue(segment.description) }}</td>
-                              <td>{{ displayValue(segment.offset) }}</td>
-                              <td>{{ displayValue(segment.size) }}</td>
-                              <td>
-                                <template v-if="segment.saot && file.kind === 'product'">
-                                  <label>
-                                    <span class="form-hint">Set at entitlement time ({{ segment.size }} bytes)</span>
-                                    <input v-model.trim="segment.value" type="text" required :disabled="loading"
-                                      :pattern="'[0-9A-Fa-f]{' + (Number(segment.size) * 2) + '}'"
-                                      :maxlength="Number(segment.size) * 2"
-                                      :aria-label="'Hex content for ' + displayValue(segment.name)"
-                                      :title="'Enter exactly ' + (Number(segment.size) * 2) + ' hexadecimal characters'">
-                                  </label>
-                                </template>
-                                <template v-else>
-                                  {{ displayValue(segment.content) }}
-                                  <p v-if="segment.saot" class="form-error">SAOT dynamic memory must be set in EMS; saving here is unavailable.</p>
-                                </template>
-                              </td>
-                            </tr>
-                          </template>
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                </template>
-              </div>
-            </li>
-          </ul>
+          <template v-for="productId in memoryProductIds" :key="productId">
+            <div v-if="productMemory[productId]?.error">
+              <p class="form-error" role="alert">{{ productMemory[productId].error }}</p>
+              <button type="button" class="button--view" @click="loadProductMemory(productId)">Retry</button>
+            </div>
+          </template>
         </div>
         <p class="form-hint">Products must use Sentinel LDK enforcement. Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="closeCreateEntitlement" :disabled="loading">Cancel</button>
           <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady">
-            {{ loading ? 'Saving…' : 'Save draft entitlement' }}
+            {{ loading ? 'Savingâ€¦' : 'Save draft entitlement' }}
           </button>
         </div>
       </form>
@@ -228,7 +178,7 @@
       <section class="entitlement-details" aria-live="polite">
         <template v-if="selectedEntitlement">
           <h2>Entitlement details</h2>
-          <p v-if="detailLoading" role="status">Loading entitlement details…</p>
+          <p v-if="detailLoading" role="status">Loading entitlement detailsâ€¦</p>
           <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
           <template v-if="!detailLoading && !detailError">
             <dl class="entitlement-detail-fields">
@@ -296,8 +246,8 @@
       },
       computed: {
         status() {
-          if (this.detailLoading) return 'Loading entitlement details…';
-          if (this.loading) return this.createEntitlementOpen ? 'Saving entitlement…' : 'Loading entitlements…';
+          if (this.detailLoading) return 'Loading entitlement detailsâ€¦';
+          if (this.loading) return this.createEntitlementOpen ? 'Saving entitlementâ€¦' : 'Loading entitlementsâ€¦';
           if (this.error) return this.error;
           if (this.notice) return this.notice;
           return '';
@@ -334,13 +284,6 @@
         },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
-        },
-        displayedMemoryProductIds() {
-          return this.memoryProductIds.filter((id) => {
-            if (!this.isChoiceProduct(id)) return true;
-            const state = this.productMemory[id];
-            return !state || state.loading || state.error || state.files.some((file) => file.segments.length);
-          });
         },
         productMemoryReady() {
           return Boolean(this.baseProductId) && Boolean(this.baseSerialSegment) && (!this.leaseSelected || (this.baseExpirySegment && Number(this.baseExpirySegment.size) === 4)) && this.memoryProductIds.every((id) => {
@@ -621,7 +564,7 @@
           if (!this.error) await this.loadEntitlements();
         },
         displayValue(value) {
-          return value === null || value === undefined || value === '' ? '—' : String(value);
+          return value === null || value === undefined || value === '' ? 'â€”' : String(value);
         },
         highlightParts(value) {
           const text = this.displayValue(value);

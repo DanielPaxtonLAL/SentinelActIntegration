@@ -154,7 +154,6 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'selectedVersionId', { get: () => definition.computed.selectedVersionId.call(app) });
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
-  Object.defineProperty(app, 'displayedMemoryProductIds', { get: () => definition.computed.displayedMemoryProductIds.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
@@ -193,7 +192,8 @@ test('creation form has no additional product picker and retains product error r
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
   assert.doesNotMatch(html, /product-picker|productToAdd|Additional modification products/);
   assert.match(html, /v-if="productError"[\s\S]*?@click="loadProducts"/);
-  assert.match(html, /v-for="productId in displayedMemoryProductIds"/);
+  assert.doesNotMatch(html, /Read-only memory segments|displayedMemoryProductIds/);
+  assert.match(html, /@click="loadProductMemory\(productId\)"/);
 });
 
 test('loads modification products and required base memory for creation', async () => {
@@ -249,7 +249,7 @@ test('version radios select one modification and leave as is removes it', async 
   app.setVersionProduct('6052');
   assert.equal(app.selectedVersionId, '');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
-  assert.match(html, /<legend>Versions<\/legend>[\s\S]*?type="radio" name="version"[\s\S]*?Version 22 \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
+  assert.match(html, /<legend>Versions<\/legend>\s*<p class="form-hint">Up to and including<\/p>[\s\S]*?type="radio" name="version"[\s\S]*?Version 22 \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
 });
 
 test('lease checkbox controls the base expiry value and loads lease memory', async () => {
@@ -305,7 +305,7 @@ test('hidden base expiry input is removed from form validation', () => {
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
-  assert.match(html, /<tr v-if="!isBaseExpirySegment\(productId, file, segment\) && !isBaseSerialSegment\(productId, file, segment\)">/);
+  assert.doesNotMatch(html, /<tr v-if="!isBaseExpirySegment/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
 });
 
@@ -376,7 +376,7 @@ test('access checkboxes allow either or both', async () => {
   app.setCheckboxProduct('6048', true);
   await new Promise(setImmediate);
   assert.equal(app.hasAccessProduct, true);
-  assert.deepEqual(Array.from(app.displayedMemoryProductIds), ['60']);
+  assert.deepEqual(Array.from(app.memoryProductIds), ['60', '6048']);
   app.setCheckboxProduct('6049', true);
   await new Promise(setImmediate);
   app.setCheckboxProduct('6048', false);
@@ -403,7 +403,7 @@ test('Pivot is optional and loads and removes memory', async () => {
   assert.equal(requests[0], '/api/catalog/products/6051/read-only-memory');
   assert.equal(app.productMemoryReady, true);
   assert.equal(app.productMemory['6051'].files[0].segments[0].value, '0000');
-  assert.ok(app.displayedMemoryProductIds.includes('6051'));
+  assert.ok(app.memoryProductIds.includes('6051'));
   app.setCheckboxProduct('6051', false);
   assert.equal(app.form.productIds.length, 0);
   assert.equal(app.productMemory['6051'], undefined);
