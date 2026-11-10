@@ -29,7 +29,6 @@
             <thead>
               <tr>
                 <th>Type</th>
-                <th>Date</th>
                 <th>Created</th>
                 <th>Customer name</th>
                 <th>Ref ID 1</th>
@@ -46,7 +45,6 @@
                   @keydown.enter.prevent="openEntitlementDetails(entitlement)"
                   @keydown.space.prevent="openEntitlementDetails(entitlement)">
                 <td><template v-for="(part, partIndex) in highlightParts(typeLabel(entitlement.type))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
-                <td class="date-cell" :title="displayValue(entitlement.activationDate)"><template v-for="(part, partIndex) in highlightParts(entitlement.activationDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.createDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
