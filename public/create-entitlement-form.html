@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create Entitlement</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main id="app" class="entitlements-page" v-cloak>
+    <div class="dev-disclaimer">Development in progress — not for production use. Sign in with your ACT credentials. ACT interactions are limited to read-only operations; this application does not modify ACT records.</div>
+    <header class="app-header">
+      <h1>Entitlements</h1>
+      <div class="header-actions">
+        <div v-if="status" id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
+        <button type="button" @click="logout" :disabled="loading">Log out</button>
+      </div>
+    </header>
+    <nav class="tab-nav" aria-label="Main navigation">
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Home</a>
+      <a href="/catalog.html">Catalog</a>
+      <a href="/entitlements.html" aria-current="page">Entitlements</a>
+      <a href="/">Customers</a>
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Reports</a>
+      <a class="tab-nav-unavailable" href="#" aria-disabled="true" onclick="event.preventDefault()">Administration</a>
+      <a href="/custom-entities.html">Developer</a>
+    </nav>
+    <section class="create-entitlement">
+      <form class="entitlement-form" @submit.prevent="createEntitlement">
+        <h2>Create entitlement</h2>
+        <label>
+          Customer
+          <select v-model="form.customerId" required :disabled="customersLoading || loading">
+            <option value="" disabled>Select an EMS customer</option>
+            <option v-for="customer in customers" :key="customer.customerId" :value="String(customer.customerId)">
+              {{ customer.name || customer.customerName || ('Customer ' + customer.customerId) }}
+            </option>
+          </select>
+        </label>
+        <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
+        <label v-if="baseSerialSegment">
+          Serial number (decimal)
+          <input :value="serialNumber" @input="limitSerialInput" type="text" inputmode="numeric" pattern="\d+" :maxlength="serialMaxDigits" required :disabled="loading">
+          <span class="form-hint">Converted to {{ Number(baseSerialSegment.size) }} hexadecimal digits and stored as ASCII characters.</span>
+        </label>
+        <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
+        <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
+        <label>
+          Description
+          <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
+        </label>
+        <div class="product-grid">
+        <fieldset class="access-products">
+          <legend>Product options</legend>
+          <p class="form-hint">Select at least one or both.</p>
+          <label v-for="product in accessProducts" :key="product.id" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(product.id)"
+              @change="setCheckboxProduct(product.id, $event.target.checked)"
+              :disabled="loading || productsLoading || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+            {{ product.label }}
+          </label>
+        </fieldset>
+        <fieldset class="access-products">
+          <legend>Optional products</legend>
+          <label v-for="product in otherOptionalProducts" :key="product.id" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(product.id)"
+              @change="setCheckboxProduct(product.id, $event.target.checked)"
+              :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+            {{ product.label }}
+            <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
+          </label>
+        </fieldset>
+        <fieldset class="access-products">
+          <legend>Versions</legend>
+          <p class="form-hint">Up to and including</p>
+          <label class="access-product-option">
+            <input type="radio" name="version" :checked="!selectedVersionId"
+              @change="setVersionProduct('')" :disabled="loading || productsLoading">
+            Version 22 (default)
+          </label>
+          <label v-for="product in versionProducts" :key="product.id" class="access-product-option">
+            <input type="radio" name="version" :checked="selectedVersionId === product.id"
+              @change="setVersionProduct(product.id)"
+              :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !selectedVersionId)">
+            {{ product.label }}
+            <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
+          </label>
+        </fieldset>
+        <fieldset class="access-products">
+          <legend>Lease</legend>
+          <label v-if="leaseProduct" class="access-product-option">
+            <input type="checkbox" :checked="form.productIds.includes(leaseProduct.id)"
+              @change="setCheckboxProduct(leaseProduct.id, $event.target.checked)"
+              :disabled="loading || productsLoading || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
+            {{ leaseProduct.label }}
+            <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
+          </label>
+          <div v-if="leaseSelected" class="lease-options">
+            <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
+              Lease expiry date
+              <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
+            </label>
+            <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
+            <p v-else class="form-error" role="alert">Unable to find a unique editable 4-byte base product expiry date. Reload its memory before saving.</p>
+          </div>
+        </fieldset>
+        </div>
+        <div>
+          <div v-if="productError">
+            <p class="form-error" role="alert">{{ productError }}</p>
+            <button type="button" class="button--view" @click="loadProducts" :disabled="loading || productsLoading">Retry</button>
+          </div>
+          <p v-if="form.productIds.length >= 99" class="form-hint">A maximum of 99 modification products can be added.</p>
+          <template v-for="productId in memoryProductIds" :key="productId">
+            <div v-if="productMemory[productId]?.error">
+              <p class="form-error" role="alert">{{ productMemory[productId].error }}</p>
+              <button type="button" class="button--view" @click="loadProductMemory(productId)">Retry</button>
+            </div>
+          </template>
+        </div>
+        <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
+        <div class="entitlement-form-actions">
+          <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady">
+            {{ loading ? 'Saving…' : 'Save draft entitlement' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+    const DEFAULT_LEASE_LENGTH_YEARS = 1;
+
+    createApp({
+      data() {
+        return {
+          customers: [],
+          products: [],
+          accessProducts: [],
+          optionalProducts: [],
+          versionProducts: [],
+          leaseExpiryDate: '',
+          serialNumber: '',
+          baseProductId: '',
+          productMemory: {},
+          loading: false,
+          customersLoading: false,
+          productsLoading: false,
+          error: '',
+          customerError: '',
+          productError: '',
+          form: this.createEmptyForm(),
+        };
+      },
+      computed: {
+        status() {
+          if (this.loading) return 'Saving entitlement…';
+          if (this.error) return this.error;
+          return '';
+        },
+        hasAccessProduct() {
+          return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
+        },
+        leaseProduct() {
+          return this.optionalProducts.find((product) => product.label === 'Lease');
+        },
+        otherOptionalProducts() {
+          return this.optionalProducts.filter((product) => product !== this.leaseProduct);
+        },
+        leaseSelected() {
+          return Boolean(this.leaseProduct && this.form.productIds.includes(this.leaseProduct.id));
+        },
+        selectedVersionId() {
+          return this.versionProducts.find((product) => this.form.productIds.includes(product.id))?.id || '';
+        },
+        baseExpirySegment() {
+          const files = this.productMemory[this.baseProductId]?.files || [];
+          const segments = files.filter((file) => file.kind === 'product')
+            .flatMap((file) => file.segments)
+            .filter((segment) => segment.saot && typeof segment.name === 'string' &&
+              segment.name.trim().toLowerCase() === 'expiry date');
+          return segments.length === 1 ? segments[0] : null;
+        },
+        baseSerialSegment() {
+          const files = this.productMemory[this.baseProductId]?.files || [];
+          const segments = files.filter((file) => file.kind === 'product')
+            .flatMap((file) => file.segments)
+            .filter((segment) => this.isSerialSegment(segment));
+          return segments.length === 1 ? segments[0] : null;
+        },
+        serialMax() {
+          const digits = Number(this.baseSerialSegment?.size);
+          return Number.isInteger(digits) && digits > 0 ? 16n ** BigInt(digits) - 1n : 0n;
+        },
+        serialMaxDigits() {
+          return this.serialMax.toString().length;
+        },
+        memoryProductIds() {
+          return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
+        },
+        productMemoryReady() {
+          return Boolean(this.baseProductId) && Boolean(this.baseSerialSegment) && (!this.leaseSelected || (this.baseExpirySegment && Number(this.baseExpirySegment.size) === 4)) && this.memoryProductIds.every((id) => {
+            const state = this.productMemory[id];
+            return state && !state.loading && !state.error &&
+              !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
+          });
+        },
+      },
+      methods: {
+        createEmptyForm() {
+          return {
+            customerId: '',
+            productIds: [],
+            description: '',
+          };
+        },
+        isCheckboxProduct(productId) {
+          return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
+        },
+        isChoiceProduct(productId) {
+          return this.isCheckboxProduct(productId) || this.versionProducts.some((product) => product.id === productId);
+        },
+        setVersionProduct(productId) {
+          if (productId && !this.versionProducts.some((product) => product.id === productId && product.available)) return;
+          if (productId === this.selectedVersionId) return;
+          if (productId && this.form.productIds.length >= 99 && !this.selectedVersionId) {
+            this.error = 'A maximum of 99 modification products can be added.';
+            return;
+          }
+          for (const product of this.versionProducts) {
+            if (this.form.productIds.includes(product.id)) this.removeProduct(product.id);
+          }
+          if (productId) {
+            this.form.productIds.push(productId);
+            this.loadProductMemory(productId);
+          }
+        },
+        isBaseExpirySegment(productId, file, segment) {
+          return productId === this.baseProductId && file.kind === 'product' && segment.saot &&
+            typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'expiry date';
+        },
+        isSerialSegment(segment) {
+          return Boolean(segment.saot) && typeof segment.name === 'string' &&
+            segment.name.trim().toLowerCase() === 'serial number';
+        },
+        isBaseSerialSegment(productId, file, segment) {
+          return productId === this.baseProductId && file.kind === 'product' && this.isSerialSegment(segment);
+        },
+        limitSerialInput(event) {
+          let value = event.target.value.replace(/\D/g, '');
+          while (value && BigInt(value) > this.serialMax) value = value.slice(0, -1);
+          this.serialNumber = value;
+          event.target.value = value;
+        },
+        encodeSerialNumber(value, size) {
+          const digitCount = Number(size);
+          if (!/^\d+$/.test(value) || !Number.isInteger(digitCount) || digitCount < 1) {
+            throw new Error('Enter the serial number as a decimal number.');
+          }
+          const hex = BigInt(value).toString(16).toUpperCase();
+          if (hex.length > digitCount) {
+            throw new Error(`The serial number must fit in ${digitCount} hexadecimal digits (maximum ${(16n ** BigInt(digitCount) - 1n).toString()}).`);
+          }
+          return Array.from(hex.padStart(digitCount, '0'), (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
+        },
+        defaultLeaseExpiryDate(today = new Date()) {
+          const year = today.getFullYear() + DEFAULT_LEASE_LENGTH_YEARS;
+          const month = today.getMonth();
+          const day = Math.min(today.getDate(), new Date(year, month + 1, 0).getDate());
+          return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        },
+        encodeLeaseExpiryDate(value) {
+          const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+          if (!match) throw new Error('Select a valid lease expiry date between 1980 and 2107.');
+          const [, yearText, monthText, dayText] = match;
+          const year = Number(yearText), month = Number(monthText), day = Number(dayText);
+          const date = new Date(Date.UTC(year, month - 1, day));
+          if (year < 1980 || year > 2107 || date.getUTCFullYear() !== year ||
+              date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+            throw new Error('Select a valid lease expiry date between 1980 and 2107.');
+          }
+          const digits = ((year - 1980) * 512 + month * 32 + day).toString(16).toUpperCase().padStart(4, '0');
+          return Array.from(digits, (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
+        },
+        setCheckboxProduct(productId, checked) {
+          if (!this.isCheckboxProduct(productId)) return;
+          if (checked && this.optionalProducts.some((product) => product.id === productId && !product.available)) return;
+          if (checked && !this.form.productIds.includes(productId)) {
+            if (this.form.productIds.length >= 99) {
+              this.error = 'A maximum of 99 modification products can be added.';
+              return;
+            }
+            this.form.productIds.push(productId);
+            if (productId === this.leaseProduct?.id && !this.leaseExpiryDate) {
+              this.leaseExpiryDate = this.defaultLeaseExpiryDate();
+            }
+            this.loadProductMemory(productId);
+          } else if (!checked) {
+            this.removeProduct(productId);
+          }
+        },
+        removeProduct(productId) {
+          this.form.productIds = this.form.productIds.filter((id) => id !== productId);
+          delete this.productMemory[productId];
+        },
+        async loadProductMemory(productId) {
+          this.productMemory[productId] = { loading: true, error: '', files: [] };
+          const state = this.productMemory[productId];
+          try {
+            const response = await fetch(`/api/catalog/products/${encodeURIComponent(productId)}/read-only-memory`);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid memory list');
+            state.files = data.map((file) => ({
+              ...file,
+              segments: file.segments.map((segment) => ({
+                ...segment,
+                value: this.isBaseExpirySegment(productId, file, segment) || this.isBaseSerialSegment(productId, file, segment)
+                  ? '' : (segment.content ?? ''),
+              })),
+            }));
+          } catch (err) {
+            state.error = 'Failed to load read-only memory segments: ' + err.message;
+          } finally {
+            state.loading = false;
+          }
+        },
+        async loadCustomers() {
+          this.customersLoading = true;
+          this.customerError = '';
+          try {
+            const response = await fetch('/api/customers');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid customer list');
+            this.customers = data;
+          } catch (err) {
+            this.customerError = 'Failed to load EMS customers: ' + err.message;
+          } finally {
+            this.customersLoading = false;
+          }
+        },
+        async loadProducts() {
+          this.productsLoading = true;
+          this.productError = '';
+          try {
+            const response = await fetch('/api/entitlement-products');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
+                !Array.isArray(data.modifications) ||
+                !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
+                !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 2 ||
+                !Array.isArray(data.versionProducts) || data.versionProducts.length !== 1 ||
+                data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
+                data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || typeof product.available !== 'boolean' ||
+                  (product.available && !data.modifications.some((item) => String(item.productId) === String(product.id)))) ||
+                data.versionProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
+                  typeof product.label !== 'string' || typeof product.available !== 'boolean' ||
+                  (product.available && !data.modifications.some((item) => String(item.productId) === String(product.id)))) ||
+                data.modifications.some((product) => !product || !/^[1-9]\d*$/.test(String(product.productId)) ||
+                  typeof product.productName !== 'string')) {
+              throw new Error('The server returned an invalid modification product list');
+            }
+            this.baseProductId = String(data.baseProductId);
+            this.products = data.modifications;
+            this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
+            this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
+            this.versionProducts = data.versionProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
+            await this.loadProductMemory(this.baseProductId);
+          } catch (err) {
+            this.productError = 'Failed to load EMS products: ' + err.message;
+          } finally {
+            this.productsLoading = false;
+          }
+        },
+        cancel() {
+          window.location.assign('/entitlements.html');
+        },
+        async createEntitlement() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const leaseExpiryContent = this.leaseSelected ? this.encodeLeaseExpiryDate(this.leaseExpiryDate) : '';
+            const payload = {
+              ...this.form,
+              productIds: this.form.productIds,
+              memoryValues: this.memoryProductIds.flatMap((productId) =>
+                this.productMemory[productId].files.flatMap((file) =>
+                  file.kind === 'product'
+                    ? file.segments.filter((segment) => segment.saot).map((segment) => ({
+                      productId,
+                      segmentId: segment.id,
+                      content: this.isBaseSerialSegment(productId, file, segment)
+                        ? this.encodeSerialNumber(this.serialNumber, segment.size)
+                        : this.leaseSelected && this.isBaseExpirySegment(productId, file, segment)
+                          ? leaseExpiryContent : segment.value,
+                    }))
+                    : []
+                )
+              ),
+            };
+            const response = await fetch('/api/entitlements', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+              this.form = this.createEmptyForm();
+            this.leaseExpiryDate = '';
+            this.serialNumber = '';
+            this.productMemory = {};
+            window.location.assign('/entitlements.html?created=1');
+          } catch (err) {
+            this.error = 'Failed to create entitlement: ' + err.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+        async logout() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            window.location.replace('/login.html');
+          } catch (err) {
+            this.error = 'Log out failed: ' + err.message;
+            this.loading = false;
+          }
+        },
+      },
+      mounted() {
+        this.loadCustomers();
+        this.loadProducts();
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>

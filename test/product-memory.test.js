@@ -137,11 +137,12 @@ function serialFile() {
 }
 
 function entitlementApp(fetch) {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
   let definition;
   vm.runInNewContext(script, {
     fetch,
+    window: { location: { assign() {} } },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const app = { ...definition.methods };
@@ -154,6 +155,7 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'selectedVersionId', { get: () => definition.computed.selectedVersionId.call(app) });
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
+  Object.defineProperty(app, 'serialMax', { get: () => definition.computed.serialMax.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
@@ -189,7 +191,7 @@ test('memory lookup failures are visible and can be retried', async () => {
 });
 
 test('creation form has no additional product picker and retains product error retry', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.doesNotMatch(html, /product-picker|productToAdd|Additional modification products/);
   assert.match(html, /v-if="productError"[\s\S]*?@click="loadProducts"/);
   assert.doesNotMatch(html, /Read-only memory segments|displayedMemoryProductIds/);
@@ -248,7 +250,7 @@ test('version radios select one modification and leave as is removes it', async 
   app.versionProducts[0].available = false;
   app.setVersionProduct('6052');
   assert.equal(app.selectedVersionId, '');
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /<legend>Versions<\/legend>\s*<p class="form-hint">Up to and including<\/p>[\s\S]*?type="radio" name="version"[\s\S]*?Version 22 \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
 });
 
@@ -301,7 +303,7 @@ test('default lease expiry is one calendar year from the local date', () => {
 });
 
 test('hidden base expiry input is removed from form validation', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
@@ -344,6 +346,18 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   ]);
   assert.equal(app.leaseExpiryDate, '');
   assert.equal(app.serialNumber, '');
+});
+
+test('serial input cannot exceed the segment capacity', () => {
+  const app = entitlementApp(async () => {});
+  app.baseProductId = '60';
+  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
+  const type = (value) => { const event = { target: { value } }; app.limitSerialInput(event); return event.target.value; };
+  assert.equal(type('65535'), '65535');
+  assert.equal(type('65536'), '6553');
+  assert.equal(type('99999'), '9999');
+  assert.equal(type('12ab3'), '123');
+  assert.equal(app.serialNumber, '123');
 });
 
 test('serial numbers convert from decimal to ASCII hexadecimal digits', () => {
@@ -456,4 +470,22 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
     { productId: '60', segmentId: '91', content: '30303041' },
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
+});
+
+test('entitlements list links to the separate create form page', () => {
+  const dir = path.join(__dirname, '..', 'public');
+  const list = fs.readFileSync(path.join(dir, 'entitlements.html'), 'utf8');
+  const script = list.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  let definition;
+  let target;
+  vm.runInNewContext(script, {
+    fetch: async () => ({ ok: true, json: async () => [] }),
+    window: { location: { assign: (url) => { target = url; }, search: '' } },
+    URLSearchParams,
+    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
+  });
+  definition.methods.openCreateEntitlement();
+  assert.equal(target, '/create-entitlement-form.html');
+  assert.doesNotMatch(list, /class="entitlement-form"|<legend>/);
+  assert.ok(fs.existsSync(path.join(dir, 'create-entitlement-form.html')));
 });
