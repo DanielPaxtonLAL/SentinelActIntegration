@@ -45,7 +45,7 @@
                   @click="openEntitlementDetails(entitlement)"
                   @keydown.enter.prevent="openEntitlementDetails(entitlement)"
                   @keydown.space.prevent="openEntitlementDetails(entitlement)">
-                <td><template v-for="(part, partIndex) in highlightParts(entitlement.type)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td><template v-for="(part, partIndex) in highlightParts(typeLabel(entitlement.type))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="date-cell" :title="displayValue(entitlement.activationDate)"><template v-for="(part, partIndex) in highlightParts(entitlement.activationDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.createDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
@@ -135,6 +135,7 @@
               }
             };
             collectValues(entitlement);
+            collectValues(this.typeLabel(entitlement.type));
             return values.some((value) => value.toLocaleLowerCase().includes(query));
           });
         },
@@ -181,6 +182,10 @@
         },
         openCreateEntitlement() {
           window.location.assign('/create-entitlement-form.html');
+        },
+        typeLabel(type) {
+          const labels = { 1: 'HL Key', 2: 'Product Key' };
+          return labels[String(type).trim()] ?? type;
         },
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);
