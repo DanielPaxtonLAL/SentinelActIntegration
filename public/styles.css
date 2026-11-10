@@ -45,44 +45,42 @@
   color-scheme: light;
 }
 
-/* Dark theme: applied automatically when the OS/browser prefers dark mode */
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
+/* Dark theme: set via data-theme="dark" on <html> by theme.js */
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
-    /* ---- Global theme colours ---- */
-    --color-bg: #15181d;
-    --color-text: #e6e8eb;
-    --color-text-muted: #a3aab4;
-    --color-text-subtle: #b4bac2;
-    --color-text-nav: #c4c9d0;
-    --color-surface: #1e2229;
-    --color-surface-alt: #242932;
-    --color-surface-muted: #2b313b;
-    --color-surface-header: #2b313b;
-    --color-surface-hover: #363d49;
-    --color-border: #394150;
-    --color-border-strong: #4d576a;
-    --color-border-soft: #434c5e;
-    --color-primary: #4a90d9;
-    --color-selected-bg: #1f3350;
-    --color-selected-strong-bg: #274468;
-    --color-selected-outline: #4a79ad;
-    --color-highlight: #7a6a10;
-    --color-warning-bg: #5c5200;
-    --color-warning-bg-hover: #716400;
-    --color-error: #ff6b81;
-    --color-error-dark: #ff8a8a;
-    --color-success-marker: #3fb866;
+  /* ---- Global theme colours ---- */
+  --color-bg: #15181d;
+  --color-text: #e6e8eb;
+  --color-text-muted: #a3aab4;
+  --color-text-subtle: #b4bac2;
+  --color-text-nav: #c4c9d0;
+  --color-surface: #1e2229;
+  --color-surface-alt: #242932;
+  --color-surface-muted: #2b313b;
+  --color-surface-header: #2b313b;
+  --color-surface-hover: #363d49;
+  --color-border: #394150;
+  --color-border-strong: #4d576a;
+  --color-border-soft: #434c5e;
+  --color-primary: #4a90d9;
+  --color-selected-bg: #1f3350;
+  --color-selected-strong-bg: #274468;
+  --color-selected-outline: #4a79ad;
+  --color-highlight: #7a6a10;
+  --color-warning-bg: #5c5200;
+  --color-warning-bg-hover: #716400;
+  --color-error: #ff6b81;
+  --color-error-dark: #ff8a8a;
+  --color-success-marker: #3fb866;
 
-    /* ---- Button colours ---- */
-    --button-constructive-bg: #2a8a45;
-    --button-constructive-bg-hover: #34a352;
-    --button-destructive-bg: #c9372c;
-    --button-destructive-bg-hover: #e04a3e;
-    --button-view-bg: #2a78bd;
-    --button-view-bg-hover: #3790dc;
-  }
+  /* ---- Button colours ---- */
+  --button-constructive-bg: #2a8a45;
+  --button-constructive-bg-hover: #34a352;
+  --button-destructive-bg: #c9372c;
+  --button-destructive-bg-hover: #e04a3e;
+  --button-view-bg: #2a78bd;
+  --button-view-bg-hover: #3790dc;
 }
 
 * { box-sizing: border-box; }
@@ -150,6 +148,8 @@ button.button--view:hover:not(:disabled),
   margin: 0;
   font-size: 1.35rem;
 }
+
+.theme-toggle { white-space: nowrap; }
 
 .header-actions {
   display: flex;
