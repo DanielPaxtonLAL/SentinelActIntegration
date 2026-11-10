@@ -80,15 +80,12 @@
             <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
           </label>
           <div v-if="leaseSelected" class="lease-options">
-            <label v-if="baseExpirySegment">
-              Lease expiry date (hex, {{ baseExpirySegment.size }} bytes)
-              <input v-model.trim="baseExpirySegment.value" type="text" required :disabled="loading"
-                :pattern="'[0-9A-Fa-f]{' + (Number(baseExpirySegment.size) * 2) + '}'"
-                :maxlength="Number(baseExpirySegment.size) * 2"
-                :title="'Enter exactly ' + (Number(baseExpirySegment.size) * 2) + ' hexadecimal characters'">
+            <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
+              Lease expiry date
+              <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
             </label>
             <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
-            <p v-else class="form-error" role="alert">Unable to find a unique editable base product expiry date. Reload its memory before saving.</p>
+            <p v-else class="form-error" role="alert">Unable to find a unique editable 4-byte base product expiry date. Reload its memory before saving.</p>
           </div>
         </fieldset>
         <fieldset class="access-products">
@@ -106,23 +103,11 @@
             <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
           </label>
         </fieldset>
-        <div class="product-picker-field">
-          <label for="product-picker">Additional modification products (optional)</label>
-          <div class="product-picker">
-            <select id="product-picker" v-model="form.productToAdd" :disabled="loading || productsLoading || !availableProducts.length">
-              <option value="" disabled>{{ productsLoading ? 'Loading modification products…' : 'Select a modification product' }}</option>
-              <option v-for="product in availableProducts" :key="product.productId" :value="String(product.productId)">
-                {{ product.productName.trim() }} ({{ product.productId }})
-              </option>
-            </select>
-            <button type="button" class="button--constructive" @click="addProduct" :disabled="loading || !form.productToAdd || form.productIds.length >= 99">Add</button>
-          </div>
+        <div>
           <div v-if="productError">
             <p class="form-error" role="alert">{{ productError }}</p>
             <button type="button" class="button--view" @click="loadProducts" :disabled="loading || productsLoading">Retry</button>
           </div>
-          <p v-else-if="!productsLoading && products.length && !availableProducts.length" class="form-hint">No additional modification products are available to add.</p>
-          <p v-else-if="!productsLoading && !products.length" class="form-hint">No complete modification products are available.</p>
           <p v-if="form.productIds.length >= 99" class="form-hint">A maximum of 99 modification products can be added.</p>
           <ul v-if="displayedMemoryProductIds.length" class="selected-products">
             <li v-for="productId in displayedMemoryProductIds" :key="productId">
@@ -269,6 +254,7 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script>
     const { createApp } = Vue;
+    const DEFAULT_LEASE_LENGTH_YEARS = 1;
 
     createApp({
       data() {
@@ -279,6 +265,7 @@
           accessProducts: [],
           optionalProducts: [],
           versionProducts: [],
+          leaseExpiryDate: '',
           baseProductId: '',
           productMemory: {},
           selectedEntitlement: null,
@@ -303,10 +290,6 @@
           if (this.error) return this.error;
           if (this.notice) return this.notice;
           return '';
-        },
-        availableProducts() {
-          const added = new Set(this.form.productIds);
-          return this.products.filter((product) => !added.has(String(product.productId)) && !this.isChoiceProduct(String(product.productId)));
         },
         hasAccessProduct() {
           return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
@@ -342,7 +325,7 @@
           });
         },
         productMemoryReady() {
-          return Boolean(this.baseProductId) && (!this.leaseSelected || Boolean(this.baseExpirySegment)) && this.memoryProductIds.every((id) => {
+          return Boolean(this.baseProductId) && (!this.leaseSelected || (this.baseExpirySegment && Number(this.baseExpirySegment.size) === 4)) && this.memoryProductIds.every((id) => {
             const state = this.productMemory[id];
             return state && !state.loading && !state.error &&
               !state.files.some((file) => file.kind !== 'product' && file.segments.some((segment) => segment.saot));
@@ -370,7 +353,6 @@
         createEmptyForm() {
           return {
             customerId: '',
-            productToAdd: '',
             productIds: [],
             description: '',
           };
@@ -385,13 +367,6 @@
           if (!this.customers.length && !this.customersLoading) this.loadCustomers();
           if (!this.baseProductId && !this.productsLoading) this.loadProducts();
           else if (this.baseProductId && !this.productMemory[this.baseProductId]) this.loadProductMemory(this.baseProductId);
-        },
-        addProduct() {
-          const productId = String(this.form.productToAdd);
-          if (!productId || this.form.productIds.length >= 99 || !this.availableProducts.some((product) => String(product.productId) === productId)) return;
-          this.form.productIds.push(productId);
-          this.form.productToAdd = '';
-          this.loadProductMemory(productId);
         },
         isCheckboxProduct(productId) {
           return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
@@ -418,6 +393,25 @@
           return productId === this.baseProductId && file.kind === 'product' && segment.saot &&
             typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'expiry date';
         },
+        defaultLeaseExpiryDate(today = new Date()) {
+          const year = today.getFullYear() + DEFAULT_LEASE_LENGTH_YEARS;
+          const month = today.getMonth();
+          const day = Math.min(today.getDate(), new Date(year, month + 1, 0).getDate());
+          return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        },
+        encodeLeaseExpiryDate(value) {
+          const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+          if (!match) throw new Error('Select a valid lease expiry date between 1980 and 2107.');
+          const [, yearText, monthText, dayText] = match;
+          const year = Number(yearText), month = Number(monthText), day = Number(dayText);
+          const date = new Date(Date.UTC(year, month - 1, day));
+          if (year < 1980 || year > 2107 || date.getUTCFullYear() !== year ||
+              date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+            throw new Error('Select a valid lease expiry date between 1980 and 2107.');
+          }
+          const digits = ((year - 1980) * 512 + month * 32 + day).toString(16).toUpperCase().padStart(4, '0');
+          return Array.from(digits, (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
+        },
         setCheckboxProduct(productId, checked) {
           if (!this.isCheckboxProduct(productId)) return;
           if (checked && this.optionalProducts.some((product) => product.id === productId && !product.available)) return;
@@ -427,6 +421,9 @@
               return;
             }
             this.form.productIds.push(productId);
+            if (productId === this.leaseProduct?.id && !this.leaseExpiryDate) {
+              this.leaseExpiryDate = this.defaultLeaseExpiryDate();
+            }
             this.loadProductMemory(productId);
           } else if (!checked) {
             this.removeProduct(productId);
@@ -547,6 +544,7 @@
           this.error = '';
           this.notice = '';
           try {
+            const leaseExpiryContent = this.leaseSelected ? this.encodeLeaseExpiryDate(this.leaseExpiryDate) : '';
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
@@ -556,7 +554,8 @@
                     ? file.segments.filter((segment) => segment.saot).map((segment) => ({
                       productId,
                       segmentId: segment.id,
-                      content: segment.value,
+                      content: this.leaseSelected && this.isBaseExpirySegment(productId, file, segment)
+                        ? leaseExpiryContent : segment.value,
                     }))
                     : []
                 )
@@ -571,6 +570,7 @@
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.createEntitlementOpen = false;
             this.form = this.createEmptyForm();
+            this.leaseExpiryDate = '';
             this.productMemory = {};
             this.notice = 'Entitlement saved as a draft.';
           } catch (err) {

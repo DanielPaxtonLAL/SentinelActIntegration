@@ -142,7 +142,6 @@ function entitlementApp(fetch) {
   });
   const app = { ...definition.methods };
   Object.assign(app, definition.data.call(app));
-  Object.defineProperty(app, 'availableProducts', { get: () => definition.computed.availableProducts.call(app) });
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
   Object.defineProperty(app, 'hasAccessProduct', { get: () => definition.computed.hasAccessProduct.call(app) });
   Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
@@ -158,14 +157,12 @@ function entitlementApp(fetch) {
 test('adding and removing products loads their memory without stale responses', async () => {
   const pending = [];
   const app = entitlementApp((url) => new Promise((resolve) => pending.push({ url, resolve })));
-  app.products = [{ productId: 12, productName: 'Product' }];
-  app.form.productToAdd = '12';
-  app.addProduct();
+  app.optionalProducts = [{ id: '12', label: 'Option', available: true }];
+  app.setCheckboxProduct('12', true);
   assert.equal(pending[0].url, '/api/catalog/products/12/read-only-memory');
   assert.equal(app.productMemory['12'].loading, true);
-  app.removeProduct('12');
-  app.form.productToAdd = '12';
-  app.addProduct();
+  app.setCheckboxProduct('12', false);
+  app.setCheckboxProduct('12', true);
   pending[0].resolve({ ok: true, json: async () => [{ memoryId: 'old' }] });
   await new Promise(setImmediate);
   assert.equal(app.productMemory['12'].loading, true);
@@ -185,6 +182,13 @@ test('memory lookup failures are visible and can be retried', async () => {
   await app.loadProductMemory('12');
   assert.equal(app.productMemory['12'].error, '');
   assert.equal(app.productMemory['12'].files.length, 0);
+});
+
+test('creation form has no additional product picker and retains product error retry', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
+  assert.doesNotMatch(html, /product-picker|productToAdd|Additional modification products/);
+  assert.match(html, /v-if="productError"[\s\S]*?@click="loadProducts"/);
+  assert.match(html, /v-for="productId in displayedMemoryProductIds"/);
 });
 
 test('loads modification products and required base memory for creation', async () => {
@@ -207,7 +211,7 @@ test('loads modification products and required base memory for creation', async 
   await app.loadProducts();
   assert.deepEqual(requests, ['/api/entitlement-products', '/api/catalog/products/60/read-only-memory']);
   assert.equal(app.baseProductId, '60');
-  assert.equal(app.availableProducts[0].productId, '12');
+  assert.equal(app.products[0].productId, '12');
   assert.equal(app.productMemoryReady, true);
   assert.equal(app.productMemory['60'].files[0].segments[0].value, '0000');
 });
@@ -223,7 +227,6 @@ test('version radios select one modification and leave as is removes it', async 
   app.versionProducts = [{ id: '6052', label: 'Version 23', available: true }];
   app.products = [{ productId: '6052' }, { productId: '12' }];
   assert.equal(app.selectedVersionId, '');
-  assert.deepEqual(Array.from(app.availableProducts, (product) => product.productId), ['12']);
   app.setVersionProduct('6052');
   assert.equal(app.selectedVersionId, '6052');
   assert.equal(app.productMemoryReady, false);
@@ -260,35 +263,95 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
   assert.equal(app.leaseProduct.id, '6050');
   assert.deepEqual(Array.from(app.otherOptionalProducts, (product) => product.id), ['6051']);
   app.products = [{ productId: '6050', productName: 'Lease' }];
-  assert.equal(app.availableProducts.length, 0);
   assert.equal(app.leaseSelected, false);
   assert.equal(app.isBaseExpirySegment('60', file, segment), true);
   assert.equal(app.isBaseExpirySegment('60', file, file.segments[1]), false);
   app.setCheckboxProduct('6050', true);
   await new Promise(setImmediate);
   assert.equal(app.leaseSelected, true);
+  assert.equal(app.leaseExpiryDate, app.defaultLeaseExpiryDate());
+  app.leaseExpiryDate = '2030-07-12';
   assert.equal(app.baseExpirySegment, segment);
   assert.equal(app.productMemoryReady, true);
+  segment.size = '2';
+  assert.equal(app.productMemoryReady, false);
+  segment.size = '4';
   app.setCheckboxProduct('6050', false);
   assert.equal(app.leaseSelected, false);
   assert.equal(app.productMemory['6050'], undefined);
+  app.setCheckboxProduct('6050', true);
+  assert.equal(app.leaseExpiryDate, '2030-07-12');
+  await new Promise(setImmediate);
+});
+
+test('default lease expiry is one calendar year from the local date', () => {
+  const app = entitlementApp(async () => {});
+  assert.equal(app.defaultLeaseExpiryDate(new Date(2026, 10, 10, 23, 30)), '2027-11-10');
+  assert.equal(app.defaultLeaseExpiryDate(new Date(2024, 1, 29, 12)), '2025-02-28');
+  assert.equal(app.defaultLeaseExpiryDate(new Date(2027, 11, 31, 12)), '2028-12-31');
 });
 
 test('hidden base expiry input is removed from form validation', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
+  assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
   assert.match(html, /<tr v-if="!isBaseExpirySegment\(productId, file, segment\)">/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
 });
 
-test('access checkboxes allow either or both and do not duplicate dropdown products', async () => {
+test('lease dates encode four ASCII hexadecimal digits and reject invalid dates', () => {
+  const app = entitlementApp(async () => {});
+  assert.equal(app.encodeLeaseExpiryDate('2026-11-10'), '35443641');
+  assert.equal(app.encodeLeaseExpiryDate('1980-01-01'), '30303231');
+  assert.equal(app.encodeLeaseExpiryDate('2107-12-31'), '46463946');
+  assert.equal(app.encodeLeaseExpiryDate('2000-02-29'), '32383544');
+  for (const date of ['', '1979-12-31', '2108-01-01', '2025-02-29', '2026-13-01', '2026-00-01', '2026-11-00']) {
+    assert.throws(() => app.encodeLeaseExpiryDate(date), /valid lease expiry date/);
+  }
+});
+
+test('lease creation submits the encoded date and retains other SAOT values', async () => {
+  let submitted;
+  const app = entitlementApp(async (_url, options) => {
+    submitted = JSON.parse(options.body);
+    return { ok: true, json: async () => ({}) };
+  });
+  app.loadEntitlements = async () => {};
+  app.baseProductId = '60';
+  app.optionalProducts = [{ id: '6050', label: 'Lease', available: true }];
+  app.form.productIds = ['6050'];
+  app.productMemory['60'] = { loading: false, error: '', files: [{ kind: 'product', segments: [
+    { id: '90', name: 'Expiry Date', size: '4', saot: true, value: '' },
+    { id: '91', name: 'Serial Number', size: '4', saot: true, value: '12345678' },
+  ] }] };
+  app.productMemory['6050'] = { loading: false, error: '', files: [] };
+  app.leaseExpiryDate = '2026-11-10';
+  await app.createEntitlement();
+  assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
+    { productId: '60', segmentId: '90', content: '35443641' },
+    { productId: '60', segmentId: '91', content: '12345678' },
+  ]);
+  assert.equal(app.leaseExpiryDate, '');
+});
+
+test('invalid lease date prevents submission', async () => {
+  let requests = 0;
+  const app = entitlementApp(async () => { requests++; });
+  app.optionalProducts = [{ id: '6050', label: 'Lease', available: true }];
+  app.form.productIds = ['6050'];
+  app.leaseExpiryDate = '2025-02-29';
+  await app.createEntitlement();
+  assert.equal(requests, 0);
+  assert.match(app.error, /valid lease expiry date/);
+});
+
+test('access checkboxes allow either or both', async () => {
   const app = entitlementApp(async () => ({ ok: true, json: async () => [] }));
   app.baseProductId = '60';
   app.productMemory['60'] = { loading: false, error: '', files: [] };
   app.accessProducts = [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }];
   app.products = [{ productId: '6048' }, { productId: '6049' }, { productId: '12' }];
-  assert.equal(app.availableProducts.length, 1);
   assert.equal(app.hasAccessProduct, false);
   app.setCheckboxProduct('6048', true);
   await new Promise(setImmediate);
@@ -302,7 +365,7 @@ test('access checkboxes allow either or both and do not duplicate dropdown produ
   assert.equal(app.hasAccessProduct, false);
 });
 
-test('Pivot is optional, excluded from the dropdown, and loads and removes memory', async () => {
+test('Pivot is optional and loads and removes memory', async () => {
   const requests = [];
   const app = entitlementApp(async (url) => {
     requests.push(url);
@@ -313,7 +376,6 @@ test('Pivot is optional, excluded from the dropdown, and loads and removes memor
   app.accessProducts = [{ id: '6048', label: 'Standalone' }];
   app.optionalProducts = [{ id: '6051', label: 'Pivot', available: true }];
   app.products = [{ productId: '6048' }, { productId: '6051' }, { productId: '12' }];
-  assert.equal(app.availableProducts.length, 1);
   app.setCheckboxProduct('6051', true);
   assert.equal(app.hasAccessProduct, false);
   assert.equal(app.productMemoryReady, false);

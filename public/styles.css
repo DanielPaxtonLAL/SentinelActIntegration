@@ -285,13 +285,6 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .create-entitlement-toolbar h2 { margin: 0; font-size: 1.1rem; }
 .entitlements-page .entitlement-form { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid #ddd; border-radius: 6px; background: #fff; }
 .entitlements-page .entitlement-form label { display: grid; gap: .35rem; min-width: 0; font-size: .9rem; font-weight: 600; }
-.entitlements-page .product-picker-field { display: grid; align-content: start; gap: .35rem; min-width: 0; }
-.entitlements-page .product-picker-field > label { font-size: .9rem; font-weight: 600; }
-.entitlements-page .product-picker { display: flex; align-items: center; gap: .5rem; }
-.entitlements-page .product-picker select,
-.entitlements-page .product-picker button { box-sizing: border-box; height: 2.5rem; }
-.entitlements-page .product-picker select { flex: 1; }
-.entitlements-page .product-picker button { padding: 0 .75rem; }
 .entitlements-page .selected-products { display: grid; gap: .4rem; margin: .25rem 0 0; padding: 0; list-style: none; }
 .entitlements-page .selected-products > li { min-width: 0; padding: .5rem .65rem; border: 1px solid #ddd; border-radius: 4px; background: #f8f8f8; }
 .entitlements-page .selected-product-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
