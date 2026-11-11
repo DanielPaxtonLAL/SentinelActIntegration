@@ -329,6 +329,7 @@ class EmsClient {
             name: segment.name,
             saot: String(segment.saot) === 'true',
             size: segment.size,
+            offset: segment.offset,
             text: segment.text === undefined || segment.text === null ? '' : String(segment.text),
           })),
       }));

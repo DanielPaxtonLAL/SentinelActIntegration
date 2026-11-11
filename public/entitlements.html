@@ -73,6 +73,7 @@
               <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
               <dt>End date</dt><dd>{{ displayValue(selectedEntitlement.endDate) }}</dd>
               <dt>Description</dt><dd>{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</dd>
+              <dt>Version</dt><dd>{{ decodedVersion }}</dd>
             </dl>
             <h3>Products</h3>
             <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
@@ -86,6 +87,23 @@
                     <td>{{ displayValue(product.lineItemType) }}</td>
                     <td>{{ displayValue(product.productName) }}</td>
                     <td>{{ displayValue(product.productId) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>Base product memory</h3>
+            <p v-if="!baseMemorySegments.length">No memory fields are listed for the base product.</p>
+            <div v-else class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>ID</th><th>Name</th><th>Size</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="segment in baseMemorySegments" :key="segment.id">
+                    <td>{{ displayValue(segment.id) }}</td>
+                    <td>{{ displayValue(segment.name) }}</td>
+                    <td>{{ displayValue(segment.size) }}</td>
+                    <td><code>{{ hexValue(segment) }}</code></td>
                   </tr>
                 </tbody>
               </table>
@@ -106,6 +124,9 @@
           entitlements: [],
           customers: [],
           selectedEntitlement: null,
+          versionMemory: null,
+          versionError: '',
+          detailRequest: 0,
           detailLoading: false,
           detailError: '',
           loading: false,
@@ -123,6 +144,24 @@
           if (this.error) return this.error;
           if (this.notice) return this.notice;
           return '';
+        },
+        baseMemorySegments() {
+          const base = (this.selectedEntitlement?.products || [])
+            .find((product) => String(product.productId) === String(this.selectedEntitlement.baseProductId));
+          return base?.memorySegments || [];
+        },
+        decodedVersion() {
+          if (this.versionError) return this.versionError;
+          const segments = this.baseMemorySegments.filter((segment) =>
+            typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'version'
+          );
+          if (!segments.length) return 'Unavailable';
+          if (segments.length !== 1) return 'Invalid version data';
+          const text = String((this.versionMemory ? this.versionMemory.content : segments[0].text) ?? '').trim();
+          if (!/^[0-9a-f]{8}$/i.test(text)) return 'Invalid version data';
+          const versionHex = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
+          if (!/^[0-9a-f]{4}$/i.test(versionHex)) return 'Invalid version data';
+          return 'v' + ((parseInt(versionHex, 16) ^ 0xBEAD) / 1000);
         },
         filteredEntitlements() {
           const query = this.filter.toLocaleLowerCase();
@@ -145,7 +184,10 @@
       },
       methods: {
         async openEntitlementDetails(entitlement) {
+          const request = ++this.detailRequest;
           this.detailError = '';
+          this.versionError = '';
+          this.versionMemory = null;
           this.selectedEntitlement = { ...entitlement, products: [] };
           this.detailLoading = true;
           try {
@@ -153,6 +195,7 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!Array.isArray(data.products)) throw new Error('The server returned invalid entitlement details');
+            if (request !== this.detailRequest) return;
             const customerId = data.customerId ?? entitlement.customerId;
             const customer = this.customers.find((item) =>
               String(item.customerId ?? item.id ?? '') === String(customerId ?? '')
@@ -162,11 +205,62 @@
               customerName: customer?.name ?? customer?.customerName ??
                 data.customerName ?? data.customer ?? entitlement.customer,
             };
+            try {
+              const memory = await this.loadVersionMemory(data);
+              if (request === this.detailRequest) this.versionMemory = memory;
+            } catch (err) {
+              if (request === this.detailRequest) this.versionError = 'Unable to determine effective version: ' + err.message;
+            }
           } catch (err) {
-            this.detailError = 'Failed to load entitlement details: ' + err.message;
+            if (request === this.detailRequest) this.detailError = 'Failed to load entitlement details: ' + err.message;
           } finally {
-            this.detailLoading = false;
+            if (request === this.detailRequest) this.detailLoading = false;
           }
+        },
+        async loadVersionMemory(entitlement) {
+          if (!Array.isArray(entitlement.versionProductIds)) {
+            throw new Error('version product configuration is missing');
+          }
+          const selected = entitlement.products.filter((product) =>
+            entitlement.versionProductIds.includes(String(product.productId))
+          );
+          if (!selected.length) return;
+          if (selected.length !== 1) throw new Error('multiple version products are selected');
+          const base = entitlement.products.find((product) => String(product.productId) === String(entitlement.baseProductId));
+          const versions = (base?.memorySegments || []).filter((segment) =>
+            typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'version'
+          );
+          if (versions.length !== 1) throw new Error('the base Version segment is missing or ambiguous');
+          const offset = (value) => {
+            const text = String(value ?? '').trim();
+            return /^(?:0x[0-9a-f]+|\d+)$/i.test(text) ? Number(text) : NaN;
+          };
+          const baseOffset = offset(versions[0].offset);
+          const baseSize = Number(versions[0].size);
+          if (!Number.isSafeInteger(baseOffset) || !Number.isSafeInteger(baseSize) || baseSize !== 4) {
+            throw new Error('the base Version segment has invalid memory metadata');
+          }
+          const response = await fetch(`/api/catalog/products/${encodeURIComponent(selected[0].productId)}/read-only-memory`);
+          const files = await response.json();
+          if (!response.ok) throw new Error(files.error || response.statusText);
+          if (!Array.isArray(files)) throw new Error('invalid version product memory');
+          const writes = files.filter((file) => file.kind === 'product').flatMap((file) => {
+            if (!Array.isArray(file.segments)) throw new Error('invalid version product memory segments');
+            return file.segments;
+          });
+          const overlaps = writes.filter((segment) => {
+            const start = offset(segment.offset);
+            const size = Number(segment.size);
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(size) || size <= 0) {
+              throw new Error('invalid version product memory metadata');
+            }
+            return start < baseOffset + baseSize && baseOffset < start + size;
+          });
+          if (overlaps.length !== 1 || offset(overlaps[0].offset) !== baseOffset ||
+              Number(overlaps[0].size) !== baseSize || overlaps[0].saot !== false) {
+            throw new Error('the version product does not contain one complete fixed Version write');
+          }
+          return overlaps[0];
         },
         async loadCustomers() {
           this.customersLoading = true;
@@ -192,6 +286,12 @@
         typeLabel(type) {
           const labels = { 1: 'HL Key', 2: 'Product Key' };
           return labels[String(type).trim()] ?? type;
+        },
+        hexValue(segment) {
+          const text = String(segment.text ?? '').trim();
+          if (!/^[0-9a-f]*$/i.test(text)) return this.displayValue(text);
+          const digits = Number(segment.size) * 2;
+          return (Number.isInteger(digits) && digits > 0 ? text.padStart(digits, '0') : text).toUpperCase() || '—';
         },
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);

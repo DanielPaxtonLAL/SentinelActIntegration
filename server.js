@@ -149,7 +149,12 @@ app.get('/api/entitlements/:id', async (req, res) => {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
   }
   try {
-    res.json(await withSession(() => ems.getEntitlementDetails(req.params.id)));
+    const details = await withSession(() => ems.getEntitlementDetails(req.params.id));
+    res.json({
+      ...details,
+      baseProductId: formData.baseProductId,
+      versionProductIds: formData.versionProducts.map((product) => product.id),
+    });
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
