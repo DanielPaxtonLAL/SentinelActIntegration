@@ -31,9 +31,11 @@ function parseFormData(json) {
     return options.map(({ id, label }) => ({ id, label }));
   };
 
-  const accessProducts = requireIds(optionsOf(json['product-options'], 'product-options'), 'product-options');
+  const accessOptions = optionsOf(json['product-options'], 'product-options');
+  const accessProducts = requireIds(accessOptions, 'product-options');
   if (!accessProducts.length) throw new Error('entitlement form data: "product-options" needs at least one option');
-  const optionalProducts = requireIds(optionsOf(json['optional-products'], 'optional-products'), 'optional-products');
+  const optionalOptions = optionsOf(json['optional-products'], 'optional-products');
+  const optionalProducts = requireIds(optionalOptions, 'optional-products');
 
   const versionOptions = optionsOf(json.version, 'version');
   const defaults = versionOptions.filter((option) => !option.id);
@@ -45,6 +47,12 @@ function parseFormData(json) {
     throw new Error('entitlement form data: "lease" needs exactly one option with a product-id');
   }
   const lease = { id: leaseOptions[0].id, label: leaseOptions[0].label };
+  const productAliases = [
+    ...accessOptions.map(({ key: alias, id }) => ({ alias, id, group: 'product' })),
+    ...optionalOptions.map(({ key: alias, id }) => ({ alias, id, group: 'optional' })),
+    ...versionOptions.map(({ key: alias, id }) => ({ alias, id, group: 'version' })),
+    ...leaseOptions.map(({ key: alias, id }) => ({ alias, id, group: 'lease' })),
+  ];
 
   const all = [base, ...accessProducts, ...optionalProducts, ...versionProducts, lease].map((item) => item.id ?? item);
   const duplicate = all.find((id, index) => all.indexOf(id) !== index);
@@ -57,6 +65,7 @@ function parseFormData(json) {
     versionProducts,
     defaultVersionLabel: defaults[0]?.label ?? '',
     lease,
+    productAliases,
   };
 }
 

@@ -318,20 +318,30 @@ class EmsClient {
     const products = entitlementItems.flatMap((item) => {
       const itemProducts = item?.itemProduct ?? [];
       const productList = Array.isArray(itemProducts) ? itemProducts : [itemProducts];
+      const entitlementMemorySegments = asList(
+        item?.memorySegments?.segment ?? item?.memorySegments?.memorySegment ?? item?.memorySegments
+      );
       return productList.filter((product) => product && typeof product === 'object').map((product) => ({
-        lineItemType: item.lineItemType,
+        lineItemType: item?.lineItemType,
         productId: product.productId,
         productName: product.product?.productName ?? product.productName,
         memorySegments: asList(product.product?.memorySegment)
           .filter((segment) => segment && typeof segment === 'object')
-          .map((segment) => ({
-            id: String(segment.id),
-            name: segment.name,
-            saot: String(segment.saot) === 'true',
-            size: segment.size,
-            offset: segment.offset,
-            text: segment.text === undefined || segment.text === null ? '' : String(segment.text),
-          })),
+          .map((segment) => {
+            const entitlementSegment = entitlementMemorySegments.find((memorySegment) =>
+              String(memorySegment.prdMemorySegmentId ?? memorySegment.productMemorySegmentId ?? '') === String(segment.id)
+            );
+            const text = entitlementSegment?.data ?? entitlementSegment?.text ??
+              entitlementSegment?.content ?? segment.text ?? segment.content;
+            return {
+              id: String(segment.id),
+              name: segment.name,
+              saot: String(segment.saot) === 'true',
+              size: segment.size,
+              offset: segment.offset,
+              text: text === undefined || text === null ? '' : String(text),
+            };
+          }),
       }));
     });
 

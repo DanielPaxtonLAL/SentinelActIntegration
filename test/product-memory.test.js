@@ -40,6 +40,20 @@ test('lists product-specific segments only for read-only memory files', async ()
   assert.equal(files[0].segments[1].saot, false);
 });
 
+test('uses entitlement item memory values for product memory segments', async () => {
+  const client = clientWithResponses({
+    '/entitlement/5057.xml': `<entitlement><customerId>5</customerId><entitlementItem>
+      <memorySegments><segment><prdMemorySegmentId>90</prdMemorySegmentId><data>35383544</data></segment></memorySegments>
+      <itemProduct><productId>6047</productId><product><productName>Base</productName>
+        <memorySegment><id>90</id><name>Expiry Date</name><size>4</size><text>30303030</text><saot>true</saot></memorySegment>
+      </product></itemProduct>
+    </entitlementItem></entitlement>`,
+    '/customer.xml': '<listResponse></listResponse>',
+  });
+  const details = await client.getEntitlementDetails('5057');
+  assert.equal(details.products[0].memorySegments[0].text, '35383544');
+});
+
 test('handles no references, empty segment lists, and invalid EMS data explicitly', async () => {
   assert.deepEqual(await clientWithResponses({ '/product/1.ws': '<product><productName>None</productName></product>' }).getProductReadOnlyMemory('1'), []);
   const client = clientWithResponses({

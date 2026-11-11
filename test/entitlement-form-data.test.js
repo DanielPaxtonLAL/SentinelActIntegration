@@ -26,6 +26,12 @@ test('parses ids, labels and default version', () => {
   assert.equal(data.defaultVersionLabel, 'V1');
   assert.deepEqual(data.versionProducts.map((p) => p.id), ['3']);
   assert.equal(data.lease.id, '4');
+  assert.deepEqual(data.productAliases, [
+    { alias: 'a', id: '2', group: 'product' },
+    { alias: 'v1', id: '', group: 'version' },
+    { alias: 'v2', id: '3', group: 'version' },
+    { alias: 'lease', id: '4', group: 'lease' },
+  ]);
 });
 
 test('rejects duplicate ids and missing sections', () => {

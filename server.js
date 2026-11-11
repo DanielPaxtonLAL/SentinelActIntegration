@@ -154,6 +154,8 @@ app.get('/api/entitlements/:id', async (req, res) => {
       ...details,
       baseProductId: formData.baseProductId,
       versionProductIds: formData.versionProducts.map((product) => product.id),
+      leaseProductId: formData.lease.id,
+      productAliases: formData.productAliases,
     });
   } catch (err) {
     if (err.status === 401) {

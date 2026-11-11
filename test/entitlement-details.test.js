@@ -21,8 +21,90 @@ function versionFor(products, baseProductId = '6047') {
   return definition.computed.decodedVersion.call(app);
 }
 
+test('labels entitlement types and allows filtering by key update', () => {
+  const { typeLabel } = definition.methods;
+  assert.equal(typeLabel(1), 'HL Key');
+  assert.equal(typeLabel('2'), 'Product Key');
+  assert.equal(typeLabel(3), 'Key Update');
+  assert.equal(typeLabel(' 3 '), 'Key Update');
+  assert.equal(typeLabel(4), 4);
+  const app = { filter: 'key update', entitlements: [{ id: '1', type: 3 }, { id: '2', type: 2 }], typeLabel };
+  assert.equal(definition.computed.filteredEntitlements.call(app)[0].id, '1');
+  assert.equal(definition.computed.filteredEntitlements.call(app).length, 1);
+});
+
+test('shows customer, serial number, status, and expiry date in order in entitlement details', () => {
+  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<p class="detail-footnote"/)[1];
+  const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
+  const checkboxes = details.match(/<input type="checkbox"/g) || [];
+  assert.equal(checkboxes.length, labels.length);
+  assert.doesNotMatch(details, /v-model|@change|@click/);
+  assert.deepEqual(labels.slice(0, 4), ['Customer', 'Serial Number*', 'Status', 'Expiry Date*']);
+  const app = { selectedEntitlement: {
+    baseProductId: '6047',
+    leaseProductId: '6050',
+    products: [
+      { productId: '6047', memorySegments: [
+        { name: 'Serial Number', saot: true, text: '344432' },
+        { name: 'Expiry Date', saot: true, text: '35383544' },
+      ] },
+      { productId: '6050', memorySegments: [] },
+    ],
+  } };
+  Object.defineProperty(app, 'baseMemorySegments', {
+    get: () => definition.computed.baseMemorySegments.call(app),
+  });
+  assert.equal(definition.computed.selectedSerialNumber.call(app), '1234');
+  assert.equal(definition.computed.selectedExpiryDate.call(app), '2024-02-29');
+  app.selectedEntitlement.products[0].memorySegments[1].text = '585D';
+  assert.equal(definition.computed.selectedExpiryDate.call(app), '2024-02-29');
+  app.selectedEntitlement.products[0].memorySegments[1].text = '0000585D';
+  assert.equal(definition.computed.selectedExpiryDate.call(app), '2024-02-29');
+  app.selectedEntitlement.products[0].memorySegments[1].text = '35383544';
+  app.selectedEntitlement.products.pop();
+  assert.equal(definition.computed.selectedExpiryDate.call(app), 'N/A (Not Lease)');
+  app.selectedEntitlement.products[0].memorySegments = [];
+  assert.equal(definition.computed.selectedSerialNumber.call(app), 'Unavailable');
+  app.selectedEntitlement.products.push({ productId: '6050', memorySegments: [] });
+  assert.equal(definition.computed.selectedExpiryDate.call(app), 'Unavailable');
+});
+
+test('marks malformed or invalid base expiry dates unavailable', () => {
+  const app = {
+    selectedEntitlement: { leaseProductId: '6050', products: [{ productId: '6050' }] },
+    baseMemorySegments: [{ name: 'Expiry Date', saot: true, text: '30303030' }],
+  };
+  assert.equal(definition.computed.selectedExpiryDate.call(app), 'Unavailable');
+  app.baseMemorySegments[0].text = '35383230';
+  assert.equal(definition.computed.selectedExpiryDate.call(app), 'Unavailable');
+});
+
+test('shows each configured product alias as present or absent', () => {
+  const aliasTemplate = html.match(/<template v-for="attribute in selectedProductAttributes"[\s\S]*?<\/template>/)[0];
+  assert.match(aliasTemplate, /<div class="detail-check"[^>]*><input type="checkbox"/);
+  const app = { selectedEntitlement: {
+    products: [{ productId: '6048' }, { productId: '6052' }],
+    productAliases: [
+      { alias: 'standalone', id: '6048', group: 'product' },
+      { alias: 'link', id: '6049', group: 'product' },
+      { alias: 'v22', id: '', group: 'version' },
+      { alias: 'v23', id: '6052', group: 'version' },
+      { alias: 'lease', id: '6050', group: 'lease' },
+    ],
+  } };
+  assert.deepEqual(
+    definition.computed.selectedProductAttributes.call(app).map(({ alias, present }) => ({ alias, present })),
+    [
+      { alias: 'standalone', present: true },
+      { alias: 'link', present: false },
+      { alias: 'lease', present: false },
+    ]
+  );
+  assert.ok(!html.includes('>End date<'));
+});
+
 test('shows the decoded base product version in entitlement details', () => {
-  assert.match(html, /<dt>Version<\/dt><dd>\{\{ decodedVersion \}\}<\/dd>/);
+  assert.match(html, /<div class="detail-label"[^>]*>Version\*<\/div><div class="detail-value"[^>]*>\{\{ decodedVersion \}\}<\/div>/);
   const products = [
     { productId: '6048', memorySegments: [{ name: 'Version', text: '30303030' }] },
     { productId: '6047', memorySegments: [{ name: ' Version ', text: '45423544' }] },

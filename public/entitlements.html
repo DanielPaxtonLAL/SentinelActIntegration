@@ -66,15 +66,20 @@
           <p v-if="detailLoading" role="status">Loading entitlement details…</p>
           <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
           <template v-if="!detailLoading && !detailError">
-            <dl class="entitlement-detail-fields">
-              <dt>Customer</dt><dd>{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</dd>
-              <dt>Status</dt><dd>{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</dd>
-              <dt>Created</dt><dd>{{ displayValue(selectedEntitlement.createDate) }}</dd>
-              <dt>Start date</dt><dd>{{ displayValue(selectedEntitlement.startDate) }}</dd>
-              <dt>End date</dt><dd>{{ displayValue(selectedEntitlement.endDate) }}</dd>
-              <dt>Description</dt><dd>{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</dd>
-              <dt>Version</dt><dd>{{ decodedVersion }}</dd>
-            </dl>
+            <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Customer"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Serial number"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Status</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Status"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Expiry Date*</div><div class="detail-value" role="cell">{{ selectedExpiryDate }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Expiry date"></div></div>
+              <template v-for="attribute in selectedProductAttributes" :key="attribute.alias">
+                <div class="detail-row" role="row"><div class="detail-label" role="rowheader">{{ attribute.alias }}</div><div class="detail-value" role="cell">{{ attribute.present ? 'Yes' : 'No' }}</div><div class="detail-check" role="cell"><input type="checkbox" :aria-label="'Confirm ' + attribute.alias"></div></div>
+              </template>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.createDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Created"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start date</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Description</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Description"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Version"></div></div>
+            </div>
+            <p class="detail-footnote">* Derived from Memory Segments in Base Product</p>
             <h3>Products</h3>
             <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
             <div v-else class="table-wrap">
@@ -149,6 +154,56 @@
           const base = (this.selectedEntitlement?.products || [])
             .find((product) => String(product.productId) === String(this.selectedEntitlement.baseProductId));
           return base?.memorySegments || [];
+        },
+        selectedSerialNumber() {
+          const segments = this.baseMemorySegments.filter((segment) =>
+            segment.saot && typeof segment.name === 'string' &&
+            segment.name.trim().toLowerCase() === 'serial number'
+          );
+          if (segments.length !== 1) return 'Unavailable';
+          const text = String(segments[0].text ?? '').trim();
+          if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return 'Unavailable';
+          const digits = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
+          if (!/^[0-9a-f]+$/i.test(digits)) return 'Unavailable';
+          return BigInt(`0x${digits}`).toString();
+        },
+        selectedExpiryDate() {
+          const hasLeaseProduct = (this.selectedEntitlement?.products || []).some((product) =>
+            String(product.productId) === String(this.selectedEntitlement.leaseProductId)
+          );
+          if (!hasLeaseProduct) return 'N/A (Not Lease)';
+          const segments = this.baseMemorySegments.filter((segment) =>
+            typeof segment.name === 'string' &&
+            segment.name.trim().toLowerCase() === 'expiry date'
+          );
+          if (segments.length !== 1) return 'Unavailable';
+          const text = String(segments[0].text ?? '').trim();
+          if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return 'Unavailable';
+          const candidates = [];
+          const decoded = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
+          if (/^[0-9a-f]{4}$/i.test(decoded)) candidates.push(parseInt(decoded, 16));
+          const raw = parseInt(text, 16);
+          if (text.length <= 8 && raw <= 0xFFFF) candidates.push(raw);
+          for (const value of candidates) {
+            const year = (value >> 9) + 1980;
+            const month = (value >> 5) & 0xF;
+            const day = value & 0x1F;
+            const date = new Date(Date.UTC(year, month - 1, day));
+            if (value && month >= 1 && month <= 12 && day >= 1 &&
+                date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 &&
+                date.getUTCDate() === day) {
+              return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            }
+          }
+          return 'Unavailable';
+        },
+        selectedProductAttributes() {
+          const products = this.selectedEntitlement?.products || [];
+          const aliases = this.selectedEntitlement?.productAliases || [];
+          return aliases.filter((attribute) => attribute.group !== 'version').map((attribute) => ({
+            ...attribute,
+            present: products.some((product) => String(product.productId) === String(attribute.id)),
+          }));
         },
         decodedVersion() {
           if (this.versionError) return this.versionError;
@@ -284,7 +339,7 @@
           window.location.assign('/create-entitlement-form.html');
         },
         typeLabel(type) {
-          const labels = { 1: 'HL Key', 2: 'Product Key' };
+          const labels = { 1: 'HL Key', 2: 'Product Key', 3: 'Key Update' };
           return labels[String(type).trim()] ?? type;
         },
         hexValue(segment) {
