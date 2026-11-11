@@ -517,3 +517,16 @@ test('shared head, disclaimer and nav are included into pages with the right cur
   assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
   assert.doesNotMatch(render('catalog.html', '/catalog.html'), /aria-current="page">(Entitlements|Customers)/);
 });
+
+test('deletes an entitlement with DELETE on the numeric entitlement ws path', async () => {
+  const client = new EmsClient({ baseUrl: 'https://ems.example' });
+  client.authenticated = true;
+  const calls = [];
+  client._fetch = async (url, options) => {
+    calls.push({ url, method: options.method });
+    return { ok: true, status: 200, statusText: 'OK', text: async () => '' };
+  };
+  assert.deepEqual(await client.deleteEntitlement('5057'), { deleted: true, entId: '5057' });
+  assert.deepEqual(calls, [{ url: 'https://ems.example/ems/v90/ws/entitlement/5057.ws', method: 'DELETE' }]);
+  await assert.rejects(() => client.deleteEntitlement('abc'), /positive number/);
+});

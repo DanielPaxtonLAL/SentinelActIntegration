@@ -115,6 +115,11 @@
               </table>
             </div>
             </details>
+            <details class="detail-collapsible danger-zone">
+              <summary>DANGER ZONE</summary>
+              <p class="form-hint">Deleting an entitlement cannot be undone.</p>
+              <button type="button" class="button--destructive" :disabled="deleting" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
+            </details>
           </template>
         </template>
         <p v-else>Select an entitlement to view its details.</p>
@@ -135,6 +140,7 @@
           versionError: '',
           detailRequest: 0,
           detailLoading: false,
+          deleting: false,
           detailError: '',
           loading: false,
           customersLoading: false,
@@ -274,8 +280,28 @@
             if (request === this.detailRequest) this.detailLoading = false;
           }
         },
-        async loadVersionMemory(entitlement) {
-          if (!Array.isArray(entitlement.versionProductIds)) {
+        async deleteSelectedEntitlement() {
+          const entitlement = this.selectedEntitlement;
+          if (!entitlement || this.deleting) return;
+          const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
+          if (!window.confirm('Delete entitlement ' + entitlement.id + ' for ' + name + '? This cannot be undone.')) return;
+          this.deleting = true;
+          this.error = '';
+          this.notice = '';
+          try {
+            const response = await fetch('/api/entitlements/' + encodeURIComponent(entitlement.id), { method: 'DELETE' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            this.selectedEntitlement = null;
+            this.notice = 'Entitlement ' + entitlement.id + ' deleted.';
+            await this.loadEntitlements();
+          } catch (err) {
+            this.error = 'Failed to delete entitlement: ' + err.message;
+          } finally {
+            this.deleting = false;
+          }
+        },
+        async loadVersionMemory(entitlement) {          if (!Array.isArray(entitlement.versionProductIds)) {
             throw new Error('version product configuration is missing');
           }
           const selected = entitlement.products.filter((product) =>

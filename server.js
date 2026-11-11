@@ -354,6 +354,21 @@ const saveEntitlement = async (req, res) => {
 };
 app.post('/api/entitlements', express.json(), saveEntitlement);
 app.put('/api/entitlements/:id', express.json(), saveEntitlement);
+app.delete('/api/entitlements/:id', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
+  }
+  try {
+    res.json(await withSession(() => ems.deleteEntitlement(req.params.id)));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
 
 const { ACT_URL, ACT_DATABASE } = process.env;
 const act = new ActClient({

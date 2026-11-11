@@ -519,3 +519,5 @@ td { overflow-wrap: anywhere; }
 @media (min-width: 641px) {
   .entitlements-page .entitlement-details { max-height: calc(100vh - 11rem); overflow-y: auto; }
 }
+.entitlements-page .danger-zone { border-color: var(--color-error); }
+.entitlements-page .danger-zone > summary { background: var(--color-error); color: var(--button-text-on-color); }

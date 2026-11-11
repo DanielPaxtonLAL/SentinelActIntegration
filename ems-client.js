@@ -527,6 +527,29 @@ class EmsClient {
     return { saved: true, entId: String(id), Eid: entitlement.eid };
   }
 
+  // Deletes an entitlement by its numeric id (not the EID GUID).
+  async deleteEntitlement(id) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
+    const response = await this._fetch(`${this.apiRoot}/entitlement/${id}.ws`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/xml, application/json' },
+    });
+    const text = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while deleting the entitlement. Please retry.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS entitlement delete failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = text;
+      throw error;
+    }
+    return { deleted: true, entId: String(id) };
+  }
+
   async createEntitlement(entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     const { entitlementXml, lineItemType } = this.buildEntitlementXml(entitlement);
