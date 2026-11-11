@@ -49,7 +49,7 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.createDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
-                <td><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
                 <td class="entitlement-actions" @click.stop @keydown.stop>
                   <button type="button" class="button--constructive" @click="openEditEntitlement(entitlement)">Edit</button>
                   <button type="button">More options</button>
@@ -62,24 +62,25 @@
       </div>
       <section class="entitlement-details" aria-live="polite">
         <template v-if="selectedEntitlement">
-          <h2>Entitlement details</h2>
+          <h2 class="entitlement-heading">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }} - Entitlement Details - <span class="status-tag" :class="statusTagClass(selectedEntitlement.entState || selectedEntitlement.state)">{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</span></h2>
+          <p class="entitlement-description">{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</p>
           <p v-if="detailLoading" role="status">Loading entitlement details…</p>
           <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
           <template v-if="!detailLoading && !detailError">
             <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Customer"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Serial number"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Status</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Status"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Expiry Date*</div><div class="detail-value" role="cell">{{ selectedExpiryDate }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Expiry date"></div></div>
-              <template v-for="attribute in selectedProductAttributes" :key="attribute.alias">
-                <div class="detail-row" role="row"><div class="detail-label" role="rowheader">{{ attribute.alias }}</div><div class="detail-value" role="cell">{{ attribute.present ? 'Yes' : 'No' }}</div><div class="detail-check" role="cell"><input type="checkbox" :aria-label="'Confirm ' + attribute.alias"></div></div>
-              </template>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.createDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Created"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start date</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start date"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Description</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Description"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Version"></div></div>
+<div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Serial Number"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Standalone Irricad</div><div class="detail-value" role="cell">{{ productPresent('standalone') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Standalone Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Link Irricad</div><div class="detail-value" role="cell">{{ productPresent('link') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Link Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Pivot Irricad</div><div class="detail-value" role="cell">{{ productPresent('pivot') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Pivot Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Irricad</div><div class="detail-value" role="cell">{{ productPresent('lease') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Lease Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Expiry Date*</div><div class="detail-value" role="cell">{{ selectedExpiryDate }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Lease Expiry Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Irricad Version"></div></div>
             </div>
             <p class="detail-footnote">* Derived from Memory Segments in Base Product</p>
+            <details class="detail-collapsible">
+            <summary>Verbose Details</summary>
             <h3>Products</h3>
             <p v-if="!selectedEntitlement.products.length">No products are listed for this entitlement.</p>
             <div v-else class="table-wrap">
@@ -113,6 +114,7 @@
                 </tbody>
               </table>
             </div>
+            </details>
           </template>
         </template>
         <p v-else>Select an entitlement to view its details.</p>
@@ -165,7 +167,7 @@
           if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return 'Unavailable';
           const digits = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
           if (!/^[0-9a-f]+$/i.test(digits)) return 'Unavailable';
-          return BigInt(`0x${digits}`).toString();
+          return BigInt(`0x${digits}`).toString().padStart(5, '0');
         },
         selectedExpiryDate() {
           const hasLeaseProduct = (this.selectedEntitlement?.products || []).some((product) =>
@@ -337,6 +339,17 @@
         },
         openCreateEntitlement() {
           window.location.assign('/create-entitlement-form.html');
+        },
+        statusTagClass(state) {
+          const key = String(state ?? '').trim().toLowerCase();
+          const known = ['complete', 'draft', 'acknowledged', 'queued', 'produced'];
+          const aliases = { acknowleged: 'acknowledged', qued: 'queued', completed: 'complete' };
+          const name = aliases[key] || key;
+          return known.includes(name) ? 'status-' + name : 'status-unknown';
+        },
+        productPresent(alias) {
+          const attribute = this.selectedProductAttributes.find((item) => item.alias === alias);
+          return attribute && attribute.present ? 'Yes' : 'No';
         },
         typeLabel(type) {
           const labels = { 1: 'HL Key', 2: 'Product Key', 3: 'Key Update' };

@@ -33,13 +33,13 @@ test('labels entitlement types and allows filtering by key update', () => {
   assert.equal(definition.computed.filteredEntitlements.call(app).length, 1);
 });
 
-test('shows customer, serial number, status, and expiry date in order in entitlement details', () => {
+test('shows customer, serial number, and expiry date in order in entitlement details', () => {
   const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<p class="detail-footnote"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   const checkboxes = details.match(/<input type="checkbox"/g) || [];
   assert.equal(checkboxes.length, labels.length);
   assert.doesNotMatch(details, /v-model|@change|@click/);
-  assert.deepEqual(labels.slice(0, 4), ['Customer', 'Serial Number*', 'Status', 'Expiry Date*']);
+  assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Start Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
   const app = { selectedEntitlement: {
     baseProductId: '6047',
     leaseProductId: '6050',
@@ -54,7 +54,7 @@ test('shows customer, serial number, status, and expiry date in order in entitle
   Object.defineProperty(app, 'baseMemorySegments', {
     get: () => definition.computed.baseMemorySegments.call(app),
   });
-  assert.equal(definition.computed.selectedSerialNumber.call(app), '1234');
+  assert.equal(definition.computed.selectedSerialNumber.call(app), '01234');
   assert.equal(definition.computed.selectedExpiryDate.call(app), '2024-02-29');
   app.selectedEntitlement.products[0].memorySegments[1].text = '585D';
   assert.equal(definition.computed.selectedExpiryDate.call(app), '2024-02-29');
@@ -80,8 +80,7 @@ test('marks malformed or invalid base expiry dates unavailable', () => {
 });
 
 test('shows each configured product alias as present or absent', () => {
-  const aliasTemplate = html.match(/<template v-for="attribute in selectedProductAttributes"[\s\S]*?<\/template>/)[0];
-  assert.match(aliasTemplate, /<div class="detail-check"[^>]*><input type="checkbox"/);
+  assert.match(html, /<div class="detail-value"[^>]*>\{\{ productPresent\('standalone'\) \}\}<\/div>/);
   const app = { selectedEntitlement: {
     products: [{ productId: '6048' }, { productId: '6052' }],
     productAliases: [
@@ -104,7 +103,7 @@ test('shows each configured product alias as present or absent', () => {
 });
 
 test('shows the decoded base product version in entitlement details', () => {
-  assert.match(html, /<div class="detail-label"[^>]*>Version\*<\/div><div class="detail-value"[^>]*>\{\{ decodedVersion \}\}<\/div>/);
+  assert.match(html, /<div class="detail-label"[^>]*>Irricad Version\*<\/div><div class="detail-value"[^>]*>\{\{ decodedVersion \}\}<\/div>/);
   const products = [
     { productId: '6048', memorySegments: [{ name: 'Version', text: '30303030' }] },
     { productId: '6047', memorySegments: [{ name: ' Version ', text: '45423544' }] },

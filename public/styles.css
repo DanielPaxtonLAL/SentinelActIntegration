@@ -26,6 +26,20 @@
   --color-error-dark: #9c2525;
   --color-success-marker: #278345;
 
+  /* ---- Entitlement status tags ---- */
+  --status-complete-bg: #3cb371;
+  --status-complete-text: #fff;
+  --status-draft-bg: #9fd3f5;
+  --status-draft-text: #0b2e4a;
+  --status-acknowledged-bg: #123b68;
+  --status-acknowledged-text: #fff;
+  --status-queued-bg: #0b5d2a;
+  --status-queued-text: #fff;
+  --status-produced-bg: #a4de2c;
+  --status-produced-text: #1f3300;
+  --status-unknown-bg: var(--color-surface-header);
+  --status-unknown-text: var(--color-text);
+
   /* ---- Button colours ---- */
   --button-default-bg: var(--color-surface-muted);
   --button-default-bg-hover: var(--color-surface-hover);
@@ -487,3 +501,21 @@ td { overflow-wrap: anywhere; }
 
 .entitlement-actions { white-space: nowrap; }
 .entitlement-actions button + button { margin-left: 0.4rem; }
+.entitlements-page .entitlement-description { margin: 0 0 1rem; overflow-wrap: anywhere; }
+.status-tag { display: inline-block; padding: .15rem .75rem; border-radius: 999px; font-size: .8rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.status-tag.status-complete { background: var(--status-complete-bg); color: var(--status-complete-text); }
+.status-tag.status-draft { background: var(--status-draft-bg); color: var(--status-draft-text); }
+.status-tag.status-acknowledged { background: var(--status-acknowledged-bg); color: var(--status-acknowledged-text); }
+.status-tag.status-queued { background: var(--status-queued-bg); color: var(--status-queued-text); }
+.status-tag.status-produced { background: var(--status-produced-bg); color: var(--status-produced-text); }
+.status-tag.status-unknown { background: var(--status-unknown-bg); color: var(--status-unknown-text); }
+.entitlements-page td.status-cell { text-align: center; vertical-align: middle; }
+.entitlements-page td.status-cell .status-tag { display: block; width: 100%; box-sizing: border-box; text-align: center; }
+.entitlements-page .entitlement-heading .status-tag { vertical-align: middle; margin-left: .25rem; }
+.entitlements-page .detail-collapsible { margin-top: 1rem; border: 1px solid var(--color-border); border-radius: 6px; }
+.entitlements-page .detail-collapsible > summary { padding: .6rem .75rem; font-weight: 600; cursor: pointer; background: var(--color-surface-header); border-radius: 6px; }
+.entitlements-page .detail-collapsible[open] > summary { border-bottom: 1px solid var(--color-border); border-radius: 6px 6px 0 0; }
+.entitlements-page .detail-collapsible > :not(summary) { margin: .75rem; }
+@media (min-width: 641px) {
+  .entitlements-page .entitlement-details { max-height: calc(100vh - 11rem); overflow-y: auto; }
+}
