@@ -5,7 +5,7 @@ const express = require('express');
 const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
 const { validateMemoryValues } = require('./entitlement-memory');
-const { pageIncludes } = require('./page-includes');
+const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
 
 const envFile = path.join(__dirname, '.env');
@@ -481,6 +481,15 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
         : `${err.message}${err.body ? `: ${typeof err.body === 'string' ? err.body : JSON.stringify(err.body)}` : ''}`,
     });
   }
+});
+
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
+  if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(404).type('text').send('Not found');
+  fs.readFile(path.join(publicDir, '404.html'), 'utf8', (err, html) => {
+    if (err) return res.status(404).type('text').send('Page not found');
+    res.status(404).type('html').send(renderPage(html, path.join(__dirname, 'partials'), '/404.html'));
+  });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
