@@ -170,6 +170,28 @@ class EmsClient {
     return bases[0];
   }
 
+  // Reads one product by its internal EMS id.
+  async getProductSummary(id) {
+    if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Product ID must be a positive number');
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
+    let xml;
+    try {
+      xml = await this.call(`/product/${id}.ws`);
+    } catch (err) {
+      if (err.status === 302) err.status = 401;
+      throw err;
+    }
+    const product = parser.parse(xml)?.product;
+    if (!product || typeof product !== 'object') throw new Error(`EMS returned invalid details for product ${id}`);
+    return {
+      id: String(id),
+      productName: product.productName,
+      lifeCycleStage: product.lifeCycleStage,
+      enforcementProductType: product.enforcementProductType,
+      productIdentifier: product.productIdentifier,
+    };
+  }
+
   async listModificationProducts(productId, vendorId = '2') {
     if (!/^[1-9]\d*$/.test(String(productId))) throw new Error('Product ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });

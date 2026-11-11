@@ -66,7 +66,7 @@
           <label class="access-product-option">
             <input type="radio" name="version" :checked="!selectedVersionId"
               @change="setVersionProduct('')" :disabled="loading || productsLoading">
-            Version 22 (default)
+            {{ defaultVersionLabel }} (default)
           </label>
           <label v-for="product in versionProducts" :key="product.id" class="access-product-option">
             <input type="radio" name="version" :checked="selectedVersionId === product.id"
@@ -130,6 +130,7 @@
           accessProducts: [],
           optionalProducts: [],
           versionProducts: [],
+          defaultVersionLabel: 'Default',
           leaseExpiryDate: '',
           serialNumber: '',
           baseProductId: '',
@@ -154,7 +155,7 @@
           return this.accessProducts.some((product) => this.form.productIds.includes(product.id));
         },
         leaseProduct() {
-          return this.optionalProducts.find((product) => product.label === 'Lease');
+          return this.optionalProducts.find((product) => product.lease);
         },
         otherOptionalProducts() {
           return this.optionalProducts.filter((product) => product !== this.leaseProduct);
@@ -356,9 +357,9 @@
             if (!response.ok) throw new Error(data.error || response.statusText);
             if (!data || !/^[1-9]\d*$/.test(String(data.baseProductId)) ||
                 !Array.isArray(data.modifications) ||
-                !Array.isArray(data.accessProducts) || data.accessProducts.length !== 2 ||
-                !Array.isArray(data.optionalProducts) || data.optionalProducts.length !== 2 ||
-                !Array.isArray(data.versionProducts) || data.versionProducts.length !== 1 ||
+                !Array.isArray(data.accessProducts) || data.accessProducts.length < 1 ||
+                !Array.isArray(data.optionalProducts) ||
+                !Array.isArray(data.versionProducts) ||
                 data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
                 data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
@@ -374,8 +375,9 @@
             this.baseProductId = String(data.baseProductId);
             this.products = data.modifications;
             this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
-            this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
+            this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, lease: Boolean(product.lease), available: product.available }));
             this.versionProducts = data.versionProducts.map((product) => ({ id: String(product.id), label: product.label, available: product.available }));
+            this.defaultVersionLabel = typeof data.defaultVersionLabel === 'string' && data.defaultVersionLabel ? data.defaultVersionLabel : 'Default';
             await this.loadProductMemory(this.baseProductId);
           } catch (err) {
             this.productError = 'Failed to load EMS products: ' + err.message;

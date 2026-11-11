@@ -4,15 +4,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const formJson = {
+  'base-product-id': '60',
+  'product-options': { standalone: { label: 'Standalone', 'product-id': '6048' }, link: { label: 'Link', 'product-id': '6049' } },
+  'optional-products': { pivot: { label: 'Pivot', 'product-id': '6051' } },
+  version: { v22: { label: 'Version 22', 'product-id': '' }, v23: { label: 'Version 23', 'product-id': '6052' } },
+  lease: { lease: { label: 'Lease', 'product-id': '6050' } },
+};
+
 function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true) {
   let handler;
   let saved;
   class EmsClient {
     constructor() { this.authenticated = true; }
     async listCustomers() { return [{ customerId: '5' }]; }
-    async findBaseProductByIdentifier(identifier) {
-      assert.equal(identifier, '12345');
-      return { id: '60', lifeCycleStage: 'Commit' };
+    async getProductSummary(id) {
+      assert.equal(id, '60');
+      return { id: '60', lifeCycleStage: 'Commit', enforcementProductType: 'BASE' };
     }
     async listModificationProducts(id) {
       assert.equal(id, '60');
@@ -20,7 +28,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         { productId: '6049', productName: '02 ADD Link', lifeCycleStage: 'Commit' },
         { productId: '6051', productName: '04 ADD Pivot', lifeCycleStage: pivotAvailable ? 'Commit' : 'Draft' },
         { productId: '6050', productName: '03 Lease version - fill out Expiry Date', lifeCycleStage: leaseAvailable ? 'Commit' : 'Draft' },
-        { productId: '6052', productName: versionAvailable ? '05 Set VERSION 23' : 'Different product', lifeCycleStage: 'Commit' },
+        { productId: '6052', productName: '05 Set VERSION 23', lifeCycleStage: versionAvailable ? 'Commit' : 'Draft' },
         { productId: '12', productName: 'Modification', lifeCycleStage: 'Commit' },
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
@@ -45,6 +53,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
     if (name === './entitlement-memory') return require('../entitlement-memory');
+    if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson) };
     if (name === './page-includes') return require('../page-includes');
     return require(name);
   };
@@ -119,7 +128,7 @@ test('lease requires the base expiry value and non-lease uses the EMS default', 
   assert.match(invalidDefault.res.body.error, /Expiry Date/);
   const noAccess = await route().submit({ productIds: ['6050'] });
   assert.equal(noAccess.res.statusCode, 400);
-  assert.match(noAccess.res.body.error, /Link, Standalone/);
+  assert.match(noAccess.res.body.error, /Standalone, Link/);
 });
 
 test('unavailable Lease does not prevent creation without it', async () => {

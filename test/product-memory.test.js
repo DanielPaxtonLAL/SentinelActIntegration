@@ -1,4 +1,4 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -212,7 +212,7 @@ test('loads modification products and required base memory for creation', async 
         { productId: '6050', productName: 'Lease' },
         { productId: '6052', productName: 'Version 23' },
       ], accessProducts: [{ id: '6048', label: 'Standalone' }, { id: '6049', label: 'Link' }],
-      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', available: true }],
+      optionalProducts: [{ id: '6051', label: 'Pivot', available: true }, { id: '6050', label: 'Lease', lease: true, available: true }],
       versionProducts: [{ id: '6052', label: 'Version 23', available: true }] }
       : [{ kind: 'product', segments: [
         { id: '90', saot: true, content: '0000' },
@@ -252,7 +252,7 @@ test('version radios select one modification and leave as is removes it', async 
   app.setVersionProduct('6052');
   assert.equal(app.selectedVersionId, '');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
-  assert.match(html, /<legend>Versions<\/legend>\s*<p class="form-hint">Up to and including<\/p>[\s\S]*?type="radio" name="version"[\s\S]*?Version 22 \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
+  assert.match(html, /<legend>Versions<\/legend>\s*<p class="form-hint">Up to and including<\/p>[\s\S]*?type="radio" name="version"[\s\S]*?\{\{ defaultVersionLabel \}\} \(default\)[\s\S]*?v-for="product in versionProducts"[\s\S]*?type="radio" name="version"/);
 });
 
 test('lease checkbox controls the base expiry value and loads lease memory', async () => {
@@ -269,7 +269,7 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
   assert.equal(file.segments[1].value, '');
   app.optionalProducts = [
     { id: '6051', label: 'Pivot', available: true },
-    { id: '6050', label: 'Lease', available: true },
+    { id: '6050', label: 'Lease', lease: true, available: true },
   ];
   assert.equal(app.leaseProduct.id, '6050');
   assert.deepEqual(Array.from(app.otherOptionalProducts, (product) => product.id), ['6051']);
@@ -331,7 +331,7 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   });
   app.loadEntitlements = async () => {};
   app.baseProductId = '60';
-  app.optionalProducts = [{ id: '6050', label: 'Lease', available: true }];
+  app.optionalProducts = [{ id: '6050', label: 'Lease', lease: true, available: true }];
   app.form.productIds = ['6050'];
   app.productMemory['60'] = { loading: false, error: '', files: [{ kind: 'product', segments: [
     { id: '90', name: 'Expiry Date', size: '4', saot: true, value: '' },
@@ -373,7 +373,7 @@ test('serial numbers convert from decimal to ASCII hexadecimal digits', () => {
 test('invalid lease date prevents submission', async () => {
   let requests = 0;
   const app = entitlementApp(async () => { requests++; });
-  app.optionalProducts = [{ id: '6050', label: 'Lease', available: true }];
+  app.optionalProducts = [{ id: '6050', label: 'Lease', lease: true, available: true }];
   app.form.productIds = ['6050'];
   app.leaseExpiryDate = '2025-02-29';
   await app.createEntitlement();

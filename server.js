@@ -6,6 +6,7 @@ const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
 const { validateMemoryValues } = require('./entitlement-memory');
 const { pageIncludes } = require('./page-includes');
+const { loadFormData } = require('./entitlement-form-data');
 
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) {
@@ -19,48 +20,41 @@ if (fs.existsSync(envFile)) {
 const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE } = process.env;
 const PORT = process.env.PORT || 3000;
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
-const ENTITLEMENT_BASE_PRODUCT_IDENTIFIER = '12345';
-const ENTITLEMENT_ACCESS_PRODUCTS = [
-  { id: '6048', name: '01 ADD Standalone', label: 'Standalone' },
-  { id: '6049', name: '02 ADD Link', label: 'Link' },
-];
-const ENTITLEMENT_OPTIONAL_PRODUCTS = [
-  { id: '6051', name: '04 ADD Pivot', label: 'Pivot' },
-  { id: '6050', name: '03 Lease version - fill out Expiry Date', label: 'Lease' },
-];
-const ENTITLEMENT_VERSION_PRODUCTS = [
-  { id: '6052', name: '05 Set VERSION 23', label: 'Version 23' },
-];
-const LEASE_PRODUCT_ID = '6050';
+// Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
+const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'));
 
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
-  const base = await withSession(() => ems.findBaseProductByIdentifier(ENTITLEMENT_BASE_PRODUCT_IDENTIFIER, vendorId));
-  if (String(base.lifeCycleStage).toLowerCase() !== 'commit') {
-    throw new Error(`Base product ${ENTITLEMENT_BASE_PRODUCT_IDENTIFIER} is not complete in EMS`);
+  const baseId = formData.baseProductId;
+  const base = await withSession(() => ems.getProductSummary(baseId));
+  if (String(base.lifeCycleStage).toLowerCase() !== 'commit' ||
+      String(base.enforcementProductType).toUpperCase() !== 'BASE') {
+    throw new Error(`Base product ${baseId} is not a complete base product in EMS (check entitlement-form-data.json)`);
   }
-  const modifications = await withSession(() => ems.listModificationProducts(base.id, vendorId));
+  const modifications = await withSession(() => ems.listModificationProducts(baseId, vendorId));
   const complete = modifications.filter((product) => String(product.lifeCycleStage).toLowerCase() === 'commit');
-  for (const required of ENTITLEMENT_ACCESS_PRODUCTS) {
-    if (!complete.some((product) => String(product.productId) === required.id &&
-        typeof product.productName === 'string' &&
-        product.productName.trim().toLowerCase() === required.name.toLowerCase())) {
-      throw new Error(`Required ${required.label} modification product ${required.id} is missing, renamed, or not complete in EMS`);
+  const isAvailable = (id) => complete.some((product) => String(product.productId) === id);
+  for (const required of formData.accessProducts) {
+    if (!isAvailable(required.id)) {
+      throw new Error(`Required product ${required.id} (${required.label}) is not a complete modification of base product ${baseId} in EMS (check entitlement-form-data.json)`);
     }
   }
-  const availability = (products) => products.map((option) => ({
+  const withAvailability = (products, extra = {}) => products.map((option) => ({
     id: option.id,
     label: option.label,
-    available: complete.some((product) => String(product.productId) === option.id &&
-      typeof product.productName === 'string' &&
-      product.productName.trim().toLowerCase() === option.name.toLowerCase()),
+    ...extra,
+    available: isAvailable(option.id),
   }));
   return {
-    baseProductId: String(base.id),
+    baseProductId: baseId,
     modifications: complete,
-    accessProducts: ENTITLEMENT_ACCESS_PRODUCTS.map(({ id, label }) => ({ id, label })),
-    optionalProducts: availability(ENTITLEMENT_OPTIONAL_PRODUCTS),
-    versionProducts: availability(ENTITLEMENT_VERSION_PRODUCTS),
+    accessProducts: formData.accessProducts.map(({ id, label }) => ({ id, label })),
+    optionalProducts: [
+      ...withAvailability(formData.optionalProducts),
+      ...withAvailability([formData.lease], { lease: true }),
+    ],
+    versionProducts: withAvailability(formData.versionProducts),
+    defaultVersionLabel: formData.defaultVersionLabel,
   };
 }
 
@@ -279,8 +273,8 @@ const saveEntitlement = async (req, res) => {
     if (productIds.filter((id) => versionProducts.some((product) => product.id === String(id))).length > 1) {
       return res.status(400).json({ error: 'Select at most one version.' });
     }
-    if (!ENTITLEMENT_ACCESS_PRODUCTS.some((product) => productIds.map(String).includes(product.id))) {
-      return res.status(400).json({ error: 'Select Link, Standalone, or both.' });
+    if (!formData.accessProducts.some((product) => productIds.map(String).includes(product.id))) {
+      return res.status(400).json({ error: `Select at least one of: ${formData.accessProducts.map((product) => product.label).join(', ')}.` });
     }
     const allProductIds = [baseProductId, ...productIds.map(String)];
     const enforcements = await withSession(() => ems.listEnforcements(vendorId));
@@ -299,7 +293,7 @@ const saveEntitlement = async (req, res) => {
       .flatMap((file) => file.segments)
       .filter((segment) => segment.saot && typeof segment.name === 'string' &&
         segment.name.trim().toLowerCase() === 'expiry date');
-    const leaseSelected = productIds.map(String).includes(LEASE_PRODUCT_ID);
+    const leaseSelected = productIds.map(String).includes(formData.lease.id);
     if (expirySegments.length > 1 || (leaseSelected && expirySegments.length !== 1)) {
       return res.status(400).json({ error: 'EMS must provide exactly one editable base product Expiry Date segment for Lease.' });
     }

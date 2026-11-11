@@ -1,43 +1,44 @@
 {
+    "_comment": "EMS internal product IDs and form labels. Keys starting with _ are comments. Point EMS_FORM_DATA in .env at a different copy of this file for another EMS server.",
+
     "base-product-id": "6047",
 
     "product-options": {
-        "description": "<comment> form enforces at least one of the product options",
+        "_comment": "The form enforces at least one of these.",
         "standalone": {
-            "Label": "Standalone Irricad",
+            "label": "Standalone Irricad",
             "product-id": "6048"
         },
-
         "link": {
-            "Label": "Link Irricad",
+            "label": "Link Irricad",
             "product-id": "6049"
         }
     },
 
-    "optional-product-ids": {
-        "description": "<comment> any or none of these can be selected",
-        "Pivot": {
-            "Label": "Pivot Irricad",
+    "optional-products": {
+        "_comment": "Any or none of these can be selected.",
+        "pivot": {
+            "label": "Pivot Irricad",
             "product-id": "6051"
         }
     },
 
-    "Version": {
-        "description": "<comment> only one may be selected",
+    "version": {
+        "_comment": "Only one can be selected. The option with an empty product-id is the default and adds no product.",
         "v22": {
-            "Label": "Version 22",
+            "label": "Version 22",
             "product-id": ""
         },
         "v23": {
-            "Label": "Version 23",
+            "label": "Version 23",
             "product-id": "6052"
         }
     },
 
-    "Lease": {
-        "description": "<comment> only one may be selected",
-        "lease-product-name": {
-            "Label": "Lease",
+    "lease": {
+        "_comment": "Selecting this shows the lease expiry date and writes the base product Expiry Date segment.",
+        "lease": {
+            "label": "Lease",
             "product-id": "6050"
         }
     }
