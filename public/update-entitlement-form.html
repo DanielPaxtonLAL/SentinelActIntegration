@@ -36,8 +36,8 @@
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
         <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <label>
-          Description
-          <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
+          <span>Description <span id="description-remaining" class="form-hint character-count">- {{ 510 - form.description.length }} chars left</span></span>
+          <textarea v-model="form.description" maxlength="510" rows="3" aria-describedby="description-remaining" :disabled="loading"></textarea>
         </label>
         <div class="product-grid">
         <fieldset class="access-products">
@@ -81,14 +81,16 @@
           <label v-if="leaseProduct" class="access-product-option">
             <input type="checkbox" :checked="form.productIds.includes(leaseProduct.id)"
               @change="setCheckboxProduct(leaseProduct.id, $event.target.checked)"
-              :disabled="loading || productsLoading || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
+              :disabled="loading || productsLoading || !entitlementLoaded || !leaseProduct.available || (form.productIds.length >= 99 && !form.productIds.includes(leaseProduct.id))">
             {{ leaseProduct.label }}
             <span v-if="!leaseProduct.available" class="form-hint">(unavailable in EMS)</span>
           </label>
           <div v-if="leaseSelected" class="lease-options">
             <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
               Lease expiry date
-              <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
+              <input v-model="leaseExpiryDate" type="date" :min="leaseBounds.min" :max="leaseBounds.max" required :disabled="loading || leaseBounds.min > leaseBounds.max">
+              <span v-if="leaseBounds.min <= leaseBounds.max" class="form-hint">Allowed from {{ leaseBounds.min }} to {{ leaseBounds.max }} (inclusive).</span>
+              <span v-else class="form-error" role="alert">No valid lease expiry dates are available for this start date.</span>
             </label>
             <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
             <p v-else class="form-error" role="alert">Unable to find a unique editable 4-byte base product expiry date. Reload its memory before saving.</p>
@@ -110,7 +112,7 @@
         </div>
                 <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !entitlementLoaded || !customers.length || !hasAccessProduct || !productMemoryReady || (leaseSelected && leaseBounds.min > leaseBounds.max)">
             {{ loading ? 'Saving…' : 'Save changes' }}
           </button>
         </div>
@@ -118,6 +120,7 @@
     </section>
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/lease-dates.js"></script>
   <script>
     const { createApp } = Vue;
     const DEFAULT_LEASE_LENGTH_YEARS = 1;
@@ -132,6 +135,9 @@
           versionProducts: [],
           defaultVersionLabel: 'Default',
           leaseExpiryDate: '',
+          leaseExpiryRange: null,
+          entitlementStartDate: '',
+          entitlementLoaded: false,
           serialNumber: '',
           baseProductId: '',
           productMemory: {},
@@ -162,6 +168,9 @@
         },
         leaseSelected() {
           return Boolean(this.leaseProduct && this.form.productIds.includes(this.leaseProduct.id));
+        },
+        leaseBounds() {
+          return LeaseDates.bounds(this.entitlementStartDate, this.localToday(), this.leaseExpiryRange);
         },
         selectedVersionId() {
           return this.versionProducts.find((product) => this.form.productIds.includes(product.id))?.id || '';
@@ -200,6 +209,9 @@
         },
       },
       methods: {
+        localToday(now = new Date()) {
+          return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        },
         createEmptyForm() {
           return {
             customerId: '',
@@ -272,10 +284,10 @@
           return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         },
         defaultLeaseExpiryDate(today = new Date()) {
-          const year = today.getFullYear() + DEFAULT_LEASE_LENGTH_YEARS;
-          const month = today.getMonth();
-          const day = Math.min(today.getDate(), new Date(year, month + 1, 0).getDate());
-          return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const start = this.entitlementStartDate;
+          const { min, max } = LeaseDates.bounds(start, this.localToday(today), this.leaseExpiryRange);
+          if (min > max) return '';
+          return [min, LeaseDates.addMonths(start, DEFAULT_LEASE_LENGTH_YEARS * 12), max].sort()[1];
         },
         encodeLeaseExpiryDate(value) {
           const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -360,6 +372,9 @@
                 !Array.isArray(data.accessProducts) || data.accessProducts.length < 1 ||
                 !Array.isArray(data.optionalProducts) ||
                 !Array.isArray(data.versionProducts) ||
+                !data.leaseExpiryRange || !Number.isSafeInteger(data.leaseExpiryRange.minMonths) ||
+                !Number.isSafeInteger(data.leaseExpiryRange.maxMonths) || data.leaseExpiryRange.minMonths < 0 ||
+                data.leaseExpiryRange.maxMonths < data.leaseExpiryRange.minMonths || data.leaseExpiryRange.maxMonths > 1200 ||
                 data.accessProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
                   typeof product.label !== 'string' || !data.modifications.some((item) => String(item.productId) === String(product.id))) ||
                 data.optionalProducts.some((product) => !product || !/^[1-9]\d*$/.test(String(product.id)) ||
@@ -373,6 +388,7 @@
               throw new Error('The server returned an invalid modification product list');
             }
             this.baseProductId = String(data.baseProductId);
+            this.leaseExpiryRange = data.leaseExpiryRange;
             this.products = data.modifications;
             this.accessProducts = data.accessProducts.map((product) => ({ id: String(product.id), label: product.label }));
             this.optionalProducts = data.optionalProducts.map((product) => ({ id: String(product.id), label: product.label, lease: Boolean(product.lease), available: product.available }));
@@ -386,6 +402,7 @@
           }
         },
         async prefillFromEntitlement() {
+          this.entitlementLoaded = false;
           try {
             const response = await fetch(`/api/entitlements/${encodeURIComponent(this.editId)}`);
             const data = await response.json();
@@ -395,6 +412,8 @@
               .filter((id) => known.has(id));
             this.form.customerId = String(data.customerId ?? '');
             this.form.description = data.description ?? data.descr ?? '';
+            this.entitlementStartDate = String(data.startDate ?? '').slice(0, 10);
+            LeaseDates.bounds(this.entitlementStartDate, this.localToday(), this.leaseExpiryRange);
             this.form.productIds = productIds;
             productIds.forEach((id) => this.loadProductMemory(id));
             const baseProduct = (data.products || []).find((product) => String(product.productId) === this.baseProductId);
@@ -403,6 +422,7 @@
             if (this.leaseSelected) {
               this.leaseExpiryDate = this.decodeLeaseExpiryDate(segmentText((name) => name === 'expiry date')) || this.defaultLeaseExpiryDate();
             }
+            this.entitlementLoaded = true;
           } catch (err) {
             this.error = 'Failed to load entitlement: ' + err.message;
           }
@@ -414,10 +434,13 @@
           this.loading = true;
           this.error = '';
           try {
+            if (!this.entitlementLoaded) throw new Error('Load the entitlement before saving changes.');
+            if (this.leaseSelected) LeaseDates.validate(this.leaseExpiryDate, this.entitlementStartDate, this.localToday(), this.leaseExpiryRange);
             const leaseExpiryContent = this.leaseSelected ? this.encodeLeaseExpiryDate(this.leaseExpiryDate) : '';
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
+              description: this.form.description.trim(),
               memoryValues: this.memoryProductIds.flatMap((productId) =>
                 this.productMemory[productId].files.flatMap((file) =>
                   file.kind === 'product'

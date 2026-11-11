@@ -6,6 +6,7 @@ const { loadFormData, parseFormData } = require('../entitlement-form-data');
 const valid = () => ({
   _comment: 'ignored',
   'base-product-id': '1',
+  'lease-expiry-range': { 'min-months': 6, 'max-months': 24 },
   'product-options': { a: { label: 'A', 'product-id': '2' } },
   'optional-products': {},
   version: { v1: { label: 'V1', 'product-id': '' }, v2: { label: 'V2', 'product-id': '3' } },
@@ -26,6 +27,7 @@ test('parses ids, labels and default version', () => {
   assert.equal(data.defaultVersionLabel, 'V1');
   assert.deepEqual(data.versionProducts.map((p) => p.id), ['3']);
   assert.equal(data.lease.id, '4');
+  assert.deepEqual(data.leaseExpiryRange, { minMonths: 6, maxMonths: 24 });
   assert.deepEqual(data.productAliases, [
     { alias: 'a', id: '2', group: 'product' },
     { alias: 'v1', id: '', group: 'version' },
@@ -44,4 +46,10 @@ test('rejects duplicate ids and missing sections', () => {
   const noBase = valid();
   delete noBase['base-product-id'];
   assert.throws(() => parseFormData(noBase));
+  const invalidRange = valid();
+  invalidRange['lease-expiry-range']['min-months'] = 25;
+  assert.throws(() => parseFormData(invalidRange), /lease-expiry-range/);
+  const missingRange = valid();
+  delete missingRange['lease-expiry-range'];
+  assert.throws(() => parseFormData(missingRange), /lease-expiry-range/);
 });

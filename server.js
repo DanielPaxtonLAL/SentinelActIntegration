@@ -7,6 +7,7 @@ const { ActClient } = require('./act-client');
 const { validateMemoryValues } = require('./entitlement-memory');
 const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
+const LeaseDates = require('./public/lease-dates');
 
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) {
@@ -66,6 +67,7 @@ async function getEntitlementProducts() {
     ],
     versionProducts: withAvailability(formData.versionProducts),
     defaultVersionLabel: formData.defaultVersionLabel,
+    leaseExpiryRange: formData.leaseExpiryRange,
   };
 }
 
@@ -343,6 +345,15 @@ const saveEntitlement = async (req, res) => {
     }
     const today = new Date();
     const startDate = existing?.startDate ?? requestedStartDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    if (leaseSelected) {
+      const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      const expiry = memorySegments.find((segment) => segment.id === String(expirySegments[0].id));
+      try {
+        LeaseDates.validate(LeaseDates.decode(expiry.content), String(startDate).slice(0, 10), localToday, formData.leaseExpiryRange);
+      } catch (err) {
+        return res.status(400).json({ error: `Invalid lease expiry date: ${err.message}` });
+      }
+    }
     const entitlementData = {
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
       productIds: allProductIds,
@@ -477,7 +488,7 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
       if (!parent || typeof parent.name !== 'string' || !parent.name.trim()) {
         return res.status(502).json({ error: 'Act! returned a parent company without a name' });
       }
-      emsName = `${parent.name.trim()} ${company.name.trim()}`;
+      emsName = `${parent.name.trim()} - ${company.name.trim()}`;
     }
 
     const reference = String(company.id || req.params.id);

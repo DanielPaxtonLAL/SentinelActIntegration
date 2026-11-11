@@ -3,6 +3,12 @@
 
     "base-product-id": "6047",
 
+    "lease-expiry-range": {
+        "_comment": "Inclusive calendar months after the entitlement start date.",
+        "min-months": 6,
+        "max-months": 24
+    },
+
     "product-options": {
         "_comment": "The form enforces at least one of these.",
         "standalone": {

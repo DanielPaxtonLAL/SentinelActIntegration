@@ -406,6 +406,7 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; font: inherit; font-weight: 400; }
 .entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
 .entitlements-page .form-hint { color: var(--color-text-muted); }
+.entitlements-page .character-count { font-weight: 400; }
 .entitlements-page .form-error { color: var(--color-error); }
 .entitlements-page .entitlement-form-actions { display: flex; justify-content: flex-end; gap: .6rem; }
 

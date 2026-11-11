@@ -164,18 +164,20 @@ function serialFile() {
   return { kind: 'product', segments: [{ id: '91', name: 'Serial Number', size: '4', saot: true, value: '' }] };
 }
 
-function entitlementApp(fetch) {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
+function entitlementApp(fetch, page = 'create-entitlement-form.html') {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
   let definition;
   vm.runInNewContext(script, {
     fetch,
     URLSearchParams,
+    LeaseDates: require('../public/lease-dates'),
     window: { location: { assign() {}, search: '' } },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const app = { ...definition.methods };
   Object.assign(app, definition.data.call(app));
+  app.leaseExpiryRange = { minMonths: 6, maxMonths: 24 };
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
   Object.defineProperty(app, 'hasAccessProduct', { get: () => definition.computed.hasAccessProduct.call(app) });
   Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
@@ -188,6 +190,24 @@ function entitlementApp(fetch) {
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
+
+test('update form prevents editing a lease when the entitlement start date is unavailable', async () => {
+  let submissions = 0;
+  const app = entitlementApp(async (_url, options) => {
+    if (options?.method === 'PUT') submissions++;
+    return { ok: true, json: async () => ({ customerId: '5', products: [], startDate: 'invalid' }) };
+  }, 'update-entitlement-form.html');
+  app.editId = '123';
+  await app.prefillFromEntitlement();
+  assert.equal(app.entitlementLoaded, false);
+  assert.match(app.error, /Failed to load entitlement/);
+  await app.createEntitlement();
+  assert.equal(submissions, 0);
+  assert.match(app.error, /Load the entitlement before saving/);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'update-entitlement-form.html'), 'utf8');
+  assert.match(html, /:disabled="loading \|\| productsLoading \|\| !entitlementLoaded \|\| !leaseProduct\.available/);
+  assert.match(html, /:disabled="loading \|\| customersLoading \|\| productsLoading \|\| productError \|\| !entitlementLoaded/);
+});
 
 test('adding and removing products loads their memory without stale responses', async () => {
   const pending = [];
@@ -232,7 +252,7 @@ test('loads modification products and required base memory for creation', async 
   const app = entitlementApp(async (url) => {
     requests.push(url);
     return { ok: true, json: async () => url === '/api/entitlement-products'
-      ? { baseProductId: '60', modifications: [
+      ? { baseProductId: '60', leaseExpiryRange: { minMonths: 6, maxMonths: 24 }, modifications: [
         { productId: '12', productName: 'Update' },
         { productId: '6048', productName: 'Standalone' },
         { productId: '6049', productName: 'Link' },
@@ -337,7 +357,7 @@ test('hidden base expiry input is removed from form validation', () => {
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /Lease Expiry Date \(Local time\)/);
-  assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
+  assert.match(html, /v-model="leaseExpiryDate" type="date" :min="leaseBounds\.min" :max="leaseBounds\.max" required/);
   assert.doesNotMatch(html, /<tr v-if="!isBaseExpirySegment/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
 });
@@ -369,6 +389,7 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   ] }] };
   app.productMemory['6050'] = { loading: false, error: '', files: [] };
   app.leaseExpiryDate = '2026-11-10';
+  app.localToday = () => '2026-05-10';
   app.serialNumber = '1234';
   await app.createEntitlement();
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
@@ -408,7 +429,7 @@ test('invalid lease date prevents submission', async () => {
   app.leaseExpiryDate = '2025-02-29';
   await app.createEntitlement();
   assert.equal(requests, 0);
-  assert.match(app.error, /valid lease expiry date/);
+  assert.match(app.error, /lease expiry date|Invalid calendar date/i);
 });
 
 test('access checkboxes allow either or both', async () => {
@@ -488,10 +509,12 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   ] };
   assert.equal(app.productMemoryReady, true);
   app.serialNumber = '10';
-  app.form.refId1 = 'ORDER-123';
+  app.form.refId1 = ' ORDER-123 ';
+  app.form.description = ' Description ';
   app.localToday = () => '2026-11-12';
   await app.createEntitlement();
   assert.equal(submitted.refId1, 'ORDER-123');
+  assert.equal(submitted.description, 'Description');
   assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
   assert.equal(Object.hasOwn(submitted, 'lineItemType'), false);
   assert.equal(submitted.startDate, '2026-11-12');
@@ -505,7 +528,12 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
-  assert.match(html, /Irricad Order Code \(refID 1\)\s*<input v-model\.trim="form\.refId1" type="text" maxlength="250" :disabled="loading">/);
+  assert.match(html, /Irricad Order Code \(refID 1\) <span id="ref-id-remaining" class="form-hint character-count">- \{\{ 250 - form\.refId1\.length \}\} chars left<\/span><\/span>\s*<input v-model="form\.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">/);
+  for (const page of ['create-entitlement-form.html', 'update-entitlement-form.html']) {
+    const formHtml = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
+    assert.match(formHtml, /<textarea v-model="form\.description" maxlength="510" rows="3" aria-describedby="description-remaining"/);
+    assert.match(formHtml, /<span>Description <span id="description-remaining" class="form-hint character-count">- \{\{ 510 - form\.description\.length \}\} chars left<\/span><\/span>/);
+  }
 });
 
 test('entitlements list links to the separate create form page', () => {

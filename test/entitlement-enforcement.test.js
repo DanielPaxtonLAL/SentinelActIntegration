@@ -6,13 +6,14 @@ const vm = require('node:vm');
 
 const formJson = {
   'base-product-id': '60',
+  'lease-expiry-range': { 'min-months': 6, 'max-months': 24 },
   'product-options': { standalone: { label: 'Standalone', 'product-id': '6048' }, link: { label: 'Link', 'product-id': '6049' } },
   'optional-products': { pivot: { label: 'Pivot', 'product-id': '6051' } },
   version: { v22: { label: 'Version 22', 'product-id': '' }, v23: { label: 'Version 23', 'product-id': '6052' } },
   lease: { lease: { label: 'Lease', 'product-id': '6050' } },
 };
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true) {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true, existingStartDate = '2026-11-10') {
   let handler;
   let updateHandler;
   let saved;
@@ -36,7 +37,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async listEnforcements() { return enforcements; }
     async getProductReadOnlyMemory(id) { return String(id) === '60' ? baseMemory : []; }
     async createEntitlement(data) { saved = data; return { saved: true }; }
-    async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123' }; }
+    async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
   }
   const app = {
@@ -58,6 +59,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === './act-client') return { ActClient: class {} };
     if (name === './entitlement-memory') return require('../entitlement-memory');
     if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson) };
+    if (name === './public/lease-dates') return require('../public/lease-dates');
     if (name === './page-includes') return require('../page-includes');
     return require(name);
   };
@@ -102,6 +104,17 @@ test('forwards order code on creation and preserves it when editing', async () =
   assert.equal(tooLong.res.statusCode, 400);
 });
 
+test('enforces entitlement description and order code limits', async () => {
+  const valid = await createRoute([{ id: '1' }]).submit({ description: 'd'.repeat(510), refId1: 'r'.repeat(250) });
+  assert.equal(valid.res.statusCode, 201);
+  assert.equal(valid.saved.description.length, 510);
+  assert.equal(valid.saved.refId1.length, 250);
+  for (const values of [{ description: 'd'.repeat(511) }, { refId1: 'r'.repeat(251) }]) {
+    const { res } = await createRoute([{ id: '1' }]).submit(values);
+    assert.equal(res.statusCode, 400);
+  }
+});
+
 test('entitlement creation always sends Sentinel LDK even if a different ID is supplied', async () => {
   for (const overrides of [{}, { enforcementId: '99' }]) {
     const { res, saved } = await createRoute([{ id: '1' }, { id: '99' }]).submit(overrides);
@@ -127,10 +140,10 @@ test('lease requires the base expiry value and non-lease uses the EMS default', 
   });
   assert.equal(invalid.res.statusCode, 400);
   const valid = await route().submit({
-    productIds: ['6048', '6050'], memoryValues: [{ productId: '60', segmentId: '90', content: '1234abcd' }],
+    productIds: ['6048', '6050'], memoryValues: [{ productId: '60', segmentId: '90', content: '35463641' }],
   });
   assert.equal(valid.res.statusCode, 201);
-  assert.equal(valid.saved.memorySegments[0].content, '1234ABCD');
+  assert.equal(valid.saved.memorySegments[0].content, '35463641');
   assert.deepEqual(Array.from(valid.saved.productIds), ['60', '6048', '6050']);
   const absent = await createRoute([{ id: '1' }]).submit({ productIds: ['6048', '6050'] });
   assert.equal(absent.res.statusCode, 400);
@@ -148,6 +161,35 @@ test('lease requires the base expiry value and non-lease uses the EMS default', 
   const noAccess = await route().submit({ productIds: ['6050'] });
   assert.equal(noAccess.res.statusCode, 400);
   assert.match(noAccess.res.body.error, /Standalone, Link/);
+});
+
+test('rejects lease expiry dates outside the configured inclusive range', async () => {
+  const memory = [{ kind: 'product', segments: [{ id: '90', size: '4', name: 'Expiry Date', saot: true }] }];
+  const encode = (year, month, day) => {
+    const digits = ((year - 1980) * 512 + month * 32 + day).toString(16).toUpperCase().padStart(4, '0');
+    return Buffer.from(digits, 'ascii').toString('hex');
+  };
+  for (const [year, month, day, status] of [
+    [2026, 11, 9, 400], [2027, 5, 9, 400], [2027, 5, 10, 201],
+    [2028, 11, 10, 201], [2028, 11, 11, 400],
+  ]) {
+    const { res } = await createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), memory).submit({
+      productIds: ['6048', '6050'],
+      memoryValues: [{ productId: '60', segmentId: '90', content: encode(year, month, day) }],
+    });
+    assert.equal(res.statusCode, status, `${year}-${month}-${day}`);
+    if (status === 400) assert.match(res.body.error, /lease expiry date/i);
+  }
+  const updateRoute = () => createRoute([{ id: '1' }], new Date(2027, 5, 1, 12), memory, true, true, true, '2026-01-01');
+  for (const [year, month, day, status] of [
+    [2027, 5, 31, 400], [2027, 6, 1, 200], [2028, 1, 1, 200], [2028, 1, 2, 400],
+  ]) {
+    const { res } = await updateRoute().submit({
+      productIds: ['6048', '6050'], startDate: '2027-06-01',
+      memoryValues: [{ productId: '60', segmentId: '90', content: encode(year, month, day) }],
+    }, true);
+    assert.equal(res.statusCode, status, `update ${year}-${month}-${day}`);
+  }
 });
 
 test('unavailable Lease does not prevent creation without it', async () => {

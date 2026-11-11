@@ -25,6 +25,11 @@ function parseFormData(json) {
   const base = String(json['base-product-id'] ?? '').trim();
   if (!isProductId(base)) throw new Error('entitlement form data: "base-product-id" must be a positive number');
 
+  const range = json['lease-expiry-range'];
+  if (!range || !Number.isSafeInteger(range['min-months']) || !Number.isSafeInteger(range['max-months']) ||
+      range['min-months'] < 0 || range['max-months'] < range['min-months'] || range['max-months'] > 1200) {
+    throw new Error('entitlement form data: "lease-expiry-range" needs valid min-months and max-months');
+  }
   const requireIds = (options, name) => {
     const missing = options.find((option) => !option.id);
     if (missing) throw new Error(`entitlement form data: "${name}.${missing.key}" needs a product-id`);
@@ -65,6 +70,7 @@ function parseFormData(json) {
     versionProducts,
     defaultVersionLabel: defaults[0]?.label ?? '',
     lease,
+    leaseExpiryRange: { minMonths: range['min-months'], maxMonths: range['max-months'] },
     productAliases,
   };
 }
