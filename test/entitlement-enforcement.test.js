@@ -155,17 +155,29 @@ test('unavailable optional Pivot does not prevent creation without it', async ()
   assert.equal((await route().submit({ productIds: ['6048', '6051'] })).res.statusCode, 400);
 });
 
-test('uses the server local date and always creates a never-expiring entitlement', async () => {
+test('uses the submitted local date or server local fallback and always creates a never-expiring entitlement', async () => {
+  const localClock = new Date(2026, 10, 12, 0, 30, 0, 123);
   for (const overrides of [
     {},
     { startDate: '2000-01-01' },
     { endDate: '2026-11-11', neverExpires: false },
     { endDate: '', neverExpires: false },
   ]) {
-    const { res, saved } = await createRoute([{ id: '1' }]).submit(overrides);
+    const { res, saved } = await createRoute([{ id: '1' }], localClock).submit(overrides);
     assert.equal(res.statusCode, 201);
-    assert.equal(saved.startDate, '2026-11-10');
+    assert.equal(saved.startDate, overrides.startDate || '2026-11-12');
+    assert.equal(saved.createDate, '2026-11-12T00:30:00.123' +
+      `${-localClock.getTimezoneOffset() >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(localClock.getTimezoneOffset()) / 60)).padStart(2, '0')}:${String(Math.abs(localClock.getTimezoneOffset()) % 60).padStart(2, '0')}`);
     assert.equal(saved.endDate, '2500-12-31');
+  }
+});
+
+test('rejects invalid submitted start dates', async () => {
+  for (const startDate of ['2026-2-03', '2025-02-29', '2026-13-01', '2026-11-12T00:00:00Z']) {
+    const { res, saved } = await createRoute([{ id: '1' }]).submit({ startDate });
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /valid calendar date/);
+    assert.equal(saved, undefined);
   }
 });
 

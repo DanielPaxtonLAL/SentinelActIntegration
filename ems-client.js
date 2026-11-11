@@ -467,6 +467,7 @@ class EmsClient {
       item('refId2', entitlement.refId2) +
       item('description', entitlement.description) +
       '<proContId></proContId>' +
+      (entitlement.createDate ? item('createDate', entitlement.createDate) : '') +
       item('startDate', entitlement.startDate) +
       item('endDate', entitlement.endDate) +
       '<identity></identity><policy><revocationAllowed>true</revocationAllowed></policy>' +

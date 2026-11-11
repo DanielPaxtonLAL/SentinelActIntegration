@@ -112,10 +112,13 @@ test('serializes SAOT static values in EMS entitlement memory segments', async (
   };
   await client.createEntitlement({
     lineItemType: 'Hardware_Key', productIds: ['4'], customerId: '1', vendorId: '2',
-    enforcementId: '1', startDate: '2026-01-01', endDate: '2500-12-31',
+    enforcementId: '1', createDate: '2026-11-12T10:06:31.204+13:00',
+    startDate: '2026-01-01', endDate: '2500-12-31',
     activationsPerKey: 1, description: '', refId1: '', refId2: '',
     memorySegments: [{ id: '45', content: '00AF' }],
   });
+  assert.equal((body.get('entitlementXML').match(/<createDate>2026-11-12T10:06:31\.204\+13:00<\/createDate>/g) || []).length, 1);
+  assert.equal((body.get('entitlementXML').match(/<startDate>2026-01-01<\/startDate>/g) || []).length, 2);
   assert.match(body.get('entitlementXML'), /<memorySegments><segment><lineItemMemorySegmentID><\/lineItemMemorySegmentID><prdMemorySegmentId>45<\/prdMemorySegmentId><prdSuiteLineItemId><\/prdSuiteLineItemId><data>00AF<\/data><\/segment><\/memorySegments>/);
 });
 
@@ -312,15 +315,17 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
 
 test('default lease expiry is one calendar year from the local date', () => {
   const app = entitlementApp(async () => {});
-  assert.equal(app.defaultLeaseExpiryDate(new Date(2026, 10, 10, 23, 30)), '2027-11-10');
+  assert.equal(app.defaultLeaseExpiryDate(new Date(2026, 10, 12, 0, 30)), '2027-11-12');
   assert.equal(app.defaultLeaseExpiryDate(new Date(2024, 1, 29, 12)), '2025-02-28');
   assert.equal(app.defaultLeaseExpiryDate(new Date(2027, 11, 31, 12)), '2028-12-31');
+  assert.equal(app.localToday(new Date(2026, 10, 12, 0, 30)), '2026-11-12');
 });
 
 test('hidden base expiry input is removed from form validation', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
+  assert.match(html, /Lease Expiry Date \(Local time\)/);
   assert.match(html, /v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required/);
   assert.doesNotMatch(html, /<tr v-if="!isBaseExpirySegment/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
@@ -472,10 +477,11 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   ] };
   assert.equal(app.productMemoryReady, true);
   app.serialNumber = '10';
+  app.localToday = () => '2026-11-12';
   await app.createEntitlement();
   assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
   assert.equal(Object.hasOwn(submitted, 'lineItemType'), false);
-  assert.equal(Object.hasOwn(submitted, 'startDate'), false);
+  assert.equal(submitted.startDate, '2026-11-12');
   assert.equal(Object.hasOwn(submitted, 'neverExpires'), false);
   assert.equal(Object.hasOwn(submitted, 'endDate'), false);
   assert.equal(Object.hasOwn(submitted, 'numberOfKeys'), false);

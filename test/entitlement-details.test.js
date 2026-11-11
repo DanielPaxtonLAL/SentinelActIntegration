@@ -33,13 +33,39 @@ test('labels entitlement types and allows filtering by key update', () => {
   assert.equal(definition.computed.filteredEntitlements.call(app).length, 1);
 });
 
+test('shows entitlement dates in local time with date-only values unchanged', () => {
+  const { formatLocalDate, displayValue } = definition.methods;
+  const dateTime = '2026-11-12T09:00:00+13:00';
+  const localDate = new Date(dateTime);
+  const expectedLocal = `${String(localDate.getDate()).padStart(2, '0')}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${localDate.getFullYear()}`;
+  assert.equal(formatLocalDate.call({ displayValue }, dateTime), expectedLocal);
+  assert.equal(formatLocalDate.call({ displayValue }, '2026-11-12T09:00:00'), expectedLocal);
+  assert.equal(formatLocalDate.call({ displayValue }, '2026-11-12'), '12-11-2026');
+  assert.equal(formatLocalDate.call({ displayValue }, null), '—');
+  assert.match(html, /<th>Created Date<\/th>/);
+  assert.match(html, /:title="entitlement\.createDate \? 'UTC, DD-MM-YYYY' : null"[^>]*>[\s\S]*?highlightParts\(formatUtcDate\(entitlement\.createDate\)\)/);
+  assert.ok(html.includes('Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? \'UTC, DD-MM-YYYY\' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}'));
+  assert.ok(html.includes('Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? \'Local time, DD-MM-YYYY\' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}'));
+  assert.ok(html.includes('{{ formatEndDate(selectedEntitlement.endDate) }}'));
+  assert.ok(html.includes(':title="/^\\d{4}-\\d{2}-\\d{2}$/.test(selectedExpiryDate) ? \'Local time, DD-MM-YYYY\' : null">{{ formatLocalDate(selectedExpiryDate) }}'));
+  const app = { displayValue, formatLocalDate };
+  assert.equal(definition.methods.formatUtcDate.call(app, '2026-11-12T09:00:00+13:00'), '11-11-2026');
+  assert.equal(definition.methods.formatUtcDate.call(app, '2026-11-12'), '12-11-2026');
+  assert.equal(definition.methods.formatEndDate.call(app, '2500-12-31'), 'Never');
+  assert.equal(definition.methods.formatEndDate.call(app, '2500-12-30'), '30-12-2500');
+  assert.equal(definition.methods.formatEndDate.call(app, null), '—');
+  assert.equal(formatLocalDate.call(app, '2024-02-29'), '29-02-2024');
+  assert.equal(formatLocalDate.call(app, 'N/A (Not Lease)'), 'N/A (Not Lease)');
+  assert.equal(formatLocalDate.call(app, 'Unavailable'), 'Unavailable');
+});
+
 test('shows customer, serial number, and expiry date in order in entitlement details', () => {
   const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<p class="detail-footnote"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   const checkboxes = details.match(/<input type="checkbox"/g) || [];
   assert.equal(checkboxes.length, labels.length);
   assert.doesNotMatch(details, /v-model|@change|@click/);
-  assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Start Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
+  assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
   const app = { selectedEntitlement: {
     baseProductId: '6047',
     leaseProductId: '6050',

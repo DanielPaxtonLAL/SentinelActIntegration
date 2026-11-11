@@ -29,7 +29,7 @@
             <thead>
               <tr>
                 <th>Type</th>
-                <th>Created</th>
+                <th>Created Date</th>
                 <th>Customer name</th>
                 <th>Ref ID 1</th>
                 <th>Status</th>
@@ -46,7 +46,7 @@
                   @keydown.enter.prevent="openEntitlementDetails(entitlement)"
                   @keydown.space.prevent="openEntitlementDetails(entitlement)">
                 <td><template v-for="(part, partIndex) in highlightParts(typeLabel(entitlement.type))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
-                <td><template v-for="(part, partIndex) in highlightParts(entitlement.createDate)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
+                <td :title="entitlement.createDate ? 'UTC, DD-MM-YYYY' : null"><template v-for="(part, partIndex) in highlightParts(formatUtcDate(entitlement.createDate))" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.customer)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
@@ -70,12 +70,14 @@
             <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Customer"></div></div>
 <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Serial Number"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? 'UTC, DD-MM-YYYY' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Created Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">End Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.endDate && formatEndDate(selectedEntitlement.endDate) !== 'Never' ? 'Local time, DD-MM-YYYY' : null">{{ formatEndDate(selectedEntitlement.endDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm End Date"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Standalone Irricad</div><div class="detail-value" role="cell">{{ productPresent('standalone') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Standalone Irricad"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Link Irricad</div><div class="detail-value" role="cell">{{ productPresent('link') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Link Irricad"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Pivot Irricad</div><div class="detail-value" role="cell">{{ productPresent('pivot') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Pivot Irricad"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Irricad</div><div class="detail-value" role="cell">{{ productPresent('lease') }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Lease Irricad"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Expiry Date*</div><div class="detail-value" role="cell">{{ selectedExpiryDate }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Lease Expiry Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Expiry Date*</div><div class="detail-value" role="cell" :title="/^\d{4}-\d{2}-\d{2}$/.test(selectedExpiryDate) ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedExpiryDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Lease Expiry Date"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Irricad Version"></div></div>
             </div>
             <p class="detail-footnote">* Derived from Memory Segments in Base Product</p>
@@ -389,6 +391,30 @@
         },
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);
+        },
+        formatLocalDate(value, utc = false) {
+          const text = this.displayValue(value);
+          if (text === '—') return text;
+          const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+          let localDate = text;
+          if (!dateOnly) {
+            const dateTime = /^(\d{4}-\d{2}-\d{2})[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i;
+            if (!dateTime.test(text)) return text;
+            const isoText = text.includes('T') ? text : text.replace(' ', 'T');
+            const instant = new Date(isoText);
+            if (Number.isNaN(instant.getTime())) return text;
+            localDate = utc ? instant.toISOString().slice(0, 10)
+              : `${instant.getFullYear()}-${String(instant.getMonth() + 1).padStart(2, '0')}-${String(instant.getDate()).padStart(2, '0')}`;
+          }
+          const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(localDate);
+          return date ? `${date[3]}-${date[2]}-${date[1]}` : text;
+        },
+        formatUtcDate(value) {
+          return this.formatLocalDate(value, true);
+        },
+        formatEndDate(value) {
+          const date = this.formatLocalDate(value);
+          return date === '31-12-2500' ? 'Never' : date;
         },
         highlightParts(value) {
           const text = this.displayValue(value);

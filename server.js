@@ -23,6 +23,17 @@ const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
 const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'));
 
+function formatLocalDateTime(date) {
+  const pad = (value, length = 2) => String(value).padStart(length, '0');
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const offsetHours = Math.floor(Math.abs(offset) / 60);
+  const offsetMinutes = Math.abs(offset) % 60;
+  return `${pad(date.getFullYear(), 4)}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}` +
+    `${sign}${pad(offsetHours)}:${pad(offsetMinutes)}`;
+}
+
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
   const baseId = formData.baseProductId;
@@ -245,14 +256,23 @@ const saveEntitlement = async (req, res) => {
     refId1 = '',
     refId2 = '',
     memoryValues = [],
+    startDate: requestedStartDate,
   } = req.body || {};
   const isId = (value) => /^\d+$/.test(String(value || '')) && Number(value) > 0;
+  const isCalendarDate = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  };
 
   if (!isId(customerId) ||
       !Array.isArray(productIds) || productIds.length > 99 ||
       productIds.some((id) => !isId(id)) ||
       new Set(productIds.map(String)).size !== productIds.length) {
     return res.status(400).json({ error: 'Select a customer and up to 99 unique modification products' });
+  }
+  if (requestedStartDate !== undefined && !isCalendarDate(requestedStartDate)) {
+    return res.status(400).json({ error: 'Start date must be a valid calendar date in YYYY-MM-DD format.' });
   }
   if (typeof description !== 'string' || description.length > 510 ||
       typeof refId1 !== 'string' || refId1.length > 250 ||
@@ -322,13 +342,14 @@ const saveEntitlement = async (req, res) => {
       }
     }
     const today = new Date();
-    const startDate = existing?.startDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const startDate = existing?.startDate ?? requestedStartDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const entitlementData = {
       customerId: selectedCustomer.customerId ?? selectedCustomer.id,
       productIds: allProductIds,
       enforcementId: SENTINEL_LDK_ENFORCEMENT_ID,
       vendorId,
       startDate,
+      createDate: existing ? undefined : formatLocalDateTime(today),
       endDate: existing?.endDate ?? '2500-12-31',
       eid: existing?.eid,
       numberOfKeys: 1,

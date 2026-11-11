@@ -87,7 +87,7 @@
           </label>
           <div v-if="leaseSelected" class="lease-options">
             <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
-              Lease expiry date
+              Lease Expiry Date (Local time)
               <input v-model="leaseExpiryDate" type="date" min="1980-01-01" max="2107-12-31" required :disabled="loading">
             </label>
             <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading lease expiry date…</p>
@@ -108,7 +108,7 @@
             </div>
           </template>
         </div>
-        <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (server local date).</p>
+        <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (local time).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
           <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady">
@@ -206,6 +206,9 @@
             productIds: [],
             description: '',
           };
+        },
+        localToday(now = new Date()) {
+          return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         },
         isCheckboxProduct(productId) {
           return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
@@ -381,6 +384,7 @@
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
+              startDate: this.localToday(),
               memoryValues: this.memoryProductIds.flatMap((productId) =>
                 this.productMemory[productId].files.flatMap((file) =>
                   file.kind === 'product'
