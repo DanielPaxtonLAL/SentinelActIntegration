@@ -116,7 +116,10 @@ class EmsClient {
   // Lists entitlements (XML). The server returns XML even for .json requests.
   async listEntitlements() {
     const xml = await this.call('/entitlement.xml');
-    const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
+    const parsed = new XMLParser({
+      ignoreAttributes: false, attributeNamePrefix: '',
+      tagValueProcessor: (name, value) => name === 'refId1' ? null : value,
+    }).parse(xml);
     const inst = parsed?.listResponse?.instance ?? [];
     return Array.isArray(inst) ? inst : [inst];
   }
@@ -302,7 +305,10 @@ class EmsClient {
 
   async getEntitlementDetails(id) {
     const xml = await this.getEntitlement(id);
-    const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
+    const parsed = new XMLParser({
+      ignoreAttributes: false, attributeNamePrefix: '',
+      tagValueProcessor: (name, value) => name === 'refId1' ? null : value,
+    }).parse(xml);
     const entitlement = parsed?.entitlement;
     if (!entitlement || typeof entitlement !== 'object') {
       throw new Error('EMS returned an invalid entitlement detail');

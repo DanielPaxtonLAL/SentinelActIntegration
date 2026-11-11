@@ -14,6 +14,7 @@ const formJson = {
 
 function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true) {
   let handler;
+  let updateHandler;
   let saved;
   class EmsClient {
     constructor() { this.authenticated = true; }
@@ -35,11 +36,13 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async listEnforcements() { return enforcements; }
     async getProductReadOnlyMemory(id) { return String(id) === '60' ? baseMemory : []; }
     async createEntitlement(data) { saved = data; return { saved: true }; }
+    async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123' }; }
+    async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
   }
   const app = {
     get() {},
     post(route, ...handlers) { if (route === '/api/entitlements') handler = handlers.at(-1); },
-    put() {},
+    put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
     delete() {},
     use() {},
     listen() {},
@@ -68,8 +71,8 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     console,
   });
   return {
-    async submit(overrides = {}) {
-      const req = { body: {
+    async submit(overrides = {}, update = false) {
+      const req = { params: update ? { id: '123' } : undefined, body: {
         customerId: '5', productIds: ['6048'],
         description: '', ...overrides,
       } };
@@ -78,11 +81,26 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await handler(req, res);
+      await (update ? updateHandler : handler)(req, res);
       return { res, saved };
     },
   };
 }
+
+test('forwards order code on creation and preserves it when editing', async () => {
+  const create = await createRoute([{ id: '1' }]).submit({ refId1: 'ORDER-123' });
+  assert.equal(create.res.statusCode, 201);
+  assert.equal(create.saved.refId1, 'ORDER-123');
+  const blank = await createRoute([{ id: '1' }]).submit();
+  assert.equal(blank.saved.refId1, '');
+  const update = await createRoute([{ id: '1' }]).submit({}, true);
+  assert.equal(update.res.statusCode, 200);
+  assert.equal(update.saved.refId1, '00123');
+  const clear = await createRoute([{ id: '1' }]).submit({ refId1: '' }, true);
+  assert.equal(clear.saved.refId1, '');
+  const tooLong = await createRoute([{ id: '1' }]).submit({ refId1: 'x'.repeat(251) });
+  assert.equal(tooLong.res.statusCode, 400);
+});
 
 test('entitlement creation always sends Sentinel LDK even if a different ID is supplied', async () => {
   for (const overrides of [{}, { enforcementId: '99' }]) {

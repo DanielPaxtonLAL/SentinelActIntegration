@@ -31,7 +31,7 @@
                 <th>Type</th>
                 <th>Created Date</th>
                 <th>Customer name</th>
-                <th>Ref ID 1</th>
+                <th>Irricad Order Code (Ref ID 1)</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -70,6 +70,7 @@
             <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Customer"></div></div>
 <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Serial Number"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Order Code (Ref ID 1)</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.refId1) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Irricad Order Code"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? 'UTC, DD-MM-YYYY' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Created Date"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm Start Date"></div></div>
               <div class="detail-row" role="row"><div class="detail-label" role="rowheader">End Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.endDate && formatEndDate(selectedEntitlement.endDate) !== 'Never' ? 'Local time, DD-MM-YYYY' : null">{{ formatEndDate(selectedEntitlement.endDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" aria-label="Confirm End Date"></div></div>

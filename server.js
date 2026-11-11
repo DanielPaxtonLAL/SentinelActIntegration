@@ -253,7 +253,7 @@ const saveEntitlement = async (req, res) => {
     customerId,
     productIds,
     description,
-    refId1 = '',
+    refId1,
     refId2 = '',
     memoryValues = [],
     startDate: requestedStartDate,
@@ -275,7 +275,7 @@ const saveEntitlement = async (req, res) => {
     return res.status(400).json({ error: 'Start date must be a valid calendar date in YYYY-MM-DD format.' });
   }
   if (typeof description !== 'string' || description.length > 510 ||
-      typeof refId1 !== 'string' || refId1.length > 250 ||
+      (refId1 !== undefined && (typeof refId1 !== 'string' || refId1.length > 250)) ||
       typeof refId2 !== 'string' || refId2.length > 250) {
     return res.status(400).json({ error: 'Description must be 510 characters or fewer; reference IDs must be 250 characters or fewer' });
   }
@@ -356,7 +356,7 @@ const saveEntitlement = async (req, res) => {
       activationsPerKey: 1,
       lineItemType: 'Product_Key',
       description,
-      refId1,
+      refId1: refId1 ?? String(existing?.refId1 ?? ''),
       refId2,
       memorySegments,
     };

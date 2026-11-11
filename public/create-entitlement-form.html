@@ -36,6 +36,10 @@
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
         <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <label>
+          Irricad Order Code (refID 1)
+          <input v-model.trim="form.refId1" type="text" maxlength="250" :disabled="loading">
+        </label>
+        <label>
           Description
           <textarea v-model.trim="form.description" maxlength="510" rows="3" :disabled="loading"></textarea>
         </label>
@@ -204,6 +208,7 @@
           return {
             customerId: '',
             productIds: [],
+            refId1: '',
             description: '',
           };
         },

@@ -54,6 +54,16 @@ test('uses entitlement item memory values for product memory segments', async ()
   assert.equal(details.products[0].memorySegments[0].text, '35383544');
 });
 
+test('preserves numeric order codes when listing and loading entitlements', async () => {
+  const client = clientWithResponses({
+    '/entitlement.xml': '<listResponse><instance><id>1</id><refId1>00123</refId1></instance></listResponse>',
+    '/entitlement/1.xml': '<entitlement><customerId>5</customerId><refId1>00123</refId1></entitlement>',
+    '/customer.xml': '<listResponse></listResponse>',
+  });
+  assert.equal((await client.listEntitlements())[0].refId1, '00123');
+  assert.equal((await client.getEntitlementDetails('1')).refId1, '00123');
+});
+
 test('handles no references, empty segment lists, and invalid EMS data explicitly', async () => {
   assert.deepEqual(await clientWithResponses({ '/product/1.ws': '<product><productName>None</productName></product>' }).getProductReadOnlyMemory('1'), []);
   const client = clientWithResponses({
@@ -114,11 +124,12 @@ test('serializes SAOT static values in EMS entitlement memory segments', async (
     lineItemType: 'Hardware_Key', productIds: ['4'], customerId: '1', vendorId: '2',
     enforcementId: '1', createDate: '2026-11-12T10:06:31.204+13:00',
     startDate: '2026-01-01', endDate: '2500-12-31',
-    activationsPerKey: 1, description: '', refId1: '', refId2: '',
+    activationsPerKey: 1, description: '', refId1: 'Order & 123', refId2: '',
     memorySegments: [{ id: '45', content: '00AF' }],
   });
   assert.equal((body.get('entitlementXML').match(/<createDate>2026-11-12T10:06:31\.204\+13:00<\/createDate>/g) || []).length, 1);
   assert.equal((body.get('entitlementXML').match(/<startDate>2026-01-01<\/startDate>/g) || []).length, 2);
+  assert.match(body.get('entitlementXML'), /<refId1>Order &amp; 123<\/refId1>/);
   assert.match(body.get('entitlementXML'), /<memorySegments><segment><lineItemMemorySegmentID><\/lineItemMemorySegmentID><prdMemorySegmentId>45<\/prdMemorySegmentId><prdSuiteLineItemId><\/prdSuiteLineItemId><data>00AF<\/data><\/segment><\/memorySegments>/);
 });
 
@@ -477,8 +488,10 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   ] };
   assert.equal(app.productMemoryReady, true);
   app.serialNumber = '10';
+  app.form.refId1 = 'ORDER-123';
   app.localToday = () => '2026-11-12';
   await app.createEntitlement();
+  assert.equal(submitted.refId1, 'ORDER-123');
   assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
   assert.equal(Object.hasOwn(submitted, 'lineItemType'), false);
   assert.equal(submitted.startDate, '2026-11-12');
@@ -491,6 +504,8 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
     { productId: '60', segmentId: '91', content: '30303041' },
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
+  assert.match(html, /Irricad Order Code \(refID 1\)\s*<input v-model\.trim="form\.refId1" type="text" maxlength="250" :disabled="loading">/);
 });
 
 test('entitlements list links to the separate create form page', () => {

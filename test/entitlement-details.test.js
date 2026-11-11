@@ -60,12 +60,14 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
 });
 
 test('shows customer, serial number, and expiry date in order in entitlement details', () => {
+  assert.match(html, /<th>Irricad Order Code \(Ref ID 1\)<\/th>/);
   const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<p class="detail-footnote"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   const checkboxes = details.match(/<input type="checkbox"/g) || [];
   assert.equal(checkboxes.length, labels.length);
   assert.doesNotMatch(details, /v-model|@change|@click/);
-  assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
+  assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Irricad Order Code (Ref ID 1)', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
+  assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div><div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
   const app = { selectedEntitlement: {
     baseProductId: '6047',
     leaseProductId: '6050',
