@@ -1,0 +1,44 @@
+{
+    "base-product-id": "6047",
+
+    "product-options": {
+        "description": "<comment> form enforces at least one of the product options",
+        "standalone": {
+            "Label": "Standalone Irricad",
+            "product-id": "6048"
+        },
+
+        "link": {
+            "Label": "Link Irricad",
+            "product-id": "6049"
+        }
+    },
+
+    "optional-product-ids": {
+        "description": "<comment> any or none of these can be selected",
+        "Pivot": {
+            "Label": "Pivot Irricad",
+            "product-id": "6051"
+        }
+    },
+
+    "Version": {
+        "description": "<comment> only one may be selected",
+        "v22": {
+            "Label": "Version 22",
+            "product-id": ""
+        },
+        "v23": {
+            "Label": "Version 23",
+            "product-id": "6052"
+        }
+    },
+
+    "Lease": {
+        "description": "<comment> only one may be selected",
+        "lease-product-name": {
+            "Label": "Lease",
+            "product-id": "6050"
+        }
+    }
+}
