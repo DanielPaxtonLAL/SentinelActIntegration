@@ -294,6 +294,27 @@ test('update form prevents editing a lease when the entitlement start date is un
   assert.match(html, /:disabled="loading \|\| customersLoading \|\| productsLoading \|\| productError \|\| !entitlementLoaded/);
 });
 
+test('update form pads the loaded serial without changing its encoded value', async () => {
+  const encoded = '31373733';
+  const app = entitlementApp(async (url) => ({
+    ok: true,
+    json: async () => url.startsWith('/api/entitlements/')
+      ? { customerId: '5', startDate: '2026-11-12', products: [{
+        productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: encoded }],
+      }] }
+      : [],
+  }), 'update-entitlement-form.html');
+  app.editId = '123';
+  app.baseProductId = '60';
+  await app.prefillFromEntitlement();
+  assert.equal(app.entitlementLoaded, true);
+  assert.equal(app.serialNumber, '06003');
+  assert.equal(app.encodeSerialNumber(app.serialNumber, '4'), encoded);
+  assert.equal(app.decodeSerialNumber('30303030'), '00000');
+  assert.equal(app.decodeSerialNumber(''), '');
+  assert.equal(app.decodeSerialNumber('invalid'), '');
+});
+
 test('adding and removing products loads their memory without stale responses', async () => {
   const pending = [];
   const app = entitlementApp((url) => new Promise((resolve) => pending.push({ url, resolve })));

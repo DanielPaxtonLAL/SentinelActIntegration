@@ -269,7 +269,7 @@
         },
         decodeSerialNumber(content) {
           const value = this.asciiHexToNumber(content);
-          return value === null ? '' : String(value);
+          return value === null ? '' : String(value).padStart(5, '0');
         },
         decodeLeaseExpiryDate(content) {
           const raw = this.asciiHexToNumber(content);
