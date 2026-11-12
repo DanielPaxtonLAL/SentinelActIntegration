@@ -92,7 +92,7 @@ async function withSession(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (err.status === 401) {
+    if (err.status === 401 && !err.outcomeUnknown) {
       ems.authenticated = false;
       ems.cookies.clear();
       await ems.authenticate();
@@ -418,6 +418,17 @@ const saveEntitlement = async (req, res) => {
 };
 app.post('/api/entitlements', express.json(), saveEntitlement);
 app.put('/api/entitlements/:id', express.json(), saveEntitlement);
+app.post('/api/entitlements/:id/produce', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number.' });
+  }
+  try {
+    res.json(await withSession(() => ems.produceEntitlement(req.params.id)));
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
+  }
+});
 app.delete('/api/entitlements/:id', async (req, res) => {
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });

@@ -8,9 +8,84 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.
 const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
 let definition;
 let fetchMemory;
+let confirmProduce = () => true;
 vm.runInNewContext(script, {
   fetch: (...args) => fetchMemory(...args),
+  window: { confirm: (...args) => confirmProduce(...args) },
   Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
+});
+
+test('produce eligibility requires a draft and only Product Key line items', () => {
+  const app = { selectedEntitlement: { entState: 'DRAFT', lineItemTypes: ['Product_Key'] } };
+  assert.equal(definition.computed.canProduce.call(app), true);
+  for (const types of [[], ['Product_Key', 'Hardware_Key'], ['Product_Key', undefined]]) {
+    app.selectedEntitlement.lineItemTypes = types;
+    assert.equal(definition.computed.canProduce.call(app), false);
+  }
+  app.selectedEntitlement = { entState: 'PRODUCED', lineItemTypes: ['Product_Key'] };
+  assert.equal(definition.computed.canProduce.call(app), false);
+});
+
+test('produce confirms, reloads list and selected details on success and blocks uncertain retries', async () => {
+  const keys = [...html.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
+  const app = {
+    selectedEntitlement: { id: '123', entState: 'DRAFT', lineItemTypes: ['Product_Key'] },
+    confirmedDetails: [],
+    producing: false, deleting: false, detailLoading: false, detailError: '', produceUncertain: false,
+    loadEntitlements: definition.methods.loadEntitlements,
+    openEntitlementDetails: async (entitlement) => {
+      assert.equal(app.producing, false);
+      app.selectedEntitlement = { ...entitlement, entState: entitlement.state };
+    },
+  };
+  Object.defineProperty(app, 'canProduce', { get: () => definition.computed.canProduce.call(app) });
+  Object.defineProperty(app, 'allDetailsConfirmed', { get: () => definition.computed.allDetailsConfirmed.call(app) });
+  let calls = 0;
+  fetchMemory = async (url, options) => {
+    calls++;
+    if (url === '/api/entitlements/123/produce') {
+      assert.equal(options.method, 'POST');
+      return { ok: true, json: async () => ({ produced: true, state: 'PRODUCT_KEY_GENERATED' }) };
+    }
+    assert.equal(url, '/api/entitlements');
+    return { ok: true, json: async () => [{ id: '123', state: 'PRODUCT_KEY_GENERATED' }] };
+  };
+  confirmProduce = () => true;
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(calls, 0);
+  app.confirmedDetails = keys.slice(0, -1);
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(calls, 0);
+  app.confirmedDetails = keys;
+  assert.equal(app.allDetailsConfirmed, true);
+  confirmProduce = () => false;
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(calls, 0);
+  confirmProduce = () => true;
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(calls, 2);
+  assert.equal(app.selectedEntitlement.entState, 'PRODUCT_KEY_GENERATED');
+  assert.equal(app.entitlements[0].state, 'PRODUCT_KEY_GENERATED');
+  app.selectedEntitlement = { id: '123', entState: 'DRAFT', lineItemTypes: ['Product_Key'] };
+  fetchMemory = async () => { calls++; throw new Error('network error'); };
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(app.produceUncertain, true);
+  assert.match(app.produceError, /Reload/);
+  await definition.methods.produceSelectedEntitlement.call(app);
+  assert.equal(calls, 3);
+});
+
+test('opening or reloading entitlement details clears confirmations', async () => {
+  const app = {
+    producing: false, detailRequest: 0, confirmedDetails: ['customer'],
+    customers: [], loadVersionMemory: async () => undefined,
+  };
+  fetchMemory = async () => ({ ok: true, json: async () => ({ products: [] }) });
+  await definition.methods.openEntitlementDetails.call(app, { id: '1' });
+  assert.equal(app.confirmedDetails.length, 0);
+  app.confirmedDetails = ['customer'];
+  await definition.methods.openEntitlementDetails.call(app, { id: '2' });
+  assert.equal(app.confirmedDetails.length, 0);
 });
 
 function versionFor(products, baseProductId = '6047') {
@@ -20,6 +95,22 @@ function versionFor(products, baseProductId = '6047') {
   });
   return definition.computed.decodedVersion.call(app);
 }
+
+test('lists generated Product Key entitlements alongside other states', async () => {
+  const entries = [
+    { id: '1', state: 'PRODUCT_KEY_GENERATED', type: 2 },
+    { id: '2', state: 'DRAFT', type: 2 },
+  ];
+  fetchMemory = async () => ({ ok: true, json: async () => entries });
+  const app = {
+    selectedEntitlement: null,
+    openEntitlementDetails: async (entitlement) => { app.selectedEntitlement = entitlement; },
+  };
+  await definition.methods.loadEntitlements.call(app);
+  assert.deepEqual(app.entitlements, entries);
+  assert.equal(app.selectedEntitlement.id, '1');
+  assert.equal(app.error, '');
+});
 
 test('labels entitlement types and allows filtering by key update', () => {
   const { typeLabel } = definition.methods;
@@ -61,11 +152,20 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
 
 test('shows customer, serial number, and expiry date in order in entitlement details', () => {
   assert.match(html, /<th>Irricad Order Code \(Ref ID 1\)<\/th>/);
-  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<p class="detail-footnote"/)[1];
+  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div class="detail-footer"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   const checkboxes = details.match(/<input type="checkbox"/g) || [];
   assert.equal(checkboxes.length, labels.length);
-  assert.doesNotMatch(details, /v-model|@change|@click/);
+  const keys = [...details.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(keys.length, checkboxes.length);
+  assert.equal(new Set(keys).size, checkboxes.length);
+  const appChecks = { confirmedDetails: keys };
+  assert.equal(definition.computed.allDetailsConfirmed.call(appChecks), true);
+  for (const key of keys) {
+    appChecks.confirmedDetails = keys.filter((item) => item !== key);
+    assert.equal(definition.computed.allDetailsConfirmed.call(appChecks), false);
+  }
+  assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">[\s\S]*?<\/p>\s*<button v-if="canProduce"[^>]*:disabled="!allDetailsConfirmed/);
   assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Irricad Order Code (Ref ID 1)', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
   assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div><div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
   const app = { selectedEntitlement: {

@@ -18,6 +18,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let handler;
   let updateHandler;
   let serialHandler;
+  let produceHandler;
   let saved;
   const events = [];
   let largest = serialOptions.largest ?? 42;
@@ -45,10 +46,18 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
     async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
+    async produceEntitlement(id) {
+      events.push(`produce:${id}`);
+      if (serialOptions.produceError) throw serialOptions.produceError;
+      return { produced: true, entId: id };
+    }
   }
   const app = {
     get(route, ...handlers) { if (route === '/api/product-key-serial-number') serialHandler = handlers.at(-1); },
-    post(route, ...handlers) { if (route === '/api/entitlements') handler = handlers.at(-1); },
+    post(route, ...handlers) {
+      if (route === '/api/entitlements') handler = handlers.at(-1);
+      if (route === '/api/entitlements/:id/produce') produceHandler = handlers.at(-1);
+    },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
     delete() {},
     use() {},
@@ -81,6 +90,15 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   });
   return {
     events,
+    async produce(id) {
+      const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await produceHandler({ params: { id } }, res);
+      return res;
+    },
     async getSerial() {
       const res = {
         statusCode: 200,
@@ -107,6 +125,20 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     },
   };
 }
+
+test('produce route validates IDs and surfaces uncertain outcomes without retrying', async () => {
+  const route = createRoute([]);
+  assert.equal((await route.produce('0')).statusCode, 400);
+  assert.equal(route.events.length, 0);
+  assert.equal((await route.produce('123')).body.produced, true);
+  assert.deepEqual(route.events, ['produce:123']);
+  const error = Object.assign(new Error('outcome unknown'), { outcomeUnknown: true, status: 401 });
+  const failed = createRoute([], undefined, [], true, true, true, undefined, { produceError: error });
+  const response = await failed.produce('123');
+  assert.equal(response.statusCode, 502);
+  assert.equal(response.body.outcomeUnknown, true);
+  assert.deepEqual(failed.events, ['produce:123']);
+});
 
 test('serial number endpoint returns the highest stored serial without caching', async () => {
   const res = await createRoute([{ id: '1' }]).getSerial();

@@ -425,6 +425,7 @@ class EmsClient {
       ...entitlement,
       id: String(id),
       customerName: customer?.name ?? customer?.customerName ?? entitlement.customer,
+      lineItemTypes: entitlementItems.map((item) => item?.lineItemType),
       products,
     };
   }
@@ -577,6 +578,65 @@ class EmsClient {
       '</entitlementItem>' +
       '</entitlement>';
     return { entitlementXml, lineItemType };
+  }
+
+  async produceEntitlement(id) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
+    const path = `${this.apiRoot}/entitlement/${id}.xml`;
+    const response = await this._fetch(path, { headers: { Accept: 'application/xml' } });
+    const xml = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading the entitlement.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) throw new Error(`EMS entitlement lookup failed: ${response.status} ${response.statusText}`);
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid entitlement XML.');
+    const parsed = new XMLParser({ parseTagValue: false }).parse(xml).entitlement;
+    const items = parsed?.entitlementItem;
+    const itemList = Array.isArray(items) ? items : items ? [items] : [];
+    if (String(parsed?.entState ?? '').toUpperCase() !== 'DRAFT' ||
+        !itemList.length || itemList.some((item) => item?.lineItemType !== 'Product_Key')) {
+      const error = new Error('Only draft Product Key entitlements can be produced.');
+      error.status = 400;
+      throw error;
+    }
+    const options = {
+      preserveOrder: true, ignoreAttributes: false, parseTagValue: false, trimValues: false,
+      commentPropName: '#comment', cdataPropName: '#cdata',
+    };
+    const document = new XMLParser(options).parse(xml);
+    const roots = document.filter((node) => Object.hasOwn(node, 'entitlement'));
+    if (roots.length !== 1 || !Array.isArray(roots[0].entitlement)) throw new Error('EMS returned invalid entitlement XML.');
+    const fields = roots[0].entitlement;
+    if (fields.some((node) => Object.hasOwn(node, 'action'))) throw new Error('EMS returned an unexpected entitlement action.');
+    const enabledIndex = fields.findIndex((node) => Object.hasOwn(node, 'enabled'));
+    fields.splice(enabledIndex + 1, 0, { action: [{ '#text': 'PRODUCE' }] });
+    const body = new XMLBuilder(options).build(document);
+    let confirmedState;
+    try {
+      const update = await this._fetch(`${this.apiRoot}/entitlement/${id}.ws`, {
+        method: 'POST',
+        headers: { Accept: 'application/xml, application/json', 'Content-Type': 'application/xml' },
+        body,
+      });
+      if (!update.ok) throw new Error(`EMS returned ${update.status} ${update.statusText}`);
+      const check = await this._fetch(path, { headers: { Accept: 'application/xml' } });
+      const checkXml = await check.text();
+      if (!check.ok || XMLValidator.validate(checkXml) !== true) {
+        throw new Error('EMS did not confirm the produced state');
+      }
+      confirmedState = String(new XMLParser({ parseTagValue: false }).parse(checkXml).entitlement?.entState ?? '').toUpperCase();
+      if (!['PRODUCED', 'PRODUCT_KEY_GENERATED'].includes(confirmedState)) {
+        throw new Error(`EMS did not confirm the produced state (current state: ${confirmedState || 'unavailable'})`);
+      }
+    } catch (err) {
+      const error = new Error(`The result of producing entitlement ${id} is unknown: ${err.message}.`);
+      error.outcomeUnknown = true;
+      throw error;
+    }
+    return { produced: true, entId: String(id), state: confirmedState };
   }
 
   // Saves changes to an existing entitlement; returns the same shape as createEntitlement.
