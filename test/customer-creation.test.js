@@ -42,6 +42,7 @@ function customerRoute() {
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient };
+    if (name === './act-sessions') return { createActSessions: (factory) => ({ get: () => factory(), remove() {} }) };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
     if (name.startsWith('./')) return require(path.join(root, name));
     return require(name);

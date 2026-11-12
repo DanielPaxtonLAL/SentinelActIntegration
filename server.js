@@ -4,6 +4,7 @@ const os = require('os');
 const express = require('express');
 const { EmsClient } = require('./ems-client');
 const { ActClient } = require('./act-client');
+const { createActSessions } = require('./act-sessions');
 const { validateMemoryValues } = require('./entitlement-memory');
 const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
@@ -281,7 +282,7 @@ const saveEntitlement = async (req, res) => {
     productIds,
     description,
     refId1,
-    refId2 = '',
+    refId2,
     memoryValues = [],
     startDate: requestedStartDate,
   } = req.body || {};
@@ -303,7 +304,7 @@ const saveEntitlement = async (req, res) => {
   }
   if (typeof description !== 'string' || description.length > 510 ||
       (refId1 !== undefined && (typeof refId1 !== 'string' || refId1.length > 250)) ||
-      typeof refId2 !== 'string' || refId2.length > 250) {
+      (refId2 !== undefined && (typeof refId2 !== 'string' || refId2.length > 250))) {
     return res.status(400).json({ error: 'Description must be 510 characters or fewer; reference IDs must be 250 characters or fewer' });
   }
   if (!existingId && (typeof refId1 !== 'string' || !refId1.trim())) {
@@ -311,6 +312,13 @@ const saveEntitlement = async (req, res) => {
   }
 
   try {
+    let existing = null;
+    if (existingId) {
+      existing = await withSession(() => ems.getEntitlementDetails(existingId));
+      if (String(existing.entState).toUpperCase() !== 'DRAFT') {
+        return res.status(400).json({ error: 'Only draft entitlements can be edited.' });
+      }
+    }
     const customers = await withSession(() => ems.listCustomers());
     const selectedCustomerId = String(customerId).trim();
     const selectedCustomer = customers.find((customer) =>
@@ -357,10 +365,17 @@ const saveEntitlement = async (req, res) => {
     let resolvedMemoryValues = memoryValues;
     if (expirySegments.length && !leaseSelected) {
       const expiry = expirySegments[0];
+      const hadLease = existing?.products?.some((product) => String(product.productId) === formData.lease.id);
+      const previousExpiry = existing?.products?.find((product) => String(product.productId) === baseProductId)
+        ?.memorySegments?.find((segment) => String(segment.id) === String(expiry.id))?.text;
+      const expiryContent = existing && !hadLease ? previousExpiry : expiry.content;
+      if (existing && !hadLease && expiryContent === undefined) {
+        return res.status(400).json({ error: 'Cannot determine the existing expiry memory value; edit this draft in EMS.' });
+      }
       resolvedMemoryValues = memoryValues.filter((value) =>
         !value || String(value.productId) !== baseProductId || String(value.segmentId) !== String(expiry.id)
       );
-      resolvedMemoryValues.push({ productId: baseProductId, segmentId: expiry.id, content: expiry.content });
+      resolvedMemoryValues.push({ productId: baseProductId, segmentId: expiry.id, content: expiryContent });
     }
     const memorySegments = validateMemoryValues(allProductIds, productFiles, resolvedMemoryValues);
 
@@ -380,13 +395,6 @@ const saveEntitlement = async (req, res) => {
       }
     }
 
-    let existing = null;
-    if (existingId) {
-      existing = await withSession(() => ems.getEntitlementDetails(existingId));
-      if (String(existing.entState).toUpperCase() !== 'DRAFT') {
-        return res.status(400).json({ error: 'Only draft entitlements can be edited.' });
-      }
-    }
     const today = new Date();
     const startDate = existing?.startDate ?? requestedStartDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     if (leaseSelected) {
@@ -411,11 +419,29 @@ const saveEntitlement = async (req, res) => {
       activationsPerKey: 1,
       lineItemType: 'Product_Key',
       description,
-      refId1: refId1 ?? String(existing?.refId1 ?? ''),
-      refId2,
+      refId1: existingId ? refId1 : refId1 ?? '',
+      refId2: existingId ? refId2 : refId2 ?? '',
       memorySegments,
     };
     if (existingId) {
+      entitlementData.editableProductIds = [
+        ...formData.accessProducts, ...formData.optionalProducts, ...formData.versionProducts, formData.lease,
+      ].map((product) => product.id);
+      const previousProductIds = new Set((existing.products || []).map((product) => String(product.productId)));
+      const changedMemoryIds = new Set();
+      for (const productId of allProductIds) {
+        for (const file of productFiles[productId]) {
+          for (const segment of file.segments) {
+            const name = String(segment.name ?? '').trim().toLowerCase();
+            if (segment.saot && (!previousProductIds.has(productId) ||
+                (productId === baseProductId && (name === 'serial number' ||
+                  (name === 'expiry date' && (leaseSelected || previousProductIds.has(formData.lease.id))))))) {
+              changedMemoryIds.add(String(segment.id));
+            }
+          }
+        }
+      }
+      entitlementData.changedMemorySegmentIds = [...changedMemoryIds];
       const result = await ems.updateEntitlement(existingId, entitlementData);
       return res.status(200).json(result);
     }
@@ -459,10 +485,19 @@ app.delete('/api/entitlements/:id', async (req, res) => {
 });
 
 const { ACT_URL, ACT_DATABASE } = process.env;
-const act = new ActClient({
+const actSessions = createActSessions(() => new ActClient({
   baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
   database: ACT_DATABASE || 'Irricad',
-});
+}));
+
+async function callAct(req, operation) {
+  try {
+    return await operation();
+  } catch (err) {
+    if (err.status === 401) actSessions.remove(req);
+    throw err;
+  }
+}
 
 app.post('/api/act/login', express.json(), async (req, res) => {
   const { username, password } = req.body || {};
@@ -470,41 +505,41 @@ app.post('/api/act/login', express.json(), async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
   try {
-    await act.authenticate(username, password);
+    await actSessions.login(req, res, username, password);
     res.json({ ok: true });
   } catch (err) {
-    act.token = null;
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({ error: err.message });
   }
 });
 
 app.post('/api/act/logout', (req, res) => {
-  act.token = null;
+  actSessions.logout(req, res);
   res.json({ ok: true });
 });
 
 app.get('/api/act/session', (req, res) => {
-  res.json({ authenticated: Boolean(act.token) });
+  res.set('Cache-Control', 'no-store');
+  res.json({ authenticated: Boolean(actSessions.get(req)) });
 });
 
 app.get('/api/act/companies', async (req, res) => {
-  if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
+  const act = actSessions.get(req);
+  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
-    res.json(await act.listCompanies());
+    res.json(await callAct(req, () => act.listCompanies()));
   } catch (err) {
-    if (err.status === 401) act.token = null;
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({ error: err.status === 401 ? 'Act! session expired, log in again' : err.message });
   }
 });
 
 app.get('/api/act/companies/:id/divisions', async (req, res) => {
-  if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
+  const act = actSessions.get(req);
+  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
-    res.json(await act.getCompanyDivisions(req.params.id));
+    res.json(await callAct(req, () => act.getCompanyDivisions(req.params.id)));
   } catch (err) {
-    if (err.status === 401) act.token = null;
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({
       error: err.status === 401 ? 'Act! session expired, log in again' : err.message,
@@ -513,13 +548,14 @@ app.get('/api/act/companies/:id/divisions', async (req, res) => {
 });
 
 app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) => {
-  if (!act.token) return res.status(401).json({ error: 'Log in to Act! first' });
+  const act = actSessions.get(req);
+  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
-    const company = await act.getCompany(req.params.id);
+    const company = await callAct(req, () => act.getCompany(req.params.id));
     if (!company || typeof company.name !== 'string' || !company.name.trim()) {
       return res.status(502).json({ error: 'Act! returned a company without a name' });
     }
-    const divisions = company.hasDivisions === true ? [] : await act.getCompanyDivisions(req.params.id);
+    const divisions = company.hasDivisions === true ? [] : await callAct(req, () => act.getCompanyDivisions(req.params.id));
     if (!Array.isArray(divisions)) {
       throw new Error('Act! returned an invalid company divisions response');
     }
@@ -533,14 +569,14 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
       if (parentId === String(company.id || req.params.id)) {
         return res.status(400).json({ error: 'A company cannot be its own parent' });
       }
-      const parentDivisions = await act.getCompanyDivisions(parentId);
+      const parentDivisions = await callAct(req, () => act.getCompanyDivisions(parentId));
       if (!Array.isArray(parentDivisions) ||
           !parentDivisions.some((division) =>
             division && String(division.id) === String(company.id || req.params.id)
           )) {
         return res.status(400).json({ error: 'The specified parent does not contain this ACT company' });
       }
-      const parent = await act.getCompany(parentId);
+      const parent = await callAct(req, () => act.getCompany(parentId));
       if (!parent || typeof parent.name !== 'string' || !parent.name.trim()) {
         return res.status(502).json({ error: 'Act! returned a parent company without a name' });
       }
@@ -561,7 +597,6 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
     }));
     res.status(201).json({ location });
   } catch (err) {
-    if (err.status === 401) act.token = null;
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({
       error: err.status === 401

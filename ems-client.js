@@ -377,7 +377,8 @@ class EmsClient {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({
       ignoreAttributes: false, attributeNamePrefix: '',
-      tagValueProcessor: (name, value) => name === 'refId1' || name === 'productKeyId' ? null : value,
+      tagValueProcessor: (name, value) =>
+        ['refId1', 'productKeyId', 'data', 'text', 'content'].includes(name) ? null : value,
     }).parse(xml);
     const entitlement = parsed?.entitlement;
     if (!entitlement || typeof entitlement !== 'object') {
@@ -686,7 +687,116 @@ class EmsClient {
   async updateEntitlement(id, entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!/^[1-9]\d*$/.test(String(id)) || !entitlement.eid) throw new Error('Entitlement id and eid are required.');
-    const { entitlementXml } = this.buildEntitlementXml(entitlement);
+    if (!Array.isArray(entitlement.editableProductIds) || !Array.isArray(entitlement.changedMemorySegmentIds)) {
+      throw new Error('Editable product and memory configuration is required.');
+    }
+    const xml = await this.getEntitlement(id);
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid entitlement XML.');
+    const parsed = new XMLParser({ parseTagValue: false }).parse(xml).entitlement;
+    if (String(parsed?.entState ?? '').toUpperCase() !== 'DRAFT' || parsed.eid !== entitlement.eid) {
+      throw new Error('The entitlement is no longer the expected draft; reload it before saving.');
+    }
+    const options = {
+      preserveOrder: true, ignoreAttributes: false, parseTagValue: false, trimValues: false,
+      commentPropName: '#comment', cdataPropName: '#cdata',
+    };
+    const document = new XMLParser(options).parse(xml);
+    const roots = document.filter((node) => Object.hasOwn(node, 'entitlement'));
+    if (roots.length !== 1 || !Array.isArray(roots[0].entitlement)) throw new Error('EMS returned invalid entitlement XML.');
+    const fields = roots[0].entitlement;
+    const nodes = (list, name) => list.filter((node) => Object.hasOwn(node, name));
+    const textOf = (list, name) => {
+      const found = nodes(list, name);
+      if (found.length !== 1 || !Array.isArray(found[0][name])) return null;
+      const parts = found[0][name];
+      if (parts.some((part) => !Object.hasOwn(part, '#text'))) return null;
+      return parts.map((part) => String(part['#text'])).join('').trim();
+    };
+    const setText = (list, name, value) => {
+      const found = nodes(list, name);
+      if (found.length > 1) throw new Error(`EMS returned ambiguous ${name}.`);
+      const node = found[0] || { [name]: [] };
+      node[name] = [{ '#text': String(value) }];
+      if (!found.length) list.push(node);
+    };
+    const itemNodes = nodes(fields, 'entitlementItem');
+    if (itemNodes.length !== 1 || !Array.isArray(itemNodes[0].entitlementItem) ||
+        textOf(itemNodes[0].entitlementItem, 'lineItemType') !== 'Product_Key') {
+      throw new Error('This draft has unsupported entitlement items; edit it in EMS instead.');
+    }
+    if (nodes(fields, 'action').length) throw new Error('EMS returned an unexpected entitlement action.');
+    const enabledIndex = fields.findIndex((node) => Object.hasOwn(node, 'enabled'));
+    fields.splice(enabledIndex + 1, 0, { action: [{ '#text': 'Save' }] });
+    setText(fields, 'customerId', entitlement.customerId);
+    setText(fields, 'description', entitlement.description);
+    if (entitlement.refId1 !== undefined) setText(fields, 'refId1', entitlement.refId1);
+    if (entitlement.refId2 !== undefined) setText(fields, 'refId2', entitlement.refId2);
+    const itemFields = itemNodes[0].entitlementItem;
+    const editable = new Set(entitlement.editableProductIds.map(String));
+    const selected = new Set(entitlement.productIds.map(String));
+    const originalProducts = nodes(itemFields, 'itemProduct');
+    const productIds = originalProducts.map((node) => Array.isArray(node.itemProduct) && textOf(node.itemProduct, 'productId'));
+    if (productIds.some((productId) => !productId) || new Set(productIds).size !== productIds.length) {
+      throw new Error('EMS returned ambiguous entitlement products.');
+    }
+    for (let index = originalProducts.length - 1; index >= 0; index--) {
+      if (editable.has(productIds[index]) && !selected.has(productIds[index])) {
+        itemFields.splice(itemFields.indexOf(originalProducts[index]), 1);
+      }
+    }
+    for (const productId of selected) {
+      if (!productIds.includes(productId)) {
+        const products = nodes(itemFields, 'itemProduct');
+        const lastIndex = products.length ? itemFields.indexOf(products[products.length - 1]) : itemFields.length - 1;
+        itemFields.splice(lastIndex + 1, 0, { itemProduct: [
+          { isRevoked: [{ '#text': 'false' }] },
+          { productId: [{ '#text': productId }] },
+        ] });
+      }
+    }
+    const memoryNodes = nodes(itemFields, 'memorySegments');
+    if (memoryNodes.length > 1 || (memoryNodes.length && !Array.isArray(memoryNodes[0].memorySegments))) {
+      throw new Error('EMS returned ambiguous entitlement memory segments.');
+    }
+    const memory = memoryNodes.length ? memoryNodes[0].memorySegments : [];
+    const removed = originalProducts.filter((node, index) => editable.has(productIds[index]) && !selected.has(productIds[index]));
+    if (removed.length && nodes(memory, 'segment').length) {
+      const parser = new XMLParser({ parseTagValue: false });
+      const builder = new XMLBuilder(options);
+      const segmentIds = (productNode) => {
+        const product = parser.parse(builder.build([productNode])).itemProduct?.product;
+        if (!product || typeof product !== 'object') {
+          throw new Error('Cannot determine product memory; edit this draft in EMS.');
+        }
+        const segments = product.memorySegment === undefined ? [] :
+          Array.isArray(product.memorySegment) ? product.memorySegment : [product.memorySegment];
+        if (segments.some((segment) => !segment || !/^[1-9]\d*$/.test(String(segment.id)))) {
+          throw new Error('Cannot determine product memory; edit this draft in EMS.');
+        }
+        return segments.map((segment) => String(segment.id));
+      };
+      const removedIds = new Set(removed.flatMap(segmentIds));
+      const retainedIds = new Set(originalProducts.filter((node) => !removed.includes(node)).flatMap(segmentIds));
+      for (const segment of nodes(memory, 'segment')) {
+        const segmentId = Array.isArray(segment.segment) && textOf(segment.segment, 'prdMemorySegmentId');
+        if (removedIds.has(segmentId) && !retainedIds.has(segmentId)) memory.splice(memory.indexOf(segment), 1);
+      }
+    }
+    const changedMemory = new Set(entitlement.changedMemorySegmentIds.map(String));
+    for (const segment of entitlement.memorySegments.filter((entry) => changedMemory.has(String(entry.id)))) {
+      const matching = nodes(memory, 'segment').filter((node) =>
+        Array.isArray(node.segment) && textOf(node.segment, 'prdMemorySegmentId') === String(segment.id));
+      if (matching.length > 1) throw new Error('EMS returned ambiguous entitlement memory segment IDs.');
+      if (matching.length) setText(matching[0].segment, 'data', segment.content);
+      else memory.push({ segment: [
+        { lineItemMemorySegmentID: [] },
+        { prdMemorySegmentId: [{ '#text': String(segment.id) }] },
+        { prdSuiteLineItemId: [] },
+        { data: [{ '#text': segment.content }] },
+      ] });
+    }
+    if (!memoryNodes.length && memory.length) itemFields.push({ memorySegments: memory });
+    const entitlementXml = new XMLBuilder(options).build(document);
     const response = await this._fetch(`${this.apiRoot}/entitlement/${id}.ws`, {
       method: 'POST',
       headers: { Accept: 'application/xml, application/json', 'Content-Type': 'application/xml' },

@@ -54,6 +54,17 @@ test('uses entitlement item memory values for product memory segments', async ()
   assert.equal(details.products[0].memorySegments[0].text, '35383544');
 });
 
+test('preserves leading zeroes in saved memory values', async () => {
+  const client = clientWithResponses({
+    '/entitlement/1.xml': `<entitlement><customerId>5</customerId><entitlementItem>
+      <memorySegments><segment><prdMemorySegmentId>90</prdMemorySegmentId><data>00000010</data></segment></memorySegments>
+      <itemProduct><productId>60</productId><product><memorySegment><id>90</id><saot>true</saot><text>00000000</text></memorySegment></product></itemProduct>
+    </entitlementItem></entitlement>`,
+    '/customer.xml': '<listResponse></listResponse>',
+  });
+  assert.equal((await client.getEntitlementDetails('1')).products[0].memorySegments[0].text, '00000010');
+});
+
 test('preserves numeric order codes when listing and loading entitlements', async () => {
   const client = clientWithResponses({
     '/entitlement.xml': '<listResponse><instance><id>1</id><refId1>00123</refId1></instance></listResponse>',
@@ -321,6 +332,29 @@ test('update form pads the loaded serial without changing its encoded value', as
   assert.equal(app.decodeSerialNumber('30303030'), '00000');
   assert.equal(app.decodeSerialNumber(''), '');
   assert.equal(app.decodeSerialNumber('invalid'), '');
+});
+
+test('update form preserves saved values instead of using product memory defaults', async () => {
+  const app = entitlementApp(async (url) => {
+    if (url.startsWith('/api/entitlements/')) return {
+      ok: true, json: async () => ({
+        customerId: '5', startDate: '2026-11-10',
+        products: [
+          { productId: '60', memorySegments: [{ id: '90', saot: true, text: 'CAFE' }, { id: '91', saot: true, name: 'Serial Number', text: '30303031' }] },
+          { productId: '6048', memorySegments: [{ id: '92', saot: true, text: 'BEEF' }] },
+        ],
+      }),
+    };
+    return { ok: true, json: async () => [{ kind: 'product', segments: [{ id: '92', saot: true, content: '0000' }] }] };
+  }, 'update-entitlement-form.html');
+  app.editId = '123';
+  app.baseProductId = '60';
+  app.accessProducts = [{ id: '6048' }];
+  app.productMemory['60'] = { files: [{ kind: 'product', segments: [{ id: '90', saot: true, value: '0000' }] }] };
+  await app.prefillFromEntitlement();
+  await new Promise(setImmediate);
+  assert.equal(app.productMemory['60'].files[0].segments[0].value, 'CAFE');
+  assert.equal(app.productMemory['6048'].files[0].segments[0].value, 'BEEF');
 });
 
 test('adding and removing products loads their memory without stale responses', async () => {

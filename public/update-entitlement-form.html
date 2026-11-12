@@ -141,6 +141,7 @@
           serialNumber: '',
           baseProductId: '',
           productMemory: {},
+          savedMemory: {},
           loading: false,
           customersLoading: false,
           productsLoading: false,
@@ -330,7 +331,7 @@
               segments: file.segments.map((segment) => ({
                 ...segment,
                 value: this.isBaseExpirySegment(productId, file, segment) || this.isBaseSerialSegment(productId, file, segment)
-                  ? '' : (segment.content ?? ''),
+                  ? '' : (this.savedMemory[productId]?.[String(segment.id)] ?? segment.content ?? ''),
               })),
             }));
           } catch (err) {
@@ -402,6 +403,20 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             const known = new Set([...this.accessProducts, ...this.optionalProducts, ...this.versionProducts].map((product) => product.id));
+            this.savedMemory = Object.fromEntries((data.products || []).map((product) => [
+              String(product.productId),
+              Object.fromEntries((product.memorySegments || []).map((segment) => [String(segment.id), segment.text])),
+            ]));
+            for (const [productId, state] of Object.entries(this.productMemory)) {
+              for (const file of state.files) {
+                for (const segment of file.segments) {
+                  if (!this.isBaseExpirySegment(productId, file, segment) && !this.isBaseSerialSegment(productId, file, segment) &&
+                      this.savedMemory[productId]?.[String(segment.id)] !== undefined) {
+                    segment.value = this.savedMemory[productId][String(segment.id)];
+                  }
+                }
+              }
+            }
             const productIds = [...new Set((data.products || []).map((product) => String(product.productId)))]
               .filter((id) => known.has(id));
             this.form.customerId = String(data.customerId ?? '');

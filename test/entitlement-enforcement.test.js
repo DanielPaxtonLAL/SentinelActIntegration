@@ -77,6 +77,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
+    if (name === './act-sessions') return require('../act-sessions');
     if (name === './entitlement-memory') return require('../entitlement-memory');
     if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson) };
     if (name === './public/lease-dates') return require('../public/lease-dates');
@@ -207,7 +208,7 @@ test('forwards order code on creation and preserves it when editing', async () =
   }
   const update = await createRoute([{ id: '1' }]).submit({}, true);
   assert.equal(update.res.statusCode, 200);
-  assert.equal(update.saved.refId1, '00123');
+  assert.equal(update.saved.refId1, undefined);
   const clear = await createRoute([{ id: '1' }]).submit({ refId1: '' }, true);
   assert.equal(clear.saved.refId1, '');
   const tooLong = await createRoute([{ id: '1' }]).submit({ refId1: 'x'.repeat(251) });
