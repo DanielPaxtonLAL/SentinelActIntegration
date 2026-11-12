@@ -64,6 +64,14 @@ test('preserves numeric order codes when listing and loading entitlements', asyn
   assert.equal((await client.getEntitlementDetails('1')).refId1, '00123');
 });
 
+test('preserves numeric product key IDs when loading entitlements', async () => {
+  const client = clientWithResponses({
+    '/entitlement/1.xml': '<entitlement><customerId>5</customerId><entitlementItem><productKeyId>00123</productKeyId></entitlementItem></entitlement>',
+    '/customer.xml': '<listResponse></listResponse>',
+  });
+  assert.equal((await client.getEntitlementDetails('1')).entitlementItem.productKeyId, '00123');
+});
+
 test('handles no references, empty segment lists, and invalid EMS data explicitly', async () => {
   assert.deepEqual(await clientWithResponses({ '/product/1.ws': '<product><productName>None</productName></product>' }).getProductReadOnlyMemory('1'), []);
   const client = clientWithResponses({

@@ -26,6 +26,19 @@ test('produce eligibility requires a draft and only Product Key line items', () 
   assert.equal(definition.computed.canProduce.call(app), false);
 });
 
+test('hides confirmation checkboxes for produced entitlement states', () => {
+  const app = { selectedEntitlement: { entState: 'DRAFT' } };
+  assert.equal(definition.computed.showDetailConfirmations.call(app), true);
+  for (const state of ['PRODUCT_KEY_PRODUCED', 'PRODUCT_KEY_GENERATED', 'PRODUCED']) {
+    app.selectedEntitlement.entState = state;
+    assert.equal(definition.computed.showDetailConfirmations.call(app), false);
+  }
+  app.selectedEntitlement = { state: 'PRODUCT_KEY_GENERATED' };
+  assert.equal(definition.computed.showDetailConfirmations.call(app), false);
+  const cells = [...html.matchAll(/<div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox"/g)];
+  assert.equal(cells.length, 12);
+});
+
 test('produce confirms, reloads list and selected details on success and blocks uncertain retries', async () => {
   const keys = [...html.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
   const app = {
@@ -88,6 +101,61 @@ test('opening or reloading entitlement details clears confirmations', async () =
   assert.equal(app.confirmedDetails.length, 0);
 });
 
+test('loads product key details and ignores responses for a previous selection', async () => {
+  let finish;
+  fetchMemory = () => new Promise((resolve) => { finish = resolve; });
+  const app = { detailRequest: 1, productKeys: [], productKeyLoading: false, productKeyError: '' };
+  const pending = definition.methods.loadProductKeys.call(app, '123', 1);
+  assert.equal(app.productKeyLoading, true);
+  app.detailRequest = 2;
+  app.productKeyLoading = false;
+  finish({ ok: true, json: async () => [{ productKeyId: 'old' }] });
+  await pending;
+  assert.equal(app.productKeys.length, 0);
+  fetchMemory = async () => ({ ok: false, statusText: 'Not Found', json: async () => ({ error: 'not found' }) });
+  await definition.methods.loadProductKeys.call(app, '124', 2);
+  assert.match(app.productKeyError, /not found/);
+  fetchMemory = async (url) => {
+    assert.equal(url, '/api/entitlements/124/product-keys');
+    return { ok: true, json: async () => [{ productKeyId: 'new' }] };
+  };
+  await definition.methods.loadProductKeys.call(app, '124', 2);
+  assert.equal(app.productKeys[0].productKeyId, 'new');
+  assert.equal(app.productKeyError, '');
+  assert.equal(app.productKeyLoading, false);
+  assert.equal(definition.computed.isProductKeyGenerated.call({ selectedEntitlement: { entState: 'PRODUCT_KEY_GENERATED' } }), true);
+  assert.equal(definition.computed.isProductKeyGenerated.call({ selectedEntitlement: { entState: 'DRAFT' } }), false);
+});
+
+test('opening a generated entitlement loads its product keys', async () => {
+  assert.match(html, /<details v-if="isProductKeyGenerated" class="detail-collapsible product-key-details">\s*<summary>Product Key<\/summary>[\s\S]*?<\/details>/);
+  const app = {
+    producing: false, detailRequest: 0, customers: [], confirmedDetails: [],
+    loadVersionMemory: async () => undefined,
+    loadProductKeys: definition.methods.loadProductKeys,
+  };
+  fetchMemory = async (url) => {
+    if (url === '/api/entitlements/123') {
+      return { ok: true, json: async () => ({ id: '123', entState: 'PRODUCT_KEY_GENERATED', products: [] }) };
+    }
+    assert.equal(url, '/api/entitlements/123/product-keys');
+    return { ok: true, json: async () => [{ productKeyId: 'key-001', productInfo: [], activationAttribute: [] }] };
+  };
+  await definition.methods.openEntitlementDetails.call(app, { id: '123' });
+  assert.equal(app.productKeys[0].productKeyId, 'key-001');
+  assert.equal(app.productKeyError, '');
+  assert.equal(app.detailLoading, false);
+});
+
+test('product key link downloads the exact key with a safe customer filename', () => {
+  const { productKeyDownloadUrl, productKeyFilename } = definition.methods;
+  const key = { productKeyId: '0001-ab&cd', customerName: 'Example / Co' };
+  assert.equal(productKeyDownloadUrl(key.productKeyId), 'data:text/plain;charset=utf-8,0001-ab%26cd');
+  assert.equal(productKeyFilename.call({}, key), 'Product Key - Example _ Co.txt');
+  assert.equal(productKeyFilename.call({ selectedEntitlement: { customerName: 'Fallback' } }, { productKeyId: 'abc' }), 'Product Key - Fallback.txt');
+  assert.match(html, /<a v-if="field.name === 'productKeyId'" :href="productKeyDownloadUrl\(key.productKeyId\)" :download="productKeyFilename\(key\)">/);
+});
+
 function versionFor(products, baseProductId = '6047') {
   const app = { selectedEntitlement: { products, baseProductId } };
   Object.defineProperty(app, 'baseMemorySegments', {
@@ -97,6 +165,8 @@ function versionFor(products, baseProductId = '6047') {
 }
 
 test('lists generated Product Key entitlements alongside other states', async () => {
+  assert.match(html, /<button v-if="String\(entitlement\.state \?\? ''\)\.toUpperCase\(\) !== 'PRODUCT_KEY_GENERATED'"[^>]*@click="openEditEntitlement\(entitlement\)">Edit<\/button>/);
+  assert.doesNotMatch(html, />More options<\/button>/);
   const entries = [
     { id: '1', state: 'PRODUCT_KEY_GENERATED', type: 2 },
     { id: '2', state: 'DRAFT', type: 2 },

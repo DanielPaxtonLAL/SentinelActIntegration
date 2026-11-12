@@ -51,8 +51,7 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
                 <td class="entitlement-actions" @click.stop @keydown.stop>
-                  <button type="button" class="button--constructive" :disabled="producing" @click="openEditEntitlement(entitlement)">Edit</button>
-                  <button type="button">More options</button>
+                  <button v-if="String(entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED'" type="button" class="button--constructive" :disabled="producing" @click="openEditEntitlement(entitlement)">Edit</button>
                 </td>
               </tr>
             </tbody>
@@ -68,18 +67,18 @@
           <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
           <template v-if="!detailLoading && !detailError">
             <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="customer" aria-label="Confirm Customer"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="serial" aria-label="Confirm Serial Number"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Order Code (Ref ID 1)</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.refId1) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="orderCode" aria-label="Confirm Irricad Order Code"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? 'UTC, DD-MM-YYYY' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="createdDate" aria-label="Confirm Created Date"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="startDate" aria-label="Confirm Start Date"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">End Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.endDate && formatEndDate(selectedEntitlement.endDate) !== 'Never' ? 'Local time, DD-MM-YYYY' : null">{{ formatEndDate(selectedEntitlement.endDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="endDate" aria-label="Confirm End Date"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Standalone Irricad</div><div class="detail-value" role="cell">{{ productPresent('standalone') }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="standalone" aria-label="Confirm Standalone Irricad"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Link Irricad</div><div class="detail-value" role="cell">{{ productPresent('link') }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="link" aria-label="Confirm Link Irricad"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Pivot Irricad</div><div class="detail-value" role="cell">{{ productPresent('pivot') }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="pivot" aria-label="Confirm Pivot Irricad"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Irricad</div><div class="detail-value" role="cell">{{ productPresent('lease') }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="lease" aria-label="Confirm Lease Irricad"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Expiry Date*</div><div class="detail-value" role="cell" :title="/^\d{4}-\d{2}-\d{2}$/.test(selectedExpiryDate) ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedExpiryDate) }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="expiryDate" aria-label="Confirm Lease Expiry Date"></div></div>
-              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="version" aria-label="Confirm Irricad Version"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Customer</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="customer" aria-label="Confirm Customer"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Serial Number*</div><div class="detail-value" role="cell">{{ selectedSerialNumber }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="serial" aria-label="Confirm Serial Number"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Order Code (Ref ID 1)</div><div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.refId1) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="orderCode" aria-label="Confirm Irricad Order Code"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? 'UTC, DD-MM-YYYY' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="createdDate" aria-label="Confirm Created Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="startDate" aria-label="Confirm Start Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">End Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.endDate && formatEndDate(selectedEntitlement.endDate) !== 'Never' ? 'Local time, DD-MM-YYYY' : null">{{ formatEndDate(selectedEntitlement.endDate) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="endDate" aria-label="Confirm End Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Standalone Irricad</div><div class="detail-value" role="cell">{{ productPresent('standalone') }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="standalone" aria-label="Confirm Standalone Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Link Irricad</div><div class="detail-value" role="cell">{{ productPresent('link') }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="link" aria-label="Confirm Link Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Pivot Irricad</div><div class="detail-value" role="cell">{{ productPresent('pivot') }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="pivot" aria-label="Confirm Pivot Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Irricad</div><div class="detail-value" role="cell">{{ productPresent('lease') }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="lease" aria-label="Confirm Lease Irricad"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Lease Expiry Date*</div><div class="detail-value" role="cell" :title="/^\d{4}-\d{2}-\d{2}$/.test(selectedExpiryDate) ? 'Local time, DD-MM-YYYY' : null">{{ formatLocalDate(selectedExpiryDate) }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="expiryDate" aria-label="Confirm Lease Expiry Date"></div></div>
+              <div class="detail-row" role="row"><div class="detail-label" role="rowheader">Irricad Version*</div><div class="detail-value" role="cell">{{ decodedVersion }}</div><div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox" v-model="confirmedDetails" value="version" aria-label="Confirm Irricad Version"></div></div>
             </div>
             <div class="detail-footer">
               <p class="detail-footnote">* Derived from Memory Segments in Base Product</p>
@@ -87,6 +86,32 @@
                 @click="produceSelectedEntitlement">{{ producing ? 'Producing…' : 'Produce entitlement' }}</button>
             </div>
             <p v-if="produceError" class="form-error" role="alert">{{ produceError }}</p>
+            <details v-if="isProductKeyGenerated" class="detail-collapsible product-key-details">
+              <summary>Product Key</summary>
+              <p v-if="productKeyLoading" role="status">Loading product key details…</p>
+              <p v-else-if="productKeyError" class="form-error" role="alert">{{ productKeyError }} <button type="button" @click="loadProductKeys(selectedEntitlement.id, detailRequest)">Retry</button></p>
+              <template v-else>
+                <div v-for="key in productKeys" :key="key.productKeyId">
+                  <div class="entitlement-detail-fields" role="table" aria-label="Product key details">
+                    <div v-for="field in productKeyFields" :key="field.name" class="detail-row" role="row">
+                      <div class="detail-label" role="rowheader">{{ field.label }}</div>
+                      <div class="detail-value" role="cell"><a v-if="field.name === 'productKeyId'" :href="productKeyDownloadUrl(key.productKeyId)" :download="productKeyFilename(key)">{{ key.productKeyId }}</a><template v-else>{{ displayValue(key[field.name]) }}</template></div>
+                    </div>
+                  </div>
+                  <h4>Products</h4>
+                  <p v-if="!key.productInfo.length">No products listed.</p>
+                  <ul v-else><li v-for="(product, index) in key.productInfo" :key="index">{{ displayValue(product.productName) }} (ID: {{ displayValue(product.id) }}, identifier: {{ displayValue(product.productIdentifier) }}, type: {{ displayValue(product.type) }})</li></ul>
+                  <h4>Activation attributes</h4>
+                  <p v-if="!key.activationAttribute.length">No activation attributes listed.</p>
+                  <div v-else class="table-wrap">
+                    <table>
+                      <thead><tr><th>Name</th><th>Value</th><th>ISV permission</th><th>End user permission</th></tr></thead>
+                      <tbody><tr v-for="(attribute, index) in key.activationAttribute" :key="index"><td>{{ displayValue(attribute.attributeName) }}</td><td>{{ displayValue(attribute.attributeValue) }}</td><td>{{ displayValue(attribute.isvPermission) }}</td><td>{{ displayValue(attribute.endUserPermission) }}</td></tr></tbody>
+                    </table>
+                  </div>
+                </div>
+              </template>
+            </details>
             <details class="detail-collapsible">
             <summary>Verbose Details</summary>
             <h3>Products</h3>
@@ -147,6 +172,21 @@
           customers: [],
           selectedEntitlement: null,
           confirmedDetails: [],
+          productKeys: [],
+          productKeyLoading: false,
+          productKeyError: '',
+          productKeyFields: [
+            { name: 'productKeyId', label: 'Product Key' },
+            { name: 'totalEntitled', label: 'Total entitled' },
+            { name: 'available', label: 'Available' },
+            { name: 'enabled', label: 'Enabled' },
+            { name: 'type', label: 'Type' },
+            { name: 'registrationRequired', label: 'Registration required' },
+            { name: 'customerEmail', label: 'Customer email' },
+            { name: 'customerName', label: 'Customer name' },
+            { name: 'entitlementId', label: 'Entitlement ID' },
+            { name: 'customerId', label: 'Customer ID' },
+          ],
           versionMemory: null,
           versionError: '',
           detailRequest: 0,
@@ -165,6 +205,13 @@
         };
       },
       computed: {
+        isProductKeyGenerated() {
+          return String(this.selectedEntitlement?.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED';
+        },
+        showDetailConfirmations() {
+          const state = String(this.selectedEntitlement?.entState || this.selectedEntitlement?.state || '').toUpperCase();
+          return !['PRODUCT_KEY_PRODUCED', 'PRODUCT_KEY_GENERATED', 'PRODUCED'].includes(state);
+        },
         allDetailsConfirmed() {
           return detailConfirmationKeys.every((key) => this.confirmedDetails.includes(key));
         },
@@ -269,10 +316,21 @@
         },
       },
       methods: {
+        productKeyDownloadUrl(key) {
+          return 'data:text/plain;charset=utf-8,' + encodeURIComponent(key);
+        },
+        productKeyFilename(key) {
+          const safe = (value) => String(value).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '') || 'Unknown';
+          const customer = key.customerName || this.selectedEntitlement?.customerName || this.selectedEntitlement?.customer || 'Unknown';
+          return `Product Key - ${safe(customer)}.txt`;
+        },
         async openEntitlementDetails(entitlement) {
           if (this.producing) return;
           const request = ++this.detailRequest;
           this.confirmedDetails = [];
+          this.productKeys = [];
+          this.productKeyError = '';
+          this.productKeyLoading = false;
           this.produceError = '';
           this.produceUncertain = false;
           this.detailError = '';
@@ -295,6 +353,9 @@
               customerName: customer?.name ?? customer?.customerName ??
                 data.customerName ?? data.customer ?? entitlement.customer,
             };
+            if (String(data.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED') {
+              await this.loadProductKeys(entitlement.id, request);
+            }
             try {
               const memory = await this.loadVersionMemory(data);
               if (request === this.detailRequest) this.versionMemory = memory;
@@ -305,6 +366,21 @@
             if (request === this.detailRequest) this.detailError = 'Failed to load entitlement details: ' + err.message;
           } finally {
             if (request === this.detailRequest) this.detailLoading = false;
+          }
+        },
+        async loadProductKeys(id, request) {
+          this.productKeyLoading = true;
+          this.productKeyError = '';
+          try {
+            const response = await fetch(`/api/entitlements/${encodeURIComponent(id)}/product-keys`, { cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data) || !data.length) throw new Error('The server returned invalid product key details');
+            if (request === this.detailRequest) this.productKeys = data;
+          } catch (err) {
+            if (request === this.detailRequest) this.productKeyError = 'Failed to load product key details: ' + err.message;
+          } finally {
+            if (request === this.detailRequest) this.productKeyLoading = false;
           }
         },
         async produceSelectedEntitlement() {

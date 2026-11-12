@@ -18,6 +18,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let handler;
   let updateHandler;
   let serialHandler;
+  let productKeysHandler;
   let produceHandler;
   let saved;
   const events = [];
@@ -45,6 +46,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async getProductReadOnlyMemory(id) { return String(id) === '60' ? [...baseMemory, { kind: 'product', segments: [{ id: '999', name: 'Serial Number', size: '4', saot: true }] }] : []; }
     async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
     async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
+    async getEntitlementProductKeys(id) { return [{ productKeyId: 'key-001', entitlementId: id }]; }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
     async produceEntitlement(id) {
       events.push(`produce:${id}`);
@@ -53,7 +55,10 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     }
   }
   const app = {
-    get(route, ...handlers) { if (route === '/api/product-key-serial-number') serialHandler = handlers.at(-1); },
+    get(route, ...handlers) {
+      if (route === '/api/product-key-serial-number') serialHandler = handlers.at(-1);
+      if (route === '/api/entitlements/:id/product-keys') productKeysHandler = handlers.at(-1);
+    },
     post(route, ...handlers) {
       if (route === '/api/entitlements') handler = handlers.at(-1);
       if (route === '/api/entitlements/:id/produce') produceHandler = handlers.at(-1);
@@ -90,6 +95,16 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   });
   return {
     events,
+    async getProductKeys(id) {
+      const res = {
+        statusCode: 200,
+        set(name, value) { this.headers = { [name]: value }; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await productKeysHandler({ params: { id } }, res);
+      return res;
+    },
     async produce(id) {
       const res = {
         statusCode: 200,
@@ -125,6 +140,17 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     },
   };
 }
+
+test('product key details route validates entitlement ID and prevents caching', async () => {
+  const route = createRoute([]);
+  const invalid = await route.getProductKeys('bad');
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.headers['Cache-Control'], 'no-store');
+  const response = await route.getProductKeys('123');
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body[0].productKeyId, 'key-001');
+  assert.equal(response.headers['Cache-Control'], 'no-store');
+});
 
 test('produce route validates IDs and surfaces uncertain outcomes without retrying', async () => {
   const route = createRoute([]);

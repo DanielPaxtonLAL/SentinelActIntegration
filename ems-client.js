@@ -377,7 +377,7 @@ class EmsClient {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({
       ignoreAttributes: false, attributeNamePrefix: '',
-      tagValueProcessor: (name, value) => name === 'refId1' ? null : value,
+      tagValueProcessor: (name, value) => name === 'refId1' || name === 'productKeyId' ? null : value,
     }).parse(xml);
     const entitlement = parsed?.entitlement;
     if (!entitlement || typeof entitlement !== 'object') {
@@ -428,6 +428,49 @@ class EmsClient {
       lineItemTypes: entitlementItems.map((item) => item?.lineItemType),
       products,
     };
+  }
+
+  async getEntitlementProductKeys(id) {
+    const entitlement = await this.getEntitlementDetails(id);
+    if (String(entitlement.entState ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED') {
+      const error = new Error('Product keys are only available for generated entitlements.');
+      error.status = 400;
+      throw error;
+    }
+    const items = Array.isArray(entitlement.entitlementItem) ? entitlement.entitlementItem : [entitlement.entitlementItem];
+    const ids = items.flatMap((item) => {
+      if (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId) {
+        throw new Error('EMS did not return a product key ID for every entitlement item.');
+      }
+      return Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId];
+    });
+    if (!ids.length || ids.some((key) => typeof key !== 'string' || !key.trim())) {
+      throw new Error('EMS returned an invalid product key ID.');
+    }
+    return Promise.all([...new Set(ids)].map(async (key) => {
+      const response = await this._fetch(`${this.apiRoot}/productKey/${encodeURIComponent(key)}.ws`, {
+        headers: { Accept: 'application/xml' },
+      });
+      const xml = await response.text();
+      if (response.status === 401 || response.status === 302) {
+        const error = new Error('EMS session expired while loading product key details.');
+        error.status = 401;
+        throw error;
+      }
+      if (!response.ok) throw new Error(`EMS product key lookup failed: ${response.status} ${response.statusText}`);
+      if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid product key XML.');
+      const productKey = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false }).parse(xml).productKey;
+      if (!productKey || typeof productKey !== 'object' ||
+          productKey.productKeyId !== key || String(productKey.entitlementId) !== String(id)) {
+        throw new Error('EMS returned product key details for an unexpected key or entitlement.');
+      }
+      const asList = (value) => value === undefined || value === '' ? [] : Array.isArray(value) ? value : [value];
+      return {
+        ...productKey,
+        productInfo: asList(productKey.productInfo),
+        activationAttribute: asList(productKey.activationAttribute),
+      };
+    }));
   }
 
   async listCatalog(category, vendorId = '2') {
