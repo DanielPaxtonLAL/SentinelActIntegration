@@ -28,13 +28,16 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <label v-if="baseSerialSegment">
-          Serial number (decimal)
-          <input :value="serialNumber" @input="limitSerialInput" type="text" inputmode="numeric" pattern="\d+" :maxlength="serialMaxDigits" required :disabled="loading">
-          <span class="form-hint">Converted to {{ Number(baseSerialSegment.size) }} hexadecimal digits and stored as ASCII characters.</span>
-        </label>
+        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :invalid="serialTooLarge">
+          <span v-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
+        </serial-number-input>
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
         <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
+        <p v-if="serialLoading" class="form-hint" role="status">Loading the serial number...</p>
+        <div v-if="serialError">
+          <p class="form-error" role="alert">{{ serialError }}</p>
+          <button type="button" class="button--view" @click="loadSerialNumber" :disabled="loading || serialLoading">Retry</button>
+        </div>
         <label>
           <span>Irricad Order Code (refID 1) <span id="ref-id-remaining" class="form-hint character-count">- {{ 250 - form.refId1.length }} chars left</span></span>
           <input v-model="form.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">
@@ -117,7 +120,7 @@
         <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (local time).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || !customers.length || !hasAccessProduct || !productMemoryReady || (leaseSelected && leaseBounds.min > leaseBounds.max)">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooLarge || (leaseSelected && leaseBounds.min > leaseBounds.max)">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -126,11 +129,13 @@
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
   <script src="/lease-dates.js"></script>
+  <script src="/serial-number-input.js"></script>
   <script>
     const { createApp } = Vue;
     const DEFAULT_LEASE_LENGTH_YEARS = 1;
 
     createApp({
+      components: { SerialNumberInput },
       data() {
         return {
           customers: [],
@@ -142,6 +147,8 @@
           leaseExpiryDate: '',
           leaseExpiryRange: null,
           serialNumber: '',
+          serialLoading: false,
+          serialError: '',
           baseProductId: '',
           productMemory: {},
           loading: false,
@@ -196,8 +203,8 @@
           const digits = Number(this.baseSerialSegment?.size);
           return Number.isInteger(digits) && digits > 0 ? 16n ** BigInt(digits) - 1n : 0n;
         },
-        serialMaxDigits() {
-          return this.serialMax.toString().length;
+        serialTooLarge() {
+          return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) > this.serialMax;
         },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
@@ -254,12 +261,6 @@
         isBaseSerialSegment(productId, file, segment) {
           return productId === this.baseProductId && file.kind === 'product' && this.isSerialSegment(segment);
         },
-        limitSerialInput(event) {
-          let value = event.target.value.replace(/\D/g, '');
-          while (value && BigInt(value) > this.serialMax) value = value.slice(0, -1);
-          this.serialNumber = value;
-          event.target.value = value;
-        },
         encodeSerialNumber(value, size) {
           const digitCount = Number(size);
           if (!/^\d+$/.test(value) || !Number.isInteger(digitCount) || digitCount < 1) {
@@ -267,7 +268,7 @@
           }
           const hex = BigInt(value).toString(16).toUpperCase();
           if (hex.length > digitCount) {
-            throw new Error(`The serial number must fit in ${digitCount} hexadecimal digits (maximum ${(16n ** BigInt(digitCount) - 1n).toString()}).`);
+            throw new Error(`Serial number must be ${(16n ** BigInt(digitCount) - 1n).toLocaleString('en-NZ')} or less.`);
           }
           return Array.from(hex.padStart(digitCount, '0'), (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
         },
@@ -346,6 +347,23 @@
             this.customerError = 'Failed to load EMS customers: ' + err.message;
           } finally {
             this.customersLoading = false;
+          }
+        },
+        async loadSerialNumber() {
+          this.serialLoading = true;
+          this.serialError = '';
+          try {
+            const response = await fetch('/api/product-key-serial-number', { cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!data || !Number.isInteger(data.largest) || data.largest < 0 || data.largest > 65535) {
+              throw new Error('The server returned an invalid serial number.');
+            }
+            this.serialNumber = String(data.largest).padStart(5, '0');
+          } catch (err) {
+            this.serialError = 'Failed to load the serial number: ' + err.message;
+          } finally {
+            this.serialLoading = false;
           }
         },
         async loadProducts() {
@@ -455,6 +473,7 @@
       mounted() {
         this.loadCustomers();
         this.loadProducts();
+        this.loadSerialNumber();
       },
     }).mount('#app');
   </script>

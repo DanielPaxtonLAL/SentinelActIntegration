@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const formJson = {
   'base-product-id': '60',
+  'highest-product-key-serial-number-customer-id': '1010',
   'lease-expiry-range': { 'min-months': 6, 'max-months': 24 },
   'product-options': { standalone: { label: 'Standalone', 'product-id': '6048' }, link: { label: 'Link', 'product-id': '6049' } },
   'optional-products': { pivot: { label: 'Pivot', 'product-id': '6051' } },
@@ -13,13 +14,18 @@ const formJson = {
   lease: { lease: { label: 'Lease', 'product-id': '6050' } },
 };
 
-function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true, existingStartDate = '2026-11-10') {
+function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true, existingStartDate = '2026-11-10', serialOptions = {}) {
   let handler;
   let updateHandler;
+  let serialHandler;
   let saved;
+  const events = [];
+  let largest = serialOptions.largest ?? 42;
   class EmsClient {
     constructor() { this.authenticated = true; }
     async listCustomers() { return [{ customerId: '5' }]; }
+    async getLargestProductKeySerial() { events.push('get'); if (serialOptions.getError) throw new Error('serial read failed'); return largest; }
+    async setLargestProductKeySerial(value) { events.push(`set:${value}`); if (serialOptions.setError) throw new Error('serial write failed'); if (serialOptions.beforeSet) await serialOptions.beforeSet(value); largest = value; }
     async getProductSummary(id) {
       assert.equal(id, '60');
       return { id: '60', lifeCycleStage: 'Commit', enforcementProductType: 'BASE' };
@@ -35,13 +41,13 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         { productId: '13', productName: 'Draft', lifeCycleStage: 'Draft' }];
     }
     async listEnforcements() { return enforcements; }
-    async getProductReadOnlyMemory(id) { return String(id) === '60' ? baseMemory : []; }
-    async createEntitlement(data) { saved = data; return { saved: true }; }
+    async getProductReadOnlyMemory(id) { return String(id) === '60' ? [...baseMemory, { kind: 'product', segments: [{ id: '999', name: 'Serial Number', size: '4', saot: true }] }] : []; }
+    async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
     async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
   }
   const app = {
-    get() {},
+    get(route, ...handlers) { if (route === '/api/product-key-serial-number') serialHandler = handlers.at(-1); },
     post(route, ...handlers) { if (route === '/api/entitlements') handler = handlers.at(-1); },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
     delete() {},
@@ -70,14 +76,27 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }
     },
+    Buffer,
     console,
   });
   return {
+    events,
+    async getSerial() {
+      const res = {
+        statusCode: 200,
+        set(name, value) { this.headers = { [name]: value }; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await serialHandler({}, res);
+      return res;
+    },
     async submit(overrides = {}, update = false) {
       const req = { params: update ? { id: '123' } : undefined, body: {
         customerId: '5', productIds: ['6048'],
         description: '', ...overrides,
       } };
+      req.body.memoryValues = [...(req.body.memoryValues || []), { productId: '60', segmentId: '999', content: overrides.serialTestContent ?? serialOptions.serialContent ?? '30303242' }];
       const res = {
         statusCode: 200,
         status(code) { this.statusCode = code; return this; },
@@ -88,6 +107,35 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     },
   };
 }
+
+test('serial number endpoint returns the highest stored serial without caching', async () => {
+  const res = await createRoute([{ id: '1' }]).getSerial();
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.largest, 42);
+  assert.equal(res.headers['Cache-Control'], 'no-store');
+});
+
+test('creating and updating entitlements does not change the recorded highest serial', async () => {
+  const route = createRoute([{ id: '1' }]);
+  const result = await route.submit();
+  assert.equal(result.res.statusCode, 201);
+  assert.deepEqual(route.events, ['create']);
+  const edited = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { serialContent: '30303634' });
+  assert.equal((await edited.submit()).res.statusCode, 201);
+  assert.deepEqual(edited.events, ['create']);
+  const failed = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { createError: true });
+  assert.equal((await failed.submit()).res.statusCode, 502);
+  assert.deepEqual(failed.events, ['create']);
+  const update = createRoute([{ id: '1' }]);
+  await update.submit({}, true);
+  assert.deepEqual(update.events, []);
+});
+
+test('rejects invalid encoded serial numbers before creation', async () => {
+  const route = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { serialContent: 'FFFFFFFF' });
+  assert.equal((await route.submit()).res.statusCode, 400);
+  assert.deepEqual(route.events, []);
+});
 
 test('forwards order code on creation and preserves it when editing', async () => {
   const create = await createRoute([{ id: '1' }]).submit({ refId1: 'ORDER-123' });
@@ -132,7 +180,7 @@ test('lease requires the base expiry value and non-lease uses the EMS default', 
     productIds: ['6048'], memoryValues: [{ productId: '60', segmentId: '90', content: 'FFFFFFFF' }],
   });
   assert.equal(noLease.res.statusCode, 201);
-  assert.equal(noLease.saved.memorySegments[0].content, '00000000');
+  assert.equal(noLease.saved.memorySegments.find((segment) => segment.id === '90').content, '00000000');
   const missing = await route().submit({ productIds: ['6048', '6050'] });
   assert.equal(missing.res.statusCode, 400);
   const invalid = await route().submit({

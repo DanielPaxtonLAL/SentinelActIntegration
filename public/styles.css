@@ -404,6 +404,10 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .entitlement-form input:not([type="checkbox"]):not([type="radio"]),
 .entitlements-page .entitlement-form select,
 .entitlements-page .entitlement-form textarea { width: 100%; min-width: 0; padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; font: inherit; font-weight: 400; }
+.entitlements-page .serial-number-field { display: grid; gap: .35rem; }
+.entitlements-page .serial-number-label { font-size: .9rem; font-weight: 600; }
+.entitlements-page .serial-number-digits { display: flex; flex-wrap: nowrap; gap: .35rem; overflow-x: auto; }
+.entitlements-page .entitlement-form .serial-number-digits input[type="text"] { flex: 0 0 2.5rem; width: 2.5rem; text-align: center; }
 .entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
 .entitlements-page .form-hint { color: var(--color-text-muted); }
 .entitlements-page .character-count { font-weight: 400; }

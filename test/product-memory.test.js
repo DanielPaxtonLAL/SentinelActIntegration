@@ -172,6 +172,7 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
     fetch,
     URLSearchParams,
     LeaseDates: require('../public/lease-dates'),
+    SerialNumberInput: {},
     window: { location: { assign() {}, search: '' } },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
@@ -187,9 +188,44 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
   Object.defineProperty(app, 'serialMax', { get: () => definition.computed.serialMax.call(app) });
+  Object.defineProperty(app, 'serialTooLarge', { get: () => definition.computed.serialTooLarge.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
+
+test('creation form loads the recorded serial and exposes failures for retry', async () => {
+  let resolve;
+  const app = entitlementApp(() => new Promise((done) => { resolve = done; }));
+  const pending = app.loadSerialNumber();
+  assert.equal(app.serialLoading, true);
+  resolve({ ok: true, json: async () => ({ largest: 1234 }) });
+  await pending;
+  assert.equal(app.serialNumber, '01234');
+  assert.equal(app.serialLoading, false);
+  assert.equal(app.serialError, '');
+
+  const first = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: 1 }) }));
+  await first.loadSerialNumber();
+  assert.equal(first.serialNumber, '00001');
+  assert.equal(first.encodeSerialNumber(first.serialNumber, '4'), '30303031');
+
+  const failed = entitlementApp(async () => ({ ok: false, json: async () => ({ error: 'EMS unavailable' }) }));
+  await failed.loadSerialNumber();
+  assert.match(failed.serialError, /EMS unavailable/);
+  assert.equal(failed.serialNumber, '');
+  const bad = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: '42' }) }));
+  await bad.loadSerialNumber();
+  assert.match(bad.serialError, /invalid serial number/);
+  const maximum = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: 65535 }) }));
+  maximum.baseProductId = '60';
+  maximum.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
+  await maximum.loadSerialNumber();
+  assert.equal(maximum.serialNumber, '65535');
+  assert.equal(maximum.serialTooLarge, false);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
+  assert.match(html, /productError \|\| serialLoading \|\| serialError \|\|/);
+  assert.match(html, /@click="loadSerialNumber"/);
+});
 
 test('update form prevents editing a lease when the entitlement start date is unavailable', async () => {
   let submissions = 0;
@@ -400,16 +436,21 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   assert.equal(app.serialNumber, '');
 });
 
-test('serial input cannot exceed the segment capacity', () => {
-  const app = entitlementApp(async () => {});
-  app.baseProductId = '60';
-  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
-  const type = (value) => { const event = { target: { value } }; app.limitSerialInput(event); return event.target.value; };
-  assert.equal(type('65535'), '65535');
-  assert.equal(type('65536'), '6553');
-  assert.equal(type('99999'), '9999');
-  assert.equal(type('12ab3'), '123');
-  assert.equal(app.serialNumber, '123');
+test('serial input flags out-of-range values on both forms', () => {
+  for (const page of ['create-entitlement-form.html', 'update-entitlement-form.html']) {
+    const app = entitlementApp(async () => {}, page);
+    app.baseProductId = '60';
+    app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
+    for (const [value, tooLarge] of [['65535', false], ['65536', true], ['999999', true], ['00065535', false], ['', false]]) {
+      app.serialNumber = value;
+      assert.equal(app.serialTooLarge, tooLarge);
+    }
+    const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
+    assert.match(html, /v-if="serialTooLarge" id="serial-error" class="form-error" role="alert"/);
+    assert.match(html, /!productMemoryReady \|\| serialTooLarge \|\|/);
+    assert.match(html, /<serial-number-input v-if="baseSerialSegment" v-model="serialNumber"/);
+    assert.match(html, /src="\/serial-number-input\.js"/);
+  }
 });
 
 test('serial numbers convert from decimal to ASCII hexadecimal digits', () => {
@@ -417,7 +458,22 @@ test('serial numbers convert from decimal to ASCII hexadecimal digits', () => {
   assert.equal(app.encodeSerialNumber('255', '4'), '30304646');
   assert.equal(app.encodeSerialNumber('0', '2'), '3030');
   for (const value of ['', '12a', '-1', '65536']) {
-    assert.throws(() => app.encodeSerialNumber(value, '4'), /serial number/);
+    assert.throws(() => app.encodeSerialNumber(value, '4'), /serial number/i);
+  }
+  assert.throws(() => app.encodeSerialNumber('65536', '4'), /65,535 or less/);
+});
+
+test('out-of-range serial numbers are not submitted by either form', async () => {
+  for (const page of ['create-entitlement-form.html', 'update-entitlement-form.html']) {
+    let requests = 0;
+    const app = entitlementApp(async () => { requests++; }, page);
+    app.baseProductId = '60';
+    app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
+    app.entitlementLoaded = true;
+    app.serialNumber = '65536';
+    await app.createEntitlement();
+    assert.equal(requests, 0);
+    assert.match(app.error, /65,535 or less/);
   }
 });
 

@@ -25,6 +25,10 @@ function parseFormData(json) {
   const base = String(json['base-product-id'] ?? '').trim();
   if (!isProductId(base)) throw new Error('entitlement form data: "base-product-id" must be a positive number');
 
+  const serialCustomerId = json['highest-product-key-serial-number-customer-id'];
+  if (serialCustomerId !== undefined && (typeof serialCustomerId !== 'string' || !isProductId(serialCustomerId))) {
+    throw new Error('entitlement form data: "highest-product-key-serial-number-customer-id" must be a positive number');
+  }
   const range = json['lease-expiry-range'];
   if (!range || !Number.isSafeInteger(range['min-months']) || !Number.isSafeInteger(range['max-months']) ||
       range['min-months'] < 0 || range['max-months'] < range['min-months'] || range['max-months'] > 1200) {
@@ -65,6 +69,7 @@ function parseFormData(json) {
 
   return {
     baseProductId: base,
+    highestProductKeySerialNumberCustomerId: serialCustomerId,
     accessProducts,
     optionalProducts,
     versionProducts,

@@ -2,7 +2,7 @@
 // Authenticates through the EMS web login (form POST to verifyLogin.html),
 // keeps the JSESSIONID cookie, and reuses it for later API calls.
 
-const { XMLParser } = require('fast-xml-parser');
+const { XMLParser, XMLBuilder, XMLValidator } = require('fast-xml-parser');
 
 const escapeXml = (value) => String(value)
   .replace(/&/g, '&amp;')
@@ -12,7 +12,7 @@ const escapeXml = (value) => String(value)
   .replace(/'/g, '&apos;');
 
 class EmsClient {
-  constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false }) {
+  constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, serialNumberCustomerId }) {
     if (!baseUrl) throw new Error('baseUrl is required');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.apiVersion = apiVersion;
@@ -20,6 +20,7 @@ class EmsClient {
     this.username = username;
     this.password = password;
     this.userType = userType; // 'ISV' for the vendor login, 'CUSTOMER' for the customer portal
+    this.serialNumberCustomerId = serialNumberCustomerId;
     this.cookies = new Map();
     this.authenticated = false;
     if (insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // self-signed certs
@@ -83,6 +84,75 @@ class EmsClient {
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
     const inst = parsed?.listResponse?.instance ?? [];
     return Array.isArray(inst) ? inst : [inst];
+  }
+
+  async _serialNumberCustomer() {
+    const id = this.serialNumberCustomerId;
+    if (typeof id !== 'string' || !/^[1-9]\d*$/.test(id)) {
+      throw new Error('Configure a valid highest-product-key-serial-number-customer-id before accessing the serial number.');
+    }
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    const response = await this._fetch(`${this.apiRoot}/customer/${id}.ws`, {
+      headers: { Accept: 'application/xml' },
+    });
+    const xml = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading the serial number customer.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS customer lookup failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = xml;
+      throw error;
+    }
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid customer XML.');
+    const options = { preserveOrder: true, ignoreAttributes: false, parseTagValue: false, trimValues: false };
+    const document = new XMLParser(options).parse(xml);
+    const roots = document.filter((node) => Object.hasOwn(node, 'customer'));
+    if (roots.length !== 1 || !Array.isArray(roots[0].customer)) throw new Error('EMS returned an invalid customer record.');
+    const references = roots[0].customer.filter((node) => Object.hasOwn(node, 'refId'));
+    if (references.length !== 1 || !Array.isArray(references[0].refId) ||
+        references[0].refId.some((node) => !Object.hasOwn(node, '#text'))) {
+      throw new Error('EMS customer must contain exactly one plain-text refId.');
+    }
+    return { document, reference: references[0], options };
+  }
+
+  async getLargestProductKeySerial() {
+    const { reference } = await this._serialNumberCustomer();
+    const value = reference.refId.map((node) => node['#text']).join('').trim();
+    if (!/^\d+$/.test(value) || BigInt(value) > 65535n) {
+      throw new Error('The serial number customer has an invalid Ref ID 1; expected a number from 0 to 65,535.');
+    }
+    return Number(value);
+  }
+
+  async setLargestProductKeySerial(newSerialNumber) {
+    const value = String(newSerialNumber);
+    if (!/^\d+$/.test(value) || BigInt(value) > 65535n) {
+      throw new Error('Serial number must be a whole number from 0 to 65,535.');
+    }
+    const { document, reference, options } = await this._serialNumberCustomer();
+    reference.refId = [{ '#text': String(Number(value)) }];
+    const response = await this._fetch(`${this.apiRoot}/customer/${this.serialNumberCustomerId}.ws`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
+      body: new XMLBuilder(options).build(document),
+    });
+    const text = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while updating the serial number customer.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS customer update failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = text;
+      throw error;
+    }
   }
 
   // Creates a customer via PUT /customer.ws with an XML body; returns the Location header.

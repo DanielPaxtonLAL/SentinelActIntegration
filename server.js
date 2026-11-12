@@ -83,6 +83,7 @@ const ems = new EmsClient({
   insecure: EMS_INSECURE === '1',
   apiVersion: EMS_API_VERSION || 'v90',
   userType: EMS_USER_TYPE || 'ISV',
+  serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
 });
 
 // Runs an EMS call, logging in first and once more if the session has expired.
@@ -127,6 +128,17 @@ app.use(express.static(publicDir));
 app.get('/api/customers', async (req, res) => {
   try {
     res.json(await withSession(() => ems.listCustomers()));
+  } catch (err) {
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/product-key-serial-number', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const largest = await withSession(() => ems.getLargestProductKeySerial());
+    res.json({ largest });
   } catch (err) {
     console.error(err.message);
     res.status(502).json({ error: err.message });
@@ -336,6 +348,22 @@ const saveEntitlement = async (req, res) => {
     }
     const memorySegments = validateMemoryValues(allProductIds, productFiles, resolvedMemoryValues);
 
+    if (!existingId) {
+      const serialSegments = productFiles[baseProductId]
+        .filter((file) => file.kind === 'product')
+        .flatMap((file) => file.segments)
+        .filter((segment) => segment.saot && typeof segment.name === 'string' &&
+          segment.name.trim().toLowerCase() === 'serial number');
+      if (serialSegments.length !== 1 || Number(serialSegments[0].size) !== 4) {
+        return res.status(400).json({ error: 'EMS must provide exactly one editable 4-byte base product Serial Number segment.' });
+      }
+      const serial = memorySegments.find((segment) => segment.id === String(serialSegments[0].id));
+      const digits = Buffer.from(serial.content, 'hex').toString('latin1');
+      if (!/^[0-9a-f]{4}$/i.test(digits)) {
+        return res.status(400).json({ error: 'The serial number segment must contain four ASCII hexadecimal digits.' });
+      }
+    }
+
     let existing = null;
     if (existingId) {
       existing = await withSession(() => ems.getEntitlementDetails(existingId));
@@ -371,10 +399,11 @@ const saveEntitlement = async (req, res) => {
       refId2,
       memorySegments,
     };
-    const result = existingId
-      ? await ems.updateEntitlement(existingId, entitlementData)
-      : await ems.createEntitlement(entitlementData);
-    res.status(existingId ? 200 : 201).json(result);
+    if (existingId) {
+      const result = await ems.updateEntitlement(existingId, entitlementData);
+      return res.status(200).json(result);
+    }
+    return res.status(201).json(await ems.createEntitlement(entitlementData));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;

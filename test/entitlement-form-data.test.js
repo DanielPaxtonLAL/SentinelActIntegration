@@ -18,6 +18,7 @@ test('repo form data file loads', () => {
   assert.ok(data.baseProductId);
   assert.ok(data.accessProducts.length >= 1);
   assert.ok(data.lease.id);
+  assert.equal(data.highestProductKeySerialNumberCustomerId, '1010');
 });
 
 test('parses ids, labels and default version', () => {
@@ -52,4 +53,7 @@ test('rejects duplicate ids and missing sections', () => {
   const missingRange = valid();
   delete missingRange['lease-expiry-range'];
   assert.throws(() => parseFormData(missingRange), /lease-expiry-range/);
+  const invalidCustomer = valid();
+  invalidCustomer['highest-product-key-serial-number-customer-id'] = '../1010';
+  assert.throws(() => parseFormData(invalidCustomer), /highest-product-key-serial-number-customer-id/);
 });
