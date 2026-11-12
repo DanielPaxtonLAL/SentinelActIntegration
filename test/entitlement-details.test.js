@@ -182,6 +182,12 @@ test('lists generated Product Key entitlements alongside other states', async ()
   assert.equal(app.error, '');
 });
 
+test('entitlement list rows have a uniform height without wrapping cell contents', () => {
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.entitlements-page \.entitlement-row \{[^}]*height:\s*3\.5rem/);
+  assert.match(styles, /\.entitlements-page \.entitlement-row > td \{[^}]*white-space:\s*nowrap/);
+});
+
 test('labels entitlement types and allows filtering by key update', () => {
   const { typeLabel } = definition.methods;
   assert.equal(typeLabel(1), 'HL Key');
