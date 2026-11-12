@@ -180,6 +180,9 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
   Object.assign(app, definition.data.call(app));
   app.leaseExpiryRange = { minMonths: 6, maxMonths: 24 };
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
+  if (definition.computed.filteredCustomers) {
+    Object.defineProperty(app, 'filteredCustomers', { get: () => definition.computed.filteredCustomers.call(app) });
+  }
   Object.defineProperty(app, 'hasAccessProduct', { get: () => definition.computed.hasAccessProduct.call(app) });
   Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
   Object.defineProperty(app, 'otherOptionalProducts', { get: () => definition.computed.otherOptionalProducts.call(app) });
@@ -192,6 +195,52 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
+
+test('creation customer search filters names and clears a hidden selection', () => {
+  const app = entitlementApp(async () => {});
+  app.customers = [
+    { customerId: '1', name: 'Acme North' },
+    { customerId: '2', customerName: 'Acme South' },
+    { customerId: '3' },
+  ];
+  assert.equal(app.filteredCustomers.length, 3);
+  app.customerSearch = ' AcMe ';
+  assert.deepEqual(Array.from(app.filteredCustomers, (customer) => customer.customerId), ['1', '2']);
+  app.form.customerId = '2';
+  app.filterCustomerSelection();
+  assert.equal(app.form.customerId, '2');
+  app.customerSearch = 'north';
+  app.filterCustomerSelection();
+  assert.deepEqual(Array.from(app.filteredCustomers, (customer) => customer.customerId), ['1']);
+  assert.equal(app.form.customerId, '');
+  app.customerSearch = 'customer 3';
+  assert.equal(app.filteredCustomers[0].customerId, '3');
+  app.customerSearch = 'absent';
+  assert.equal(app.filteredCustomers.length, 0);
+  app.customerSearch = '';
+  assert.equal(app.filteredCustomers.length, 3);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
+  assert.match(html, /v-model="customerSearch" type="search"/);
+  assert.match(html, /id="customer-select"[\s\S]*aria-controls="customer-search-field"[\s\S]*id="customer-search-field" v-show="customerSearchOpen"/);
+  assert.match(html, /v-for="customer in filteredCustomers"/);
+  assert.match(html, /serialError \|\| !form\.customerId/);
+});
+
+test('customer search toggle focuses the input and clears the filter when closed', () => {
+  const app = entitlementApp(async () => {});
+  let focused = false;
+  app.$refs = { customerSearchInput: { focus() { focused = true; } } };
+  app.$nextTick = (fn) => fn();
+  app.toggleCustomerSearch();
+  assert.equal(app.customerSearchOpen, true);
+  assert.equal(focused, true);
+  app.customerSearch = 'Acme';
+  app.toggleCustomerSearch();
+  assert.equal(app.customerSearchOpen, false);
+  assert.equal(app.customerSearch, '');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(css, /\.customer-search-toggle\[aria-expanded="true"\]/);
+});
 
 test('creation form loads the recorded serial and exposes failures for retry', async () => {
   let resolve;
@@ -427,6 +476,7 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   app.leaseExpiryDate = '2026-11-10';
   app.localToday = () => '2026-05-10';
   app.serialNumber = '1234';
+  app.form.refId1 = 'ORDER';
   await app.createEntitlement();
   assert.deepEqual(JSON.parse(JSON.stringify(submitted.memoryValues)), [
     { productId: '60', segmentId: '90', content: '35443641' },
@@ -471,10 +521,22 @@ test('out-of-range serial numbers are not submitted by either form', async () =>
     app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
     app.entitlementLoaded = true;
     app.serialNumber = '65536';
+    app.form.refId1 = 'ORDER';
     await app.createEntitlement();
     assert.equal(requests, 0);
     assert.match(app.error, /65,535 or less/);
   }
+});
+
+test('creation form rejects empty or whitespace-only order codes', async () => {
+  let requests = 0;
+  const app = entitlementApp(async () => { requests++; });
+  for (const value of ['', '   ']) {
+    app.form.refId1 = value;
+    await app.createEntitlement();
+    assert.match(app.error, /Order Code/);
+  }
+  assert.equal(requests, 0);
 });
 
 test('invalid lease date prevents submission', async () => {
@@ -483,6 +545,7 @@ test('invalid lease date prevents submission', async () => {
   app.optionalProducts = [{ id: '6050', label: 'Lease', lease: true, available: true }];
   app.form.productIds = ['6050'];
   app.leaseExpiryDate = '2025-02-29';
+  app.form.refId1 = 'ORDER';
   await app.createEntitlement();
   assert.equal(requests, 0);
   assert.match(app.error, /lease expiry date|Invalid calendar date/i);
@@ -584,7 +647,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
     { productId: '12', segmentId: '1', content: '00FF' },
   ]);
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
-  assert.match(html, /Irricad Order Code \(refID 1\) <span id="ref-id-remaining" class="form-hint character-count">- \{\{ 250 - form\.refId1\.length \}\} chars left<\/span><\/span>\s*<input v-model="form\.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">/);
+  assert.match(html, /Irricad Order Code \(refID 1\) \* <span id="ref-id-remaining" class="form-hint character-count">- \{\{ 250 - form\.refId1\.length \}\} chars left<\/span><\/span>\s*<input v-model="form\.refId1" type="text" maxlength="250" required pattern=".*\\S.*"/);
   for (const page of ['create-entitlement-form.html', 'update-entitlement-form.html']) {
     const formHtml = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
     assert.match(formHtml, /<textarea v-model="form\.description" maxlength="510" rows="3" aria-describedby="description-remaining"/);

@@ -293,6 +293,9 @@ const saveEntitlement = async (req, res) => {
       typeof refId2 !== 'string' || refId2.length > 250) {
     return res.status(400).json({ error: 'Description must be 510 characters or fewer; reference IDs must be 250 characters or fewer' });
   }
+  if (!existingId && (typeof refId1 !== 'string' || !refId1.trim())) {
+    return res.status(400).json({ error: 'Irricad Order Code (refID 1) is required.' });
+  }
 
   try {
     const customers = await withSession(() => ems.listCustomers());

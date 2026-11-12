@@ -9,7 +9,7 @@
     "lease-expiry-range": {
         "_comment": "Inclusive calendar months after the entitlement start date.",
         "min-months": 6,
-        "max-months": 24
+        "max-months": 13
     },
 
     "product-options": {

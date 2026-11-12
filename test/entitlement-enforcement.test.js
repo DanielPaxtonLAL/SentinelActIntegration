@@ -94,7 +94,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async submit(overrides = {}, update = false) {
       const req = { params: update ? { id: '123' } : undefined, body: {
         customerId: '5', productIds: ['6048'],
-        description: '', ...overrides,
+        description: '', ...(!update ? { refId1: 'ORDER' } : {}), ...overrides,
       } };
       req.body.memoryValues = [...(req.body.memoryValues || []), { productId: '60', segmentId: '999', content: overrides.serialTestContent ?? serialOptions.serialContent ?? '30303242' }];
       const res = {
@@ -141,8 +141,12 @@ test('forwards order code on creation and preserves it when editing', async () =
   const create = await createRoute([{ id: '1' }]).submit({ refId1: 'ORDER-123' });
   assert.equal(create.res.statusCode, 201);
   assert.equal(create.saved.refId1, 'ORDER-123');
-  const blank = await createRoute([{ id: '1' }]).submit();
-  assert.equal(blank.saved.refId1, '');
+  for (const refId1 of [undefined, '', '   ']) {
+    const blank = await createRoute([{ id: '1' }]).submit({ refId1 });
+    assert.equal(blank.res.statusCode, 400);
+    assert.match(blank.res.body.error, /Order Code.*required/);
+    assert.equal(blank.saved, undefined);
+  }
   const update = await createRoute([{ id: '1' }]).submit({}, true);
   assert.equal(update.res.statusCode, 200);
   assert.equal(update.saved.refId1, '00123');

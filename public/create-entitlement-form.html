@@ -18,15 +18,31 @@
     <section class="create-entitlement">
       <form class="entitlement-form" @submit.prevent="createEntitlement">
         <h2>Create entitlement</h2>
-        <label>
-          Customer
-          <select v-model="form.customerId" required :disabled="customersLoading || loading">
-            <option value="" disabled>Select an EMS customer</option>
-            <option v-for="customer in customers" :key="customer.customerId" :value="String(customer.customerId)">
-              {{ customer.name || customer.customerName || ('Customer ' + customer.customerId) }}
-            </option>
-          </select>
-        </label>
+        <div class="customer-picker">
+          <label for="customer-select">Customer</label>
+          <div class="customer-picker-row">
+            <select id="customer-select" v-model="form.customerId" required :disabled="customersLoading || loading">
+              <option value="" disabled>Select an EMS customer</option>
+              <option v-for="customer in filteredCustomers" :key="customer.customerId" :value="String(customer.customerId)">
+                {{ customerLabel(customer) }}
+              </option>
+            </select>
+            <button type="button" class="button--view customer-search-toggle" :aria-expanded="customerSearchOpen"
+              aria-controls="customer-search-field" :aria-label="customerSearchOpen ? 'Hide customer search' : 'Show customer search'"
+              :title="customerSearchOpen ? 'Hide customer search' : 'Show customer search'"
+              :disabled="customersLoading || loading" @click="toggleCustomerSearch">
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m16 16 5 5"></path>
+              </svg>
+            </button>
+          </div>
+          <label id="customer-search-field" v-show="customerSearchOpen">
+            Search customers (filters drop-down above)
+            <input ref="customerSearchInput" v-model="customerSearch" type="search" placeholder="Type a customer name" autocomplete="off"
+              :disabled="customersLoading || loading" @input="filterCustomerSelection">
+          </label>
+        </div>
+        <p v-if="!customersLoading && customers.length && !filteredCustomers.length" class="form-hint" role="status">No customers match your search.</p>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
         <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :invalid="serialTooLarge">
           <span v-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
@@ -39,8 +55,8 @@
           <button type="button" class="button--view" @click="loadSerialNumber" :disabled="loading || serialLoading">Retry</button>
         </div>
         <label>
-          <span>Irricad Order Code (refID 1) <span id="ref-id-remaining" class="form-hint character-count">- {{ 250 - form.refId1.length }} chars left</span></span>
-          <input v-model="form.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">
+          <span>Irricad Order Code (refID 1) * <span id="ref-id-remaining" class="form-hint character-count">- {{ 250 - form.refId1.length }} chars left</span></span>
+          <input v-model="form.refId1" type="text" maxlength="250" required pattern=".*\S.*" title="Enter an Irricad Order Code." aria-describedby="ref-id-remaining" :disabled="loading">
         </label>
         <label>
           <span>Description <span id="description-remaining" class="form-hint character-count">- {{ 510 - form.description.length }} chars left</span></span>
@@ -120,7 +136,7 @@
         <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (local time).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooLarge || (leaseSelected && leaseBounds.min > leaseBounds.max)">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !form.customerId || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooLarge || (leaseSelected && leaseBounds.min > leaseBounds.max)">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -139,6 +155,8 @@
       data() {
         return {
           customers: [],
+          customerSearch: '',
+          customerSearchOpen: false,
           products: [],
           accessProducts: [],
           optionalProducts: [],
@@ -161,6 +179,10 @@
         };
       },
       computed: {
+        filteredCustomers() {
+          const query = this.customerSearch.trim().toLocaleLowerCase();
+          return this.customers.filter((customer) => this.customerLabel(customer).toLocaleLowerCase().includes(query));
+        },
         status() {
           if (this.loading) return 'Saving entitlement…';
           if (this.error) return this.error;
@@ -218,6 +240,22 @@
         },
       },
       methods: {
+        customerLabel(customer) {
+          return String(customer.name || customer.customerName || ('Customer ' + customer.customerId));
+        },
+        toggleCustomerSearch() {
+          this.customerSearchOpen = !this.customerSearchOpen;
+          if (this.customerSearchOpen) {
+            this.$nextTick(() => this.$refs.customerSearchInput.focus());
+          } else {
+            this.customerSearch = '';
+          }
+        },
+        filterCustomerSelection() {
+          if (this.form.customerId && !this.filteredCustomers.some((customer) => String(customer.customerId) === this.form.customerId)) {
+            this.form.customerId = '';
+          }
+        },
         createEmptyForm() {
           return {
             customerId: '',
@@ -414,6 +452,7 @@
           this.loading = true;
           this.error = '';
           try {
+            if (!this.form.refId1.trim()) throw new Error('Enter an Irricad Order Code (refID 1).');
             const startDate = this.localToday();
             if (this.leaseSelected) LeaseDates.validate(this.leaseExpiryDate, startDate, startDate, this.leaseExpiryRange);
             const leaseExpiryContent = this.leaseSelected ? this.encodeLeaseExpiryDate(this.leaseExpiryDate) : '';
