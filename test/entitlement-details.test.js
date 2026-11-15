@@ -379,6 +379,22 @@ test('marks malformed or invalid base expiry dates unavailable', () => {
   assert.equal(definition.computed.selectedExpiryDate.call(app), 'Unavailable');
 });
 
+test('verbose memory shows EMS access and ASCII-decoded values', () => {
+  const { memoryAccess, asciiHexValue, hexValue, displayValue } = definition.methods;
+  const app = { hexValue, displayValue };
+  assert.match(html, /<th>Memory access<\/th><th>Value<\/th><th>Value \(ASCII hex\)<\/th>/);
+  assert.equal(memoryAccess({ memoryTypes: ['1'] }), 'R/W');
+  assert.equal(memoryAccess({ memoryTypes: ['2'] }), 'RO');
+  assert.equal(memoryAccess({ memoryTypes: ['1', '2'] }), 'R/W, RO');
+  assert.equal(memoryAccess({ memoryTypes: ['1', '3'] }), 'Unavailable');
+  assert.equal(memoryAccess({}), 'Unavailable');
+  assert.equal(asciiHexValue.call(app, { text: '30304432', size: 4 }), '00D2');
+  assert.equal(asciiHexValue.call(app, { text: '000AFF41', size: 4 }), '\\x00\\x0A\\xFFA');
+  assert.equal(asciiHexValue.call(app, { text: '', size: 4 }), 'Unavailable');
+  assert.equal(asciiHexValue.call(app, { text: 'abcdz', size: 4 }), 'Unavailable');
+  assert.equal(asciiHexValue.call(app, { text: 'abc' }), 'Unavailable');
+});
+
 test('shows each configured product alias as present or absent', () => {
   assert.match(html, /<div class="detail-value"[^>]*>\{\{ productPresent\('standalone'\) \}\}<\/div>/);
   const app = { selectedEntitlement: {

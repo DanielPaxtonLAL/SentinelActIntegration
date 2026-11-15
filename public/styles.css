@@ -400,6 +400,9 @@ button.button--view:hover:not(:disabled),
 .entitlements-page .product-memory h3 { margin: .75rem 0 .4rem; font-size: 1rem; }
 .entitlements-page .product-memory h4 { margin: .6rem 0 .35rem; font-size: .9rem; }
 .entitlements-page .product-memory td { overflow-wrap: anywhere; }
+.entitlements-page .base-product-memory td:first-child { white-space: nowrap; }
+.entitlements-page .base-product-memory th:nth-child(4) { width: 1%; }
+.entitlements-page .base-product-memory td:nth-child(4) { white-space: nowrap; }
 .entitlements-page .access-products { margin: 0; padding: .65rem; border: 1px solid var(--color-border); border-radius: 4px; }
 .entitlements-page .access-products legend { font-weight: 600; }
 .entitlements-page .entitlement-form .access-product-option { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }

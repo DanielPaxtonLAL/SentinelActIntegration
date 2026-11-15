@@ -146,16 +146,18 @@
             <h3>Base product memory</h3>
             <p v-if="!baseMemorySegments.length">No memory fields are listed for the base product.</p>
             <div v-else class="table-wrap">
-              <table>
+              <table class="base-product-memory">
                 <thead>
-                  <tr><th>ID</th><th>Name</th><th>Size</th><th>Value</th></tr>
+                  <tr><th>ID</th><th>Name</th><th>Size</th><th>Memory access</th><th>Value</th><th>Value (ASCII hex)</th></tr>
                 </thead>
                 <tbody>
                   <tr v-for="segment in baseMemorySegments" :key="segment.id">
                     <td>{{ displayValue(segment.id) }}</td>
                     <td>{{ displayValue(segment.name) }}</td>
                     <td>{{ displayValue(segment.size) }}</td>
+                    <td>{{ memoryAccess(segment) }}</td>
                     <td><code>{{ hexValue(segment) }}</code></td>
+                    <td><code>{{ asciiHexValue(segment) }}</code></td>
                   </tr>
                 </tbody>
               </table>
@@ -622,6 +624,21 @@
           if (!/^[0-9a-f]*$/i.test(text)) return this.displayValue(text);
           const digits = Number(segment.size) * 2;
           return (Number.isInteger(digits) && digits > 0 ? text.padStart(digits, '0') : text).toUpperCase() || '—';
+        },
+        memoryAccess(segment) {
+          if (!Array.isArray(segment.memoryTypes) || !segment.memoryTypes.length ||
+              segment.memoryTypes.some((type) => !['1', '2'].includes(type))) return 'Unavailable';
+          return [...new Set(segment.memoryTypes.map((type) => type === '1' ? 'R/W' : 'RO'))].join(', ');
+        },
+        asciiHexValue(segment) {
+          const text = String(segment.text ?? '').trim();
+          if (!text || !/^[0-9a-f]+$/i.test(text)) return 'Unavailable';
+          const hex = this.hexValue(segment);
+          if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) return 'Unavailable';
+          return hex.match(/../g).map((pair) => {
+            const byte = parseInt(pair, 16);
+            return byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : '\\x' + pair;
+          }).join('');
         },
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);

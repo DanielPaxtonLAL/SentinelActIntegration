@@ -45,13 +45,16 @@ test('uses entitlement item memory values for product memory segments', async ()
     '/entitlement/5057.xml': `<entitlement><customerId>5</customerId><entitlementItem>
       <memorySegments><segment><prdMemorySegmentId>90</prdMemorySegmentId><data>35383544</data></segment></memorySegments>
       <itemProduct><productId>6047</productId><product><productName>Base</productName>
-        <memorySegment><id>90</id><name>Expiry Date</name><size>4</size><text>30303030</text><saot>true</saot></memorySegment>
+        <memorySegment><id>90</id><name>Expiry Date</name><size>4</size><text>30303030</text><saot>true</saot><memoryType><id>2</id></memoryType></memorySegment>
+        <memorySegment><id>91</id><name>Writable</name><size>1</size><text>41</text><saot>false</saot><memoryType><id>1</id></memoryType></memorySegment>
+        <memorySegment><id>92</id><name>Unspecified</name><size>1</size><text>00</text><saot>false</saot></memorySegment>
       </product></itemProduct>
     </entitlementItem></entitlement>`,
     '/customer.xml': '<listResponse></listResponse>',
   });
   const details = await client.getEntitlementDetails('5057');
   assert.equal(details.products[0].memorySegments[0].text, '35383544');
+  assert.deepEqual(details.products[0].memorySegments.map((segment) => segment.memoryTypes), [['2'], ['1'], []]);
 });
 
 test('preserves leading zeroes in saved memory values', async () => {

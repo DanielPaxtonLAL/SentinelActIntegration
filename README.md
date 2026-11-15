@@ -25,6 +25,9 @@ available licenses. If the result is uncertain, check the Activations page for
 the license before retrying; existing V2Cs can also be downloaded there.
 Activation errors include EMS's readable diagnostics when available.
 
+In entitlement verbose details, base product memory shows EMS memory access
+and ASCII-decoded values. Non-printable bytes are shown as `\xNN`.
+
 ## Run with Docker
 
 Copy `.env.example` to `.env` and set the EMS credentials and URLs for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.

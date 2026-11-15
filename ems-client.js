@@ -460,6 +460,7 @@ class EmsClient {
               id: String(segment.id),
               name: segment.name,
               saot: String(segment.saot) === 'true',
+              memoryTypes: asList(segment.memoryType).map((type) => String(type?.id ?? '')),
               size: segment.size,
               offset: segment.offset,
               text: text === undefined || text === null ? '' : String(text),
