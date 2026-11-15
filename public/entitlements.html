@@ -150,8 +150,14 @@
             </details>
             <details class="detail-collapsible danger-zone">
               <summary>DANGER ZONE</summary>
+              <p v-if="canReopen" class="form-hint">Reopening returns this entitlement to draft state.</p>
+              <button v-if="canReopen" type="button" class="button--destructive"
+                :disabled="reopening || deleting || producing || loading || reopenUncertain" @click="reopenSelectedEntitlement">
+                {{ reopening ? 'Reopening…' : 'Reopen entitlement' }}
+              </button>
+              <p v-if="reopenError" class="form-error" role="alert">{{ reopenError }}</p>
               <p class="form-hint">Deleting an entitlement cannot be undone.</p>
-              <button type="button" class="button--destructive" :disabled="deleting || producing" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
+              <button type="button" class="button--destructive" :disabled="deleting || producing || reopening" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
             </details>
           </template>
         </template>
@@ -195,6 +201,9 @@
           producing: false,
           produceUncertain: false,
           produceError: '',
+          reopening: false,
+          reopenUncertain: false,
+          reopenError: '',
           detailError: '',
           loading: false,
           customersLoading: false,
@@ -207,6 +216,11 @@
       computed: {
         isProductKeyGenerated() {
           return String(this.selectedEntitlement?.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED';
+        },
+        canReopen() {
+          return ['PRODUCT_KEY_GENERATED', 'QUEUED'].includes(
+            String(this.selectedEntitlement?.entState ?? '').toUpperCase()
+          );
         },
         showDetailConfirmations() {
           const state = String(this.selectedEntitlement?.entState || this.selectedEntitlement?.state || '').toUpperCase();
@@ -331,6 +345,8 @@
           this.productKeys = [];
           this.productKeyError = '';
           this.productKeyLoading = false;
+          this.reopenError = '';
+          this.reopenUncertain = false;
           this.produceError = '';
           this.produceUncertain = false;
           this.detailError = '';
@@ -429,6 +445,37 @@
             this.error = 'Failed to delete entitlement: ' + err.message;
           } finally {
             this.deleting = false;
+          }
+        },
+        async reopenSelectedEntitlement() {
+          const entitlement = this.selectedEntitlement;
+          if (!entitlement || !this.canReopen || this.reopening || this.deleting ||
+              this.producing || this.loading || this.reopenUncertain) return;
+          const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
+          if (!window.confirm('Reopen entitlement ' + entitlement.id + ' for ' + name + '? This changes its state back to DRAFT.')) return;
+          this.reopening = true;
+          this.reopenError = '';
+          let outcomeUnknown = true;
+          try {
+            const response = await fetch(`/api/entitlements/${encodeURIComponent(entitlement.id)}/reopen`, { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) {
+              outcomeUnknown = data.outcomeUnknown !== false;
+              throw new Error(data.error || response.statusText);
+            }
+            outcomeUnknown = false;
+            this.selectedEntitlement.entState = data.state;
+            this.productKeys = [];
+            this.notice = 'Entitlement ' + entitlement.id + ' reopened as a draft.';
+            this.reopening = false;
+            await this.loadEntitlements();
+          } catch (err) {
+            this.reopenUncertain = outcomeUnknown;
+            this.reopenError = outcomeUnknown
+              ? 'Unable to confirm reopening: ' + err.message + ' Reload the entitlement before retrying.'
+              : 'Failed to reopen entitlement: ' + err.message;
+          } finally {
+            this.reopening = false;
           }
         },
         async loadVersionMemory(entitlement) {          if (!Array.isArray(entitlement.versionProductIds)) {

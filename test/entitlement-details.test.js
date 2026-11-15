@@ -39,6 +39,50 @@ test('hides confirmation checkboxes for produced entitlement states', () => {
   assert.equal(cells.length, 12);
 });
 
+test('reopen is limited to eligible states, confirmed, and blocks uncertain retries', async () => {
+  for (const state of ['PRODUCT_KEY_GENERATED', 'QUEUED']) {
+    assert.equal(definition.computed.canReopen.call({ selectedEntitlement: { entState: state } }), true);
+  }
+  assert.equal(definition.computed.canReopen.call({ selectedEntitlement: { entState: 'DRAFT' } }), false);
+  assert.match(html, /<button v-if="canReopen"[^>]*@click="reopenSelectedEntitlement">[\s\S]*?Reopen entitlement/);
+
+  const app = {
+    selectedEntitlement: { id: '123', entState: 'PRODUCT_KEY_GENERATED', customerName: 'Acme' },
+    reopening: false, deleting: false, producing: false, loading: false, reopenUncertain: false,
+    productKeys: [{ productKeyId: 'key-001' }], notice: '',
+    canReopen: true,
+    displayValue: definition.methods.displayValue,
+    async loadEntitlements() {},
+  };
+  let calls = 0;
+  fetchMemory = async (url, options) => {
+    calls++;
+    assert.equal(url, '/api/entitlements/123/reopen');
+    assert.equal(options.method, 'POST');
+    return { ok: true, json: async () => ({ reopened: true, state: 'DRAFT' }) };
+  };
+  confirmProduce = () => false;
+  await definition.methods.reopenSelectedEntitlement.call(app);
+  assert.equal(calls, 0);
+  confirmProduce = () => true;
+  await definition.methods.reopenSelectedEntitlement.call(app);
+  assert.equal(calls, 1);
+  assert.equal(app.selectedEntitlement.entState, 'DRAFT');
+  assert.equal(app.productKeys.length, 0);
+  assert.equal(app.notice, 'Entitlement 123 reopened as a draft.');
+
+  app.selectedEntitlement.entState = 'PRODUCT_KEY_GENERATED';
+  fetchMemory = async () => {
+    calls++;
+    return { ok: false, json: async () => ({ error: 'unknown', outcomeUnknown: true }) };
+  };
+  await definition.methods.reopenSelectedEntitlement.call(app);
+  await definition.methods.reopenSelectedEntitlement.call(app);
+  assert.equal(calls, 2);
+  assert.equal(app.reopenUncertain, true);
+  assert.match(app.reopenError, /Reload the entitlement before retrying/);
+});
+
 test('produce confirms, reloads list and selected details on success and blocks uncertain retries', async () => {
   const keys = [...html.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
   const app = {

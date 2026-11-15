@@ -519,6 +519,24 @@ app.post('/api/entitlements/:id/produce', async (req, res) => {
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
   }
 });
+app.post('/api/entitlements/:id/reopen', async (req, res) => {
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number.' });
+  }
+  try {
+    res.json(await withSession(() => ems.reopenEntitlement(req.params.id)));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : 502).json({
+      error: err.message,
+      outcomeUnknown: Boolean(err.outcomeUnknown),
+    });
+  }
+});
 app.delete('/api/entitlements/:id', async (req, res) => {
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });

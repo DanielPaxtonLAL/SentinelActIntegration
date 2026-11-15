@@ -733,6 +733,70 @@ class EmsClient {
     return { produced: true, entId: String(id), state: confirmedState };
   }
 
+  async reopenEntitlement(id) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
+    const path = `${this.apiRoot}/entitlement/${id}.xml`;
+    const response = await this._fetch(path, { headers: { Accept: 'application/xml' } });
+    const xml = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading the entitlement.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) throw new Error(`EMS entitlement lookup failed: ${response.status} ${response.statusText}`);
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid entitlement XML.');
+    const parsed = new XMLParser({ parseTagValue: false }).parse(xml).entitlement;
+    const items = parsed?.entitlementItem;
+    const itemList = Array.isArray(items) ? items : items ? [items] : [];
+    if (!['PRODUCT_KEY_GENERATED', 'QUEUED'].includes(String(parsed?.entState ?? '').toUpperCase()) ||
+        !itemList.length || itemList.some((item) => item?.lineItemType !== 'Product_Key')) {
+      const error = new Error('Only queued or Product Key generated entitlements can be reopened.');
+      error.status = 400;
+      throw error;
+    }
+    const options = {
+      preserveOrder: true, ignoreAttributes: false, parseTagValue: false, trimValues: false,
+      commentPropName: '#comment', cdataPropName: '#cdata',
+    };
+    const document = new XMLParser(options).parse(xml);
+    const roots = document.filter((node) => Object.hasOwn(node, 'entitlement'));
+    if (roots.length !== 1 || !Array.isArray(roots[0].entitlement)) {
+      throw new Error('EMS returned invalid entitlement XML.');
+    }
+    const fields = roots[0].entitlement;
+    if (fields.some((node) => Object.hasOwn(node, 'action'))) {
+      throw new Error('EMS returned an unexpected entitlement action.');
+    }
+    const enabledIndex = fields.findIndex((node) => Object.hasOwn(node, 'enabled'));
+    if (enabledIndex < 0) throw new Error('EMS returned an entitlement without an enabled field.');
+    fields.splice(enabledIndex + 1, 0, { action: [{ '#text': 'REOPEN' }] });
+    const body = new XMLBuilder(options).build(document);
+    let confirmedState;
+    try {
+      const update = await this._fetch(`${this.apiRoot}/entitlement/${id}.ws`, {
+        method: 'POST',
+        headers: { Accept: 'application/xml, application/json', 'Content-Type': 'application/xml' },
+        body,
+      });
+      if (!update.ok) throw new Error(`EMS returned ${update.status} ${update.statusText}`);
+      const check = await this._fetch(path, { headers: { Accept: 'application/xml' } });
+      const checkXml = await check.text();
+      if (!check.ok || XMLValidator.validate(checkXml) !== true) {
+        throw new Error('EMS did not confirm the reopened state');
+      }
+      confirmedState = String(new XMLParser({ parseTagValue: false }).parse(checkXml).entitlement?.entState ?? '').toUpperCase();
+      if (confirmedState !== 'DRAFT') {
+        throw new Error(`EMS did not confirm the reopened state (current state: ${confirmedState || 'unavailable'})`);
+      }
+    } catch (err) {
+      const error = new Error(`The result of reopening entitlement ${id} is unknown: ${err.message}.`);
+      error.outcomeUnknown = true;
+      throw error;
+    }
+    return { reopened: true, entId: String(id), state: confirmedState };
+  }
+
   // Saves changes to an existing entitlement; returns the same shape as createEntitlement.
   async updateEntitlement(id, entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');

@@ -20,6 +20,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let serialHandler;
   let productKeysHandler;
   let produceHandler;
+  let reopenHandler;
   let saved;
   const events = [];
   let largest = serialOptions.largest ?? 42;
@@ -53,6 +54,11 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       if (serialOptions.produceError) throw serialOptions.produceError;
       return { produced: true, entId: id };
     }
+    async reopenEntitlement(id) {
+      events.push(`reopen:${id}`);
+      if (serialOptions.reopenError) throw serialOptions.reopenError;
+      return { reopened: true, entId: id, state: 'DRAFT' };
+    }
   }
   const app = {
     get(route, ...handlers) {
@@ -62,6 +68,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     post(route, ...handlers) {
       if (route === '/api/entitlements') handler = handlers.at(-1);
       if (route === '/api/entitlements/:id/produce') produceHandler = handlers.at(-1);
+      if (route === '/api/entitlements/:id/reopen') reopenHandler = handlers.at(-1);
     },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
     delete() {},
@@ -115,6 +122,15 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       await produceHandler({ params: { id } }, res);
       return res;
     },
+    async reopen(id) {
+      const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await reopenHandler({ params: { id } }, res);
+      return res;
+    },
     async getSerial() {
       const res = {
         statusCode: 200,
@@ -165,6 +181,19 @@ test('produce route validates IDs and surfaces uncertain outcomes without retryi
   assert.equal(response.statusCode, 502);
   assert.equal(response.body.outcomeUnknown, true);
   assert.deepEqual(failed.events, ['produce:123']);
+});
+
+test('reopen route validates IDs and reports uncertain outcomes', async () => {
+  const route = createRoute([]);
+  assert.equal((await route.reopen('0')).statusCode, 400);
+  assert.equal(route.events.length, 0);
+  assert.equal((await route.reopen('123')).body.state, 'DRAFT');
+  assert.deepEqual(route.events, ['reopen:123']);
+  const error = Object.assign(new Error('outcome unknown'), { outcomeUnknown: true });
+  const failed = createRoute([], undefined, [], true, true, true, undefined, { reopenError: error });
+  const response = await failed.reopen('123');
+  assert.equal(response.statusCode, 502);
+  assert.equal(response.body.outcomeUnknown, true);
 });
 
 test('serial number endpoint returns the highest stored serial without caching', async () => {
