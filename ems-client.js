@@ -25,6 +25,38 @@ function findActivationIds(value, ids = new Set()) {
   return [...ids];
 }
 
+function activationErrorDetail(text, c2v, secrets) {
+  const trimmed = text.trim();
+  if (!trimmed) return '';
+  let values = [];
+  const fields = new Set(['error', 'errors', 'errorresponse', 'exception', 'fault',
+    'code', 'errorcode', 'message', 'errormessage', 'description', 'errordescription', 'detail', 'faultstring']);
+  const collect = (value, depth = 0) => {
+    if (depth > 5 || values.length >= 5 || !value || typeof value !== 'object') return;
+    for (const [name, child] of Object.entries(value)) {
+      if (!fields.has(name.toLowerCase().replace(/[^a-z]/g, ''))) continue;
+      if (typeof child === 'string' || typeof child === 'number') values.push(String(child));
+      else if (Array.isArray(child)) child.slice(0, 5).forEach((item) => collect(item, depth + 1));
+      else collect(child, depth + 1);
+    }
+  };
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try { collect(JSON.parse(trimmed)); } catch { return ''; }
+  } else if (trimmed.startsWith('<')) {
+    if (XMLValidator.validate(trimmed) !== true) return '';
+    collect(new XMLParser({ parseTagValue: false }).parse(trimmed));
+  } else {
+    values = [trimmed];
+  }
+  const sensitive = [...secrets, c2v, ...(c2v.match(/[A-Za-z0-9+/=_-]{12,}/g) || [])]
+    .filter((value) => typeof value === 'string' && value);
+  return values.map((value) => {
+    if (/[<>]/.test(value) || /&(?:lt|gt|#0*60|#x0*3c);/i.test(value)) return '';
+    for (const secret of sensitive) value = value.split(secret).join('[redacted]');
+    return value.replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, 500);
+  }).filter(Boolean).join(' - ');
+}
+
 class EmsClient {
   constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, serialNumberCustomerId }) {
     if (!baseUrl) throw new Error('baseUrl is required');
@@ -489,6 +521,70 @@ class EmsClient {
     }));
   }
 
+  async activateProductKey(key, c2v) {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    if (typeof key !== 'string' || !key.trim()) throw new Error('Product key is required.');
+    const validation = typeof c2v === 'string' && c2v.trim() ? XMLValidator.validate(c2v) : null;
+    if (validation !== true) {
+      const location = validation?.err ? ` ${validation.err.msg} (line ${validation.err.line}, column ${validation.err.col}).` : '';
+      const error = new Error('The C2V file must contain valid XML.' + location);
+      error.status = 400;
+      throw error;
+    }
+
+    const body = '<activation><activationInput><activationAttribute><attributeValue><![CDATA[' +
+      c2v.replace(/]]>/g, ']]]]><![CDATA[>') +
+      ']]></attributeValue><attributeName>C2V</attributeName></activationAttribute></activationInput></activation>';
+    try {
+      const response = await this._fetch(`${this.apiRoot}/productKey/${encodeURIComponent(key)}/activation.ws`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
+        body,
+      });
+      if (!response.ok) {
+        const status = `HTTP ${response.status}${response.statusText ? ' ' + response.statusText : ''}`;
+        let responseText;
+        try {
+          responseText = await response.text();
+        } catch (err) {
+          const error = new Error(`EMS activation returned ${status}, but its error response could not be read: ${err.message}`);
+          if (response.status === 404) {
+            error.status = 400;
+            error.activationRejected = true;
+          }
+          throw error;
+        }
+        const detail = activationErrorDetail(responseText, c2v, [key, this.username, this.password]);
+        const error = new Error(`EMS activation returned ${status}.` +
+          (response.status === 404 ? ' The product key does not exist in EMS.' : '') +
+          (response.status === 401 || response.status === 302 ? ' The EMS session may have expired.' : '') +
+          (detail ? ` EMS response: ${detail}` : ' EMS did not provide readable error details.'));
+        if (response.status === 404) {
+          error.status = 400;
+          error.activationRejected = true;
+        }
+        throw error;
+      }
+      const xml = await response.text();
+      if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid activation XML.');
+      const output = new XMLParser({ parseTagValue: false, trimValues: false }).parse(xml)?.activation?.activationOutput;
+      const aid = output?.AID;
+      const license = output?.activationString;
+      if (typeof aid !== 'string' || !aid.trim() || typeof license !== 'string' ||
+          !license.trim() || XMLValidator.validate(license.trim()) !== true ||
+          !new XMLParser({ parseTagValue: false }).parse(license.trim())?.hasp_info?.v2c) {
+        throw new Error('EMS did not return a valid V2C and Activation ID.');
+      }
+      return { aid: aid.trim(), license };
+    } catch (err) {
+      if (err.activationRejected) throw err;
+      const cause = err.cause?.code ? ` (${err.cause.code})` : '';
+      const error = new Error(`Activation outcome is unknown: ${err.message}${cause}`);
+      error.outcomeUnknown = true;
+      throw error;
+    }
+  }
+
   async getActivationLicense(aid) {
     if (typeof aid !== 'string' || !aid.trim()) throw new Error('Activation ID is required');
     const response = await this._fetch(`${this.apiRoot}/activation/${encodeURIComponent(aid)}.ws`, {
@@ -511,10 +607,11 @@ class EmsClient {
       ignoreAttributes: false,
       attributeNamePrefix: '',
       parseTagValue: false,
+      trimValues: false,
     }).parse(xml)?.activation;
     const output = activation?.activationOutput;
     if (!output || typeof output !== 'object' ||
-        String(output.AID ?? output.aid ?? output.activationId ?? '') !== aid) {
+        String(output.AID ?? output.aid ?? output.activationId ?? '').trim() !== aid) {
       throw new Error('EMS returned activation details for an unexpected Activation ID.');
     }
     return {

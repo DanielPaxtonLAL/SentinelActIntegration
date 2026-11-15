@@ -257,6 +257,28 @@ app.get('/api/entitlements/:id/product-keys', async (req, res) => {
   }
 });
 
+app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number.', outcomeUnknown: false });
+  }
+  const { productKeyId, c2v } = req.body || {};
+  if (typeof productKeyId !== 'string' || !productKeyId.trim() ||
+      typeof c2v !== 'string' || !c2v.trim() || Buffer.byteLength(c2v, 'utf8') > 10 * 1024 * 1024) {
+    return res.status(400).json({ error: 'Provide a product key and a C2V file no larger than 10 MB.', outcomeUnknown: false });
+  }
+  try {
+    const keys = await withSession(() => ems.getEntitlementProductKeys(req.params.id));
+    if (!keys.some((key) => key.productKeyId === productKeyId)) {
+      return res.status(400).json({ error: 'The product key does not belong to this generated entitlement.', outcomeUnknown: false });
+    }
+    res.json(await withSession(() => ems.activateProductKey(productKeyId, c2v)));
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
+  }
+});
+
 app.get('/api/catalog/:category', async (req, res) => {
   const categories = new Set(['products', 'features', 'dynamicMemory']);
   if (!categories.has(req.params.category)) {
@@ -447,7 +469,7 @@ const saveEntitlement = async (req, res) => {
     }
 
     const today = new Date();
-    const startDate = existing?.startDate ?? requestedStartDate ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const startDate = existing?.startDate ?? requestedStartDate ?? today.toISOString().slice(0, 10);
     if (leaseSelected) {
       const localToday = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
       const expiry = memorySegments.find((segment) => segment.id === String(expirySegments[0].id));

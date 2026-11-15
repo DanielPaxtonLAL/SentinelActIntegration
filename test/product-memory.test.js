@@ -183,7 +183,7 @@ function serialFile() {
   return { kind: 'product', segments: [{ id: '91', name: 'Serial Number', size: '4', saot: true, value: '' }] };
 }
 
-function entitlementApp(fetch, page = 'create-entitlement-form.html') {
+function entitlementApp(fetch, page = 'create-entitlement-form.html', clock) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
   let definition;
@@ -192,6 +192,9 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
     URLSearchParams,
     LeaseDates: require('../public/lease-dates'),
     SerialNumberInput: {},
+    Date: clock ? class extends Date {
+      constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }
+    } : Date,
     window: { location: { assign() {}, search: '' } },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
@@ -206,6 +209,7 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html') {
   Object.defineProperty(app, 'leaseProduct', { get: () => definition.computed.leaseProduct.call(app) });
   Object.defineProperty(app, 'otherOptionalProducts', { get: () => definition.computed.otherOptionalProducts.call(app) });
   Object.defineProperty(app, 'leaseSelected', { get: () => definition.computed.leaseSelected.call(app) });
+  Object.defineProperty(app, 'leaseBounds', { get: () => definition.computed.leaseBounds.call(app) });
   Object.defineProperty(app, 'selectedVersionId', { get: () => definition.computed.selectedVersionId.call(app) });
   Object.defineProperty(app, 'baseExpirySegment', { get: () => definition.computed.baseExpirySegment.call(app) });
   Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
@@ -492,12 +496,51 @@ test('lease checkbox controls the base expiry value and loads lease memory', asy
   await new Promise(setImmediate);
 });
 
-test('default lease expiry is one calendar year from the local date', () => {
+test('default lease expiry is one calendar year from the UTC start date', () => {
   const app = entitlementApp(async () => {});
-  assert.equal(app.defaultLeaseExpiryDate(new Date(2026, 10, 12, 0, 30)), '2027-11-12');
-  assert.equal(app.defaultLeaseExpiryDate(new Date(2024, 1, 29, 12)), '2025-02-28');
-  assert.equal(app.defaultLeaseExpiryDate(new Date(2027, 11, 31, 12)), '2028-12-31');
-  assert.equal(app.localToday(new Date(2026, 10, 12, 0, 30)), '2026-11-12');
+  assert.equal(app.defaultLeaseExpiryDate(new Date('2026-11-12T12:00:00Z')), '2027-11-12');
+  assert.equal(app.defaultLeaseExpiryDate(new Date('2024-02-29T12:00:00Z')), '2025-02-28');
+  assert.equal(app.defaultLeaseExpiryDate(new Date('2027-12-31T12:00:00Z')), '2028-12-31');
+});
+
+test('creation uses the UTC date across local midnight and bases lease bounds on it', async () => {
+  const originalTimezone = process.env.TZ;
+  try {
+    for (const [timezone, instant, utcDate, localDate, minimum, maximum, expiry] of [
+      ['Pacific/Auckland', '2026-11-11T11:30:00Z', '2026-11-11', '2026-11-12', '2027-05-11', '2027-12-11', '2027-11-11'],
+      ['America/Los_Angeles', '2026-11-12T00:30:00Z', '2026-11-12', '2026-11-11', '2027-05-12', '2027-12-12', '2027-11-12'],
+    ]) {
+      process.env.TZ = timezone;
+      const clock = new Date(instant);
+      let submitted;
+      const app = entitlementApp(async (_url, options) => {
+        submitted = JSON.parse(options.body);
+        return { ok: true, json: async () => ({}) };
+      }, 'create-entitlement-form.html', clock);
+      app.leaseExpiryRange = { minMonths: 6, maxMonths: 13 };
+      assert.equal(app.localToday(clock), localDate);
+      assert.equal(app.utcToday(clock), utcDate);
+      assert.equal(app.leaseBounds.min, minimum);
+      assert.equal(app.leaseBounds.max, maximum);
+      assert.equal(app.defaultLeaseExpiryDate(clock), expiry);
+      app.baseProductId = '60';
+      app.form.productIds = ['6050'];
+      app.form.refId1 = 'ORDER';
+      app.optionalProducts = [{ id: '6050', lease: true, available: true }];
+      app.productMemory['60'] = { files: [{ kind: 'product', segments: [
+        { id: '90', name: 'Expiry Date', size: '4', saot: true },
+        { id: '91', name: 'Serial Number', size: '4', saot: true },
+      ] }] };
+      app.productMemory['6050'] = { files: [] };
+      app.leaseExpiryDate = expiry;
+      app.serialNumber = '1';
+      await app.createEntitlement();
+      assert.equal(submitted.startDate, utcDate);
+    }
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
 });
 
 test('hidden base expiry input is removed from form validation', () => {
@@ -538,6 +581,7 @@ test('lease creation submits the encoded date and retains other SAOT values', as
   app.productMemory['6050'] = { loading: false, error: '', files: [] };
   app.leaseExpiryDate = '2026-11-10';
   app.localToday = () => '2026-05-10';
+  app.utcToday = () => '2026-05-10';
   app.serialNumber = '1234';
   app.form.refId1 = 'ORDER';
   await app.createEntitlement();
@@ -693,7 +737,7 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   app.serialNumber = '10';
   app.form.refId1 = ' ORDER-123 ';
   app.form.description = ' Description ';
-  app.localToday = () => '2026-11-12';
+  app.utcToday = () => '2026-11-12';
   await app.createEntitlement();
   assert.equal(submitted.refId1, 'ORDER-123');
   assert.equal(submitted.description, 'Description');

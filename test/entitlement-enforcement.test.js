@@ -19,6 +19,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let updateHandler;
   let serialHandler;
   let productKeysHandler;
+  let activateHandler;
   let produceHandler;
   let reopenHandler;
   let saved;
@@ -48,6 +49,11 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
     async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
     async getEntitlementProductKeys(id) { return [{ productKeyId: 'key-001', entitlementId: id }]; }
+    async activateProductKey(key, c2v) {
+      events.push(`activate:${key}`);
+      if (serialOptions.activateError) throw serialOptions.activateError;
+      return { aid: 'aid-1', license: c2v };
+    }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
     async produceEntitlement(id) {
       events.push(`produce:${id}`);
@@ -68,6 +74,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     post(route, ...handlers) {
       if (route === '/api/entitlements') handler = handlers.at(-1);
       if (route === '/api/entitlements/:id/produce') produceHandler = handlers.at(-1);
+      if (route === '/api/entitlements/:id/activate') activateHandler = handlers.at(-1);
       if (route === '/api/entitlements/:id/reopen') reopenHandler = handlers.at(-1);
     },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
@@ -103,6 +110,16 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   });
   return {
     events,
+    async activate(id, body) {
+      const res = {
+        statusCode: 200,
+        set(name, value) { this.headers = { [name]: value }; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await activateHandler({ params: { id }, body }, res);
+      return res;
+    },
     async getProductKeys(id) {
       const res = {
         statusCode: 200,
@@ -167,6 +184,27 @@ test('product key details route validates entitlement ID and prevents caching', 
   assert.equal(response.statusCode, 200);
   assert.equal(response.body[0].productKeyId, 'key-001');
   assert.equal(response.headers['Cache-Control'], 'no-store');
+});
+
+test('activation validates the entitlement and key and does not retry uncertain outcomes', async () => {
+  const route = createRoute([]);
+  const body = { productKeyId: 'key-001', c2v: '<hasp_info/>' };
+  assert.equal((await route.activate('0', body)).statusCode, 400);
+  assert.equal((await route.activate('123', { ...body, productKeyId: 'other' })).statusCode, 400);
+  assert.equal((await route.activate('123', { ...body, c2v: '' })).statusCode, 400);
+  assert.deepEqual(route.events, []);
+  const result = await route.activate('123', body);
+  assert.equal(result.body.aid, 'aid-1');
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.deepEqual(route.events, ['activate:key-001']);
+
+  const error = Object.assign(new Error('outcome unknown'), { outcomeUnknown: true, status: 401 });
+  const failed = createRoute([], undefined, [], true, true, true, undefined, { activateError: error });
+  const response = await failed.activate('123', body);
+  assert.equal(response.statusCode, 502);
+  assert.equal(response.body.error, 'outcome unknown');
+  assert.equal(response.body.outcomeUnknown, true);
+  assert.deepEqual(failed.events, ['activate:key-001']);
 });
 
 test('produce route validates IDs and surfaces uncertain outcomes without retrying', async () => {
@@ -314,7 +352,7 @@ test('rejects lease expiry dates outside the configured inclusive range', async 
     [2028, 11, 10, 201], [2028, 11, 11, 400],
   ]) {
     const { res } = await createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), memory).submit({
-      productIds: ['6048', '6050'],
+      productIds: ['6048', '6050'], startDate: '2026-11-10',
       memoryValues: [{ productId: '60', segmentId: '90', content: encode(year, month, day) }],
     });
     assert.equal(res.statusCode, status, `${year}-${month}-${day}`);
@@ -355,7 +393,7 @@ test('unavailable optional Pivot does not prevent creation without it', async ()
   assert.equal((await route().submit({ productIds: ['6048', '6051'] })).res.statusCode, 400);
 });
 
-test('uses the submitted local date or server local fallback and always creates a never-expiring entitlement', async () => {
+test('uses the submitted date or server UTC fallback and always creates a never-expiring entitlement', async () => {
   const localClock = new Date(2026, 10, 12, 0, 30, 0, 123);
   for (const overrides of [
     {},
@@ -365,10 +403,40 @@ test('uses the submitted local date or server local fallback and always creates 
   ]) {
     const { res, saved } = await createRoute([{ id: '1' }], localClock).submit(overrides);
     assert.equal(res.statusCode, 201);
-    assert.equal(saved.startDate, overrides.startDate || '2026-11-12');
+    assert.equal(saved.startDate, overrides.startDate || localClock.toISOString().slice(0, 10));
     assert.equal(saved.createDate, '2026-11-12T00:30:00.123' +
       `${-localClock.getTimezoneOffset() >= 0 ? '+' : '-'}${String(Math.floor(Math.abs(localClock.getTimezoneOffset()) / 60)).padStart(2, '0')}:${String(Math.abs(localClock.getTimezoneOffset()) % 60).padStart(2, '0')}`);
     assert.equal(saved.endDate, '2500-12-31');
+  }
+});
+
+test('defaults the start date to UTC on either side of local midnight', async () => {
+  const originalTimezone = process.env.TZ;
+  try {
+    for (const [timezone, instant, expected, localDate] of [
+      ['Pacific/Auckland', '2026-11-11T11:30:00Z', '2026-11-11', 12],
+      ['America/Los_Angeles', '2026-11-12T00:30:00Z', '2026-11-12', 11],
+    ]) {
+      process.env.TZ = timezone;
+      const clock = new Date(instant);
+      assert.equal(clock.getDate(), localDate);
+      const { res, saved } = await createRoute([{ id: '1' }], clock).submit();
+      assert.equal(res.statusCode, 201);
+      assert.equal(saved.startDate, expected);
+      const expiry = timezone === 'Pacific/Auckland' ? '2027-05-11' : '2027-05-12';
+      const [year, month, day] = expiry.split('-').map(Number);
+      const digits = ((year - 1980) * 512 + month * 32 + day).toString(16).toUpperCase().padStart(4, '0');
+      const memory = [{ kind: 'product', segments: [{ id: '90', size: '4', name: 'Expiry Date', saot: true }] }];
+      const leased = await createRoute([{ id: '1' }], clock, memory).submit({
+        productIds: ['6048', '6050'],
+        memoryValues: [{ productId: '60', segmentId: '90', content: Buffer.from(digits, 'ascii').toString('hex') }],
+      });
+      assert.equal(leased.res.statusCode, 201);
+      assert.equal(leased.saved.startDate, expected);
+    }
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
   }
 });
 

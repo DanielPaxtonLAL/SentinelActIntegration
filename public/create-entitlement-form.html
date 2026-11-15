@@ -133,7 +133,7 @@
             </div>
           </template>
         </div>
-        <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (local time).</p>
+        <p class="form-hint">Saving creates a never-expiring draft Product Key entitlement with one key and one activation, starting today (UTC).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
           <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !form.customerId || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooLarge || (leaseSelected && leaseBounds.min > leaseBounds.max)">
@@ -201,7 +201,8 @@
           return Boolean(this.leaseProduct && this.form.productIds.includes(this.leaseProduct.id));
         },
         leaseBounds() {
-          return LeaseDates.bounds(this.localToday(), this.localToday(), this.leaseExpiryRange);
+          const now = new Date();
+          return LeaseDates.bounds(this.utcToday(now), this.localToday(now), this.leaseExpiryRange);
         },
         selectedVersionId() {
           return this.versionProducts.find((product) => this.form.productIds.includes(product.id))?.id || '';
@@ -267,6 +268,9 @@
         localToday(now = new Date()) {
           return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         },
+        utcToday(now = new Date()) {
+          return now.toISOString().slice(0, 10);
+        },
         isCheckboxProduct(productId) {
           return [...this.accessProducts, ...this.optionalProducts].some((product) => product.id === productId);
         },
@@ -311,8 +315,8 @@
           return Array.from(hex.padStart(digitCount, '0'), (digit) => digit.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')).join('');
         },
         defaultLeaseExpiryDate(today = new Date()) {
-          const start = this.localToday(today);
-          const { min, max } = LeaseDates.bounds(start, start, this.leaseExpiryRange);
+          const start = this.utcToday(today);
+          const { min, max } = LeaseDates.bounds(start, this.localToday(today), this.leaseExpiryRange);
           if (min > max) return '';
           return [min, LeaseDates.addMonths(start, DEFAULT_LEASE_LENGTH_YEARS * 12), max].sort()[1];
         },
@@ -453,8 +457,9 @@
           this.error = '';
           try {
             if (!this.form.refId1.trim()) throw new Error('Enter an Irricad Order Code (refID 1).');
-            const startDate = this.localToday();
-            if (this.leaseSelected) LeaseDates.validate(this.leaseExpiryDate, startDate, startDate, this.leaseExpiryRange);
+            const now = new Date();
+            const startDate = this.utcToday(now);
+            if (this.leaseSelected) LeaseDates.validate(this.leaseExpiryDate, startDate, this.localToday(now), this.leaseExpiryRange);
             const leaseExpiryContent = this.leaseSelected ? this.encodeLeaseExpiryDate(this.leaseExpiryDate) : '';
             const payload = {
               ...this.form,

@@ -11,8 +11,8 @@
       <h1>Entitlements</h1>
       <div class="header-actions">
         <div v-if="status" id="status" :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
-        <button type="button" class="button--view" @click="loadEntitlements" :disabled="loading || producing">Reload</button>
-        <button type="button" @click="logout" :disabled="loading">Log out</button>
+        <button type="button" class="button--view" @click="loadEntitlements" :disabled="loading || producing || activating">Reload</button>
+        <button type="button" @click="logout" :disabled="loading || activating">Log out</button>
       </div>
     </header>
     <!-- include: nav -->
@@ -22,7 +22,7 @@
           <h2>Entitlements ({{ filteredEntitlements.length }})</h2>
           <input v-model.trim="filter" class="entitlement-filter" type="search"
             placeholder="Filter entitlements" aria-label="Filter entitlements across all attributes">
-          <button type="button" class="button--constructive entitlement-create-button" @click="openCreateEntitlement" :disabled="loading">Create entitlement</button>
+          <button type="button" class="button--constructive entitlement-create-button" @click="openCreateEntitlement" :disabled="loading || activating">Create entitlement</button>
         </div>
         <div class="table-wrap entitlement-list">
           <table v-if="filteredEntitlements.length">
@@ -51,7 +51,7 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
                 <td class="entitlement-actions" @click.stop @keydown.stop>
-                  <button v-if="String(entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED'" type="button" class="button--constructive" :disabled="producing" @click="openEditEntitlement(entitlement)">Edit</button>
+                  <button v-if="String(entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED'" type="button" class="button--constructive" :disabled="producing || activating" @click="openEditEntitlement(entitlement)">Edit</button>
                 </td>
               </tr>
             </tbody>
@@ -92,6 +92,14 @@
               <p v-else-if="productKeyError" class="form-error" role="alert">{{ productKeyError }} <button type="button" @click="loadProductKeys(selectedEntitlement.id, detailRequest)">Retry</button></p>
               <template v-else>
                 <div v-for="key in productKeys" :key="key.productKeyId">
+                  <button type="button" class="button--constructive"
+                    :disabled="activating || loading || deleting || reopening || activationUncertainKeys.includes(key.productKeyId)"
+                    @click="$event.currentTarget.nextElementSibling.click()">
+                    {{ activating ? 'Activating…' : 'Activate' }}
+                  </button>
+                  <input type="file" accept=".c2v" hidden :aria-label="'Choose C2V for product key ' + key.productKeyId"
+                    @change="activateProductKey(key, $event)">
+                  <p v-if="activationUncertainKeys.includes(key.productKeyId)" class="form-error" role="alert">Activation may have succeeded. Check the Activations page for the license before retrying.</p>
                   <div class="entitlement-detail-fields" role="table" aria-label="Product key details">
                     <div v-for="field in productKeyFields" :key="field.name" class="detail-row" role="row">
                       <div class="detail-label" role="rowheader">{{ field.label }}</div>
@@ -111,6 +119,11 @@
                   </div>
                 </div>
               </template>
+              <p v-if="activationError" class="form-error" role="alert">{{ activationError }}</p>
+              <p v-for="result in activationDownloads" :key="result.aid">
+                Activation {{ result.aid }}:
+                <a :href="licenseDownloadUrl(result.license)" :download="'Activation-' + result.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
+              </p>
             </details>
             <details class="detail-collapsible">
             <summary>Verbose Details</summary>
@@ -152,12 +165,12 @@
               <summary>DANGER ZONE</summary>
               <p v-if="canReopen" class="form-hint">Reopening returns this entitlement to draft state.</p>
               <button v-if="canReopen" type="button" class="button--destructive"
-                :disabled="reopening || deleting || producing || loading || reopenUncertain" @click="reopenSelectedEntitlement">
+                :disabled="reopening || deleting || producing || activating || loading || reopenUncertain" @click="reopenSelectedEntitlement">
                 {{ reopening ? 'Reopening…' : 'Reopen entitlement' }}
               </button>
               <p v-if="reopenError" class="form-error" role="alert">{{ reopenError }}</p>
               <p class="form-hint">Deleting an entitlement cannot be undone.</p>
-              <button type="button" class="button--destructive" :disabled="deleting || producing || reopening" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
+              <button type="button" class="button--destructive" :disabled="deleting || producing || reopening || activating" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
             </details>
           </template>
         </template>
@@ -181,6 +194,10 @@
           productKeys: [],
           productKeyLoading: false,
           productKeyError: '',
+          activating: false,
+          activationError: '',
+          activationUncertainKeys: [],
+          activationDownloads: [],
           productKeyFields: [
             { name: 'productKeyId', label: 'Product Key' },
             { name: 'totalEntitled', label: 'Total entitled' },
@@ -330,6 +347,46 @@
         },
       },
       methods: {
+        licenseDownloadUrl(license) {
+          return 'data:application/xml;charset=utf-8,' + encodeURIComponent(license);
+        },
+        async activateProductKey(key, event) {
+          const file = event.target.files[0];
+          event.target.value = '';
+          if (!file || this.activating || this.loading || this.deleting || this.reopening ||
+              !this.isProductKeyGenerated || this.activationUncertainKeys.includes(key.productKeyId)) return;
+          this.activationError = '';
+          if (!/\.c2v$/i.test(file.name) || !file.size || file.size > 10 * 1024 * 1024) {
+            this.activationError = 'Choose a non-empty C2V file no larger than 10 MB.';
+            return;
+          }
+          this.activating = true;
+          let outcomeUnknown = false;
+          try {
+            const c2v = await file.text();
+            outcomeUnknown = true;
+            const response = await fetch(`/api/entitlements/${encodeURIComponent(this.selectedEntitlement.id)}/activate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ productKeyId: key.productKeyId, c2v }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              outcomeUnknown = data.outcomeUnknown !== false;
+              throw new Error(data.error || response.statusText);
+            }
+            if (typeof data.aid !== 'string' || !data.aid || typeof data.license !== 'string' || !data.license) {
+              throw new Error('The server returned an invalid activation result.');
+            }
+            this.activationDownloads.push({ aid: data.aid, license: data.license });
+            this.notice = 'Activation completed. Download the V2C file below.';
+          } catch (err) {
+            if (outcomeUnknown) this.activationUncertainKeys.push(key.productKeyId);
+            this.activationError = 'Failed to activate: ' + err.message;
+          } finally {
+            this.activating = false;
+          }
+        },
         productKeyDownloadUrl(key) {
           return 'data:text/plain;charset=utf-8,' + encodeURIComponent(key);
         },
@@ -339,12 +396,14 @@
           return `Product Key - ${safe(customer)}.txt`;
         },
         async openEntitlementDetails(entitlement) {
-          if (this.producing) return;
+          if (this.producing || this.activating) return;
           const request = ++this.detailRequest;
           this.confirmedDetails = [];
           this.productKeys = [];
           this.productKeyError = '';
           this.productKeyLoading = false;
+          this.activationError = '';
+          this.activationDownloads = [];
           this.reopenError = '';
           this.reopenUncertain = false;
           this.produceError = '';
@@ -428,7 +487,7 @@
         },
         async deleteSelectedEntitlement() {
           const entitlement = this.selectedEntitlement;
-          if (!entitlement || this.deleting) return;
+          if (!entitlement || this.deleting || this.activating) return;
           const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
           if (!window.confirm('Delete entitlement ' + entitlement.id + ' for ' + name + '? This cannot be undone.')) return;
           this.deleting = true;
@@ -450,7 +509,7 @@
         async reopenSelectedEntitlement() {
           const entitlement = this.selectedEntitlement;
           if (!entitlement || !this.canReopen || this.reopening || this.deleting ||
-              this.producing || this.loading || this.reopenUncertain) return;
+              this.producing || this.activating || this.loading || this.reopenUncertain) return;
           const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
           if (!window.confirm('Reopen entitlement ' + entitlement.id + ' for ' + name + '? This changes its state back to DRAFT.')) return;
           this.reopening = true;
@@ -611,6 +670,7 @@
           return parts.length ? parts : [{ text, highlighted: false }];
         },
         async loadEntitlements() {
+          if (this.activating) return;
           this.loading = true;
           this.error = '';
           try {

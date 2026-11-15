@@ -84,3 +84,15 @@ test('lists distinct activations for generated product keys only', async () => {
     ['activation', 'aid-002'],
   ]);
 });
+
+test('activations page provides a V2C download for an existing license', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  let definition;
+  vm.runInNewContext(script, {
+    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
+  });
+  const license = '<hasp_info><v2c>YWJj</v2c></hasp_info>';
+  assert.equal(definition.methods.licenseDownloadUrl(license), 'data:application/xml;charset=utf-8,' + encodeURIComponent(license));
+  assert.match(html, /:download="'Activation-' \+ activation\.aid\.replace/);
+});

@@ -37,6 +37,9 @@
               <td><code>{{ activation.aid }}</code></td>
               <td>{{ displayValue(activation.protectionKeyId) }}</td>
               <td>
+                <a v-if="typeof activation.activationString === 'string' && activation.activationString.trim()"
+                  :href="licenseDownloadUrl(activation.activationString)"
+                  :download="'Activation-' + activation.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
                 <details>
                   <summary>View license</summary>
                   <pre class="activation-license">{{ displayValue(activation.activationString) }}</pre>
@@ -72,6 +75,9 @@
         },
       },
       methods: {
+        licenseDownloadUrl(license) {
+          return 'data:application/xml;charset=utf-8,' + encodeURIComponent(license);
+        },
         displayValue(value) {
           return value === null || value === undefined || value === '' ? '—' : String(value);
         },

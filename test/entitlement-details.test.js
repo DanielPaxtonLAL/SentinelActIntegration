@@ -200,6 +200,58 @@ test('product key link downloads the exact key with a safe customer filename', (
   assert.match(html, /<a v-if="field.name === 'productKeyId'" :href="productKeyDownloadUrl\(key.productKeyId\)" :download="productKeyFilename\(key\)">/);
 });
 
+test('activates the selected generated product key and exposes the V2C download', async () => {
+  const app = definition.data();
+  app.selectedEntitlement = { id: '123', entState: 'PRODUCT_KEY_GENERATED' };
+  app.isProductKeyGenerated = true;
+  const key = { productKeyId: 'key-001' };
+  const license = '<?xml version="1.0"?><hasp_info><v2c>YWJj</v2c></hasp_info>';
+  fetchMemory = async (url, options) => {
+    assert.equal(url, '/api/entitlements/123/activate');
+    assert.deepEqual(JSON.parse(options.body), { productKeyId: 'key-001', c2v: '<hasp_info/>' });
+    return { ok: true, json: async () => ({ aid: 'aid-1', license }) };
+  };
+  const event = { target: { files: [{ name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' }], value: 'file' } };
+  await definition.methods.activateProductKey.call(app, key, event);
+  assert.equal(app.activationDownloads[0].license, license);
+  assert.equal(definition.methods.licenseDownloadUrl(license), 'data:application/xml;charset=utf-8,' + encodeURIComponent(license));
+  assert.equal(event.target.value, '');
+  assert.match(html, /<details v-if="isProductKeyGenerated" class="detail-collapsible product-key-details">[\s\S]*?@change="activateProductKey\(key, \$event\)"[\s\S]*?Download V2C[\s\S]*?<\/details>/);
+});
+
+test('blocks invalid files and prevents retries after an uncertain activation', async () => {
+  const app = definition.data();
+  app.selectedEntitlement = { id: '123', entState: 'PRODUCT_KEY_GENERATED' };
+  app.isProductKeyGenerated = true;
+  const key = { productKeyId: 'key-001' };
+  let calls = 0;
+  fetchMemory = async () => { calls++; throw new Error('connection lost'); };
+  const event = (file) => ({ target: { files: [file], value: 'file' } });
+  await definition.methods.activateProductKey.call(app, key, event({ name: 'wrong.txt', size: 1 }));
+  assert.match(app.activationError, /C2V/);
+  assert.equal(calls, 0);
+  const file = { name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' };
+  await definition.methods.activateProductKey.call(app, key, event(file));
+  assert.equal(calls, 1);
+  assert.equal(app.activationUncertainKeys.includes('key-001'), true);
+  await definition.methods.activateProductKey.call(app, key, event(file));
+  assert.equal(calls, 1);
+});
+
+test('shows EMS diagnostic details while retaining the uncertain outcome warning', async () => {
+  const app = definition.data();
+  app.selectedEntitlement = { id: '123', entState: 'PRODUCT_KEY_GENERATED' };
+  app.isProductKeyGenerated = true;
+  fetchMemory = async () => ({
+    ok: false,
+    json: async () => ({ error: 'EMS activation returned HTTP 400. EMS response: Invalid fingerprint', outcomeUnknown: true }),
+  });
+  const file = { name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' };
+  await definition.methods.activateProductKey.call(app, { productKeyId: 'key-001' }, { target: { files: [file] } });
+  assert.match(app.activationError, /HTTP 400.*Invalid fingerprint/);
+  assert.equal(app.activationUncertainKeys.includes('key-001'), true);
+});
+
 function versionFor(products, baseProductId = '6047') {
   const app = { selectedEntitlement: { products, baseProductId } };
   Object.defineProperty(app, 'baseMemorySegments', {
