@@ -155,6 +155,57 @@ app.get('/api/entitlements', async (req, res) => {
   }
 });
 
+app.get('/api/activations', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const entitlements = await withSession(() => ems.listEntitlements());
+    const generated = entitlements.filter((entitlement) =>
+      String(entitlement.entState ?? entitlement.state ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED'
+    );
+    const keys = [];
+    for (let index = 0; index < generated.length; index += 10) {
+      const batch = await Promise.all(generated.slice(index, index + 10).map(async (entitlement) => ({
+        entitlement,
+        productKeys: await withSession(() => ems.getEntitlementProductKeys(
+          entitlement.id ?? entitlement.entitlementId
+        )),
+      })));
+      keys.push(...batch.flatMap(({ entitlement, productKeys }) => productKeys.map((key) => ({
+        key,
+        entitlement,
+      }))));
+    }
+
+    const candidates = [];
+    const seenAids = new Set();
+    for (const { key, entitlement } of keys) {
+      for (const aid of key.activationIds || []) {
+        if (seenAids.has(aid)) continue;
+        seenAids.add(aid);
+        candidates.push({ aid, key, entitlement });
+      }
+    }
+    const activations = [];
+    for (let index = 0; index < candidates.length; index += 10) {
+      const batch = await Promise.all(candidates.slice(index, index + 10).map(async ({ aid, key, entitlement }) => ({
+        ...await withSession(() => ems.getActivationLicense(aid)),
+        productKeyId: key.productKeyId,
+        entitlementId: key.entitlementId,
+        customerName: key.customerName ?? entitlement.customerName ?? entitlement.customer,
+      })));
+      activations.push(...batch);
+    }
+    res.json(activations);
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 app.get('/api/enforcements', async (req, res) => {
   try {
     res.json(await withSession(() =>

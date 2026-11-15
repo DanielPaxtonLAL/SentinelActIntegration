@@ -6,6 +6,7 @@ const CURRENT_AREA = {
   '/': 'customers',
   '/index.html': 'customers',
   '/entitlements.html': 'entitlements',
+  '/activations.html': 'activations',
   '/create-entitlement-form.html': 'entitlements',
   '/update-entitlement-form.html': 'entitlements',
 };
@@ -16,7 +17,7 @@ function renderPage(html, partialsDir, requestPath) {
   return html.replace(INCLUDE_PATTERN, (match, indent, name) => {
     const partial = fs.readFileSync(path.join(partialsDir, `${name}.html`), 'utf8')
       .replace(/\r?\n$/, '')
-      .replace(/{{(entitlements|customers)Current}}/g, (token, key) => current(key));
+      .replace(/{{(entitlements|activations|customers)Current}}/g, (token, key) => current(key));
     return partial.split(/\r?\n/).map((line) => (line ? indent + line : line)).join('\n');
   });
 }

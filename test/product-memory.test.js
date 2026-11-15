@@ -744,8 +744,11 @@ test('shared head, disclaimer and nav are included into pages with the right cur
   assert.doesNotMatch(entitlements, /<!-- include:/);
   assert.match(entitlements, /<link rel="stylesheet" href="\/styles.css">\s*<script src="\/theme.js"><\/script>/);
   assert.match(entitlements, /class="dev-disclaimer">Development in progress/);
-  assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/">Customers<\/a>/);
-  assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
+  assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/activations.html">Activations<\/a>\s*<a href="\/">Customers<\/a>/);
+  const activations = render('activations.html', '/activations.html');
+  assert.match(activations, /<a href="\/activations.html" aria-current="page">Activations<\/a>/);
+  assert.match(activations, /All activations/);
+  assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Activations<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
   assert.doesNotMatch(render('catalog.html', '/catalog.html'), /aria-current="page">(Entitlements|Customers)/);
 });
 

@@ -7,6 +7,7 @@ const responseXml = `<productKey><productKeyId>key-001</productKeyId><totalEntit
 <productInfo id="001" productName="Base" productIdentifier="02" type="BASE"/>
 <activationAttribute><attributeName>C2V</attributeName><attributeValue>null</attributeValue>
 <isvPermission>NONE</isvPermission><endUserPermission>WRITE</endUserPermission></activationAttribute>
+<activationInfo><activationId>activation-001</activationId></activationInfo>
 <entitlementId>123</entitlementId><customerId>5</customerId></productKey>`;
 
 function createClient() {
@@ -30,6 +31,7 @@ test('loads product key details including product attributes and activation perm
   assert.equal(key.productInfo[0].id, '001');
   assert.equal(key.productInfo[0].productIdentifier, '02');
   assert.equal(key.activationAttribute[0].endUserPermission, 'WRITE');
+  assert.deepEqual(key.activationIds, ['activation-001']);
 });
 
 test('handles multiple keys and rejects missing IDs or non-generated entitlements', async () => {
@@ -54,4 +56,28 @@ test('reports failed or mismatched EMS key lookups', async () => {
   await assert.rejects(() => client.getEntitlementProductKeys('123'), /invalid product key XML/);
   client._fetch = async () => ({ ok: true, text: async () => responseXml.replace('<entitlementId>123', '<entitlementId>124') });
   await assert.rejects(() => client.getEntitlementProductKeys('123'), /unexpected key or entitlement/);
+});
+
+test('loads a license by Activation ID and verifies the returned ID', async () => {
+  const client = createClient();
+  const activationXml = `<activation><activationOutput><AID>activation-001</AID>
+  <protectionKeyId>712734935</protectionKeyId><activationString>license-data</activationString>
+  </activationOutput></activation>`;
+  let url;
+  client._fetch = async (path) => {
+    url = path;
+    return { ok: true, text: async () => activationXml };
+  };
+  assert.deepEqual(await client.getActivationLicense('activation-001'), {
+    aid: 'activation-001',
+    protectionKeyId: '712734935',
+    activationString: 'license-data',
+  });
+  assert.equal(url, 'https://ems.example/ems/v90/ws/activation/activation-001.ws');
+
+  client._fetch = async () => ({
+    ok: true,
+    text: async () => activationXml.replace('activation-001', 'unexpected'),
+  });
+  await assert.rejects(() => client.getActivationLicense('activation-001'), /unexpected Activation ID/);
 });

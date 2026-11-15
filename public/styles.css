@@ -506,6 +506,13 @@ td { overflow-wrap: anywhere; }
   .custom-entities-page table { display: block; overflow-x: auto; }
 }
 .entitlements-page .entitlement-form .product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.activations-page .activation-list { padding: 1rem; }
+.activations-page .activation-list-tools { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; }
+.activations-page .activation-list-tools h2 { margin: 0; font-size: 1.1rem; }
+.activations-page .activation-list-tools input { width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
+.activations-page .table-wrap { overflow-x: auto; }
+.activations-page td code { overflow-wrap: anywhere; }
+.activations-page .activation-license { max-height: 24rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .entitlements-page .entitlement-form .product-grid { grid-template-columns: 1fr; } }
 .entitlements-page .entitlement-form textarea { resize: none; }
 .entitlements-page .entitlement-list-panel .entitlements-subheading { justify-content: flex-start; }

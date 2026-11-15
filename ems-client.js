@@ -11,6 +11,20 @@ const escapeXml = (value) => String(value)
   .replace(/"/g, '&quot;')
   .replace(/'/g, '&apos;');
 
+function findActivationIds(value, ids = new Set()) {
+  if (!value || typeof value !== 'object') return [...ids];
+  for (const [name, child] of Object.entries(value)) {
+    if (['aid', 'activationid'].includes(name.toLowerCase().replace(/[^a-z]/g, ''))) {
+      for (const candidate of Array.isArray(child) ? child : [child]) {
+        if (typeof candidate === 'string' && candidate.trim()) ids.add(candidate.trim());
+      }
+    } else {
+      findActivationIds(child, ids);
+    }
+  }
+  return [...ids];
+}
+
 class EmsClient {
   constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, serialNumberCustomerId }) {
     if (!baseUrl) throw new Error('baseUrl is required');
@@ -470,8 +484,44 @@ class EmsClient {
         ...productKey,
         productInfo: asList(productKey.productInfo),
         activationAttribute: asList(productKey.activationAttribute),
+        activationIds: findActivationIds(productKey),
       };
     }));
+  }
+
+  async getActivationLicense(aid) {
+    if (typeof aid !== 'string' || !aid.trim()) throw new Error('Activation ID is required');
+    const response = await this._fetch(`${this.apiRoot}/activation/${encodeURIComponent(aid)}.ws`, {
+      headers: { Accept: 'application/xml' },
+    });
+    const xml = await response.text();
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading activation details.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) {
+      const error = new Error(`EMS activation lookup failed: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      error.body = xml;
+      throw error;
+    }
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid activation XML.');
+    const activation = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '',
+      parseTagValue: false,
+    }).parse(xml)?.activation;
+    const output = activation?.activationOutput;
+    if (!output || typeof output !== 'object' ||
+        String(output.AID ?? output.aid ?? output.activationId ?? '') !== aid) {
+      throw new Error('EMS returned activation details for an unexpected Activation ID.');
+    }
+    return {
+      aid,
+      protectionKeyId: output.protectionKeyId,
+      activationString: output.activationString,
+    };
   }
 
   async listCatalog(category, vendorId = '2') {

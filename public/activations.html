@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- include: head -->
+  <title>EMS Activations</title>
+</head>
+<body>
+  <main id="app" class="activations-page" v-cloak>
+    <!-- include: disclaimer -->
+    <header class="app-header">
+      <h1>Activations</h1>
+      <div class="header-actions">
+        <div :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
+        <button type="button" class="button--view" @click="loadActivations" :disabled="loading">Reload</button>
+        <button type="button" @click="logout" :disabled="loading">Log out</button>
+      </div>
+    </header>
+    <!-- include: nav -->
+    <section class="activation-list">
+      <div class="activation-list-tools">
+        <h2>All activations ({{ filteredActivations.length }})</h2>
+        <input v-model.trim="filter" type="search" placeholder="Filter activations"
+          aria-label="Filter activations by customer, product key, Activation ID, or protection key">
+      </div>
+      <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+      <p v-else-if="loading" role="status">Loading activations…</p>
+      <p v-else-if="!filteredActivations.length">{{ filter ? 'No matching activations.' : 'No activations found.' }}</p>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="activation in filteredActivations" :key="activation.aid">
+              <td>{{ displayValue(activation.customerName) }}</td>
+              <td>{{ displayValue(activation.productKeyId) }}</td>
+              <td><code>{{ activation.aid }}</code></td>
+              <td>{{ displayValue(activation.protectionKeyId) }}</td>
+              <td>
+                <details>
+                  <summary>View license</summary>
+                  <pre class="activation-license">{{ displayValue(activation.activationString) }}</pre>
+                </details>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script>
+    const { createApp } = Vue;
+
+    createApp({
+      data() {
+        return { activations: [], filter: '', loading: false, error: '' };
+      },
+      computed: {
+        status() {
+          if (this.loading) return 'Loading activations…';
+          if (this.error) return this.error;
+          return `${this.activations.length} activations`;
+        },
+        filteredActivations() {
+          const query = this.filter.toLocaleLowerCase();
+          if (!query) return this.activations;
+          return this.activations.filter((activation) =>
+            [activation.customerName, activation.productKeyId, activation.aid, activation.protectionKeyId]
+              .some((value) => String(value ?? '').toLocaleLowerCase().includes(query))
+          );
+        },
+      },
+      methods: {
+        displayValue(value) {
+          return value === null || value === undefined || value === '' ? '—' : String(value);
+        },
+        async loadActivations() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/activations', { cache: 'no-store' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            if (!Array.isArray(data)) throw new Error('The server returned an invalid activations list');
+            this.activations = data;
+          } catch (err) {
+            this.error = 'Failed to load activations: ' + err.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+        async logout() {
+          this.loading = true;
+          this.error = '';
+          try {
+            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || response.statusText);
+            window.location.replace('/login.html');
+          } catch (err) {
+            this.error = 'Log out failed: ' + err.message;
+            this.loading = false;
+          }
+        },
+      },
+      mounted() {
+        this.loadActivations();
+      },
+    }).mount('#app');
+  </script>
+</body>
+</html>
