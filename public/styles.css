@@ -388,8 +388,19 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
   overflow-wrap: anywhere;
 }
 
-.login-page { margin: 2rem; }
-.login-page main { max-width: 24rem; margin: 10vh auto; }
+.login-page {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+.login-page main {
+  width: min(24rem, calc(100% - 2rem));
+  margin: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
 .login-page label { display: block; margin-top: 1rem; }
 
 .login-page input {
