@@ -1,8 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
 const { EmsClient } = require('../ems-client');
 
 function clientWithResponses(responses) {
@@ -67,44 +64,4 @@ test('resolves base products by identifier, rejecting missing or ambiguous match
   for (const response of ['<listResponse count="0"/>', `<listResponse>${instance}<instance id="62" identifier="12345" type="BASE"/></listResponse>`]) {
     await assert.rejects(() => clientWithResponses({ [search]: response }).findBaseProductByIdentifier('12345'), /Expected one base product/);
   }
-});
-
-function catalogApp(fetch) {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'catalog.html'), 'utf8');
-  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
-  let definition;
-  vm.runInNewContext(script, {
-    fetch,
-    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
-  });
-  const app = { ...definition.methods };
-  Object.assign(app, definition.data.call(app));
-  return app;
-}
-
-test('selection ignores stale modification requests', async () => {
-  const requests = [];
-  const app = catalogApp((url) => new Promise((resolve) => requests.push({ url, resolve })));
-  app.selectItem({ productId: 1 });
-  app.selectItem({ productId: 2 });
-  assert.equal(requests[0].url, '/api/catalog/products/1/modifications');
-  requests[1].resolve({ ok: true, json: async () => [{ productId: 'new' }] });
-  await new Promise(setImmediate);
-  requests[0].resolve({ ok: true, json: async () => [{ productId: 'old' }] });
-  await new Promise(setImmediate);
-  assert.equal(app.modifications[0].productId, 'new');
-  assert.equal(app.modificationsLoading, false);
-});
-
-test('modification errors are shown and retry reloads data', async () => {
-  let attempt = 0;
-  const app = catalogApp(async () => ++attempt === 1
-    ? { ok: false, statusText: 'Bad gateway', json: async () => ({ error: 'EMS unavailable' }) }
-    : { ok: true, json: async () => [] });
-  const product = { productId: 1 };
-  await app.loadModifications(product);
-  assert.match(app.modificationsError, /EMS unavailable/);
-  await app.loadModifications(product);
-  assert.equal(app.modificationsError, '');
-  assert.equal(app.modifications.length, 0);
 });

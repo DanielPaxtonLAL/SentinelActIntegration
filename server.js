@@ -279,49 +279,12 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
   }
 });
 
-app.get('/api/catalog/:category', async (req, res) => {
-  const categories = new Set(['products', 'features', 'dynamicMemory']);
-  if (!categories.has(req.params.category)) {
-    return res.status(404).json({ error: 'Unknown catalog category' });
-  }
-  try {
-    res.json(await withSession(() =>
-      ems.listCatalog(req.params.category, process.env.EMS_VENDOR_ID || '2')
-    ));
-  } catch (err) {
-    if (err.status === 401) {
-      ems.authenticated = false;
-      ems.cookies.clear();
-    }
-    console.error(err.message);
-    res.status(502).json({ error: err.message });
-  }
-});
-
 app.get('/api/catalog/products/:id/read-only-memory', async (req, res) => {
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Product ID must be a positive number' });
   }
   try {
     res.json(await withSession(() => ems.getProductReadOnlyMemory(req.params.id)));
-  } catch (err) {
-    if (err.status === 401) {
-      ems.authenticated = false;
-      ems.cookies.clear();
-    }
-    console.error(err.message);
-    res.status(502).json({ error: err.message });
-  }
-});
-
-app.get('/api/catalog/products/:id/modifications', async (req, res) => {
-  if (!/^[1-9]\d*$/.test(req.params.id)) {
-    return res.status(400).json({ error: 'Product ID must be a positive number' });
-  }
-  try {
-    res.json(await withSession(() =>
-      ems.listModificationProducts(req.params.id, process.env.EMS_VENDOR_ID || '2')
-    ));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;

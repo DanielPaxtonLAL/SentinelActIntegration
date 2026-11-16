@@ -796,7 +796,6 @@ test('shared head, disclaimer and nav are included into pages with the right cur
   assert.match(activations, /<a href="\/activations.html" aria-current="page">Activations<\/a>/);
   assert.match(activations, /All activations/);
   assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Activations<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
-  assert.doesNotMatch(render('catalog.html', '/catalog.html'), /aria-current="page">(Entitlements|Customers)/);
 });
 
 test('deletes an entitlement with DELETE on the numeric entitlement ws path', async () => {
