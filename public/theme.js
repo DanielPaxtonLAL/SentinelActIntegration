@@ -1,8 +1,9 @@
 (function () {
   const KEY = 'theme';
+  const THEMES = ['light', 'dark', 'dracula', 'fugly'];
   const root = document.documentElement;
   const stored = localStorage.getItem(KEY);
-  const initial = stored === 'light' || stored === 'dark'
+  const initial = THEMES.includes(stored)
     ? stored
     : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   root.setAttribute('data-theme', initial);
@@ -14,13 +15,14 @@
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'theme-toggle';
+    const nextTheme = () => THEMES[(THEMES.indexOf(root.getAttribute('data-theme')) + 1) % THEMES.length];
     const render = () => {
-      const dark = root.getAttribute('data-theme') === 'dark';
-      toggle.textContent = dark ? 'Light theme' : 'Dark theme';
-      toggle.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+      const next = nextTheme();
+      toggle.textContent = `${next[0].toUpperCase()}${next.slice(1)} theme`;
+      toggle.setAttribute('aria-label', `Switch to ${next} theme`);
     };
     toggle.addEventListener('click', () => {
-      const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      const next = nextTheme();
       root.setAttribute('data-theme', next);
       localStorage.setItem(KEY, next);
       render();

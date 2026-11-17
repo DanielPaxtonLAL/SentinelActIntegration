@@ -59,7 +59,7 @@
   color-scheme: light;
 }
 
-/* Dark theme: set via data-theme="dark" on <html> by theme.js */
+/* Alternate palettes are selected by theme.js. */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
@@ -97,6 +97,110 @@
   --button-view-bg-hover: #3790dc;
 }
 
+:root[data-theme="dracula"] {
+  color-scheme: dark;
+
+  --color-bg: #282a36;
+  --color-text: #f8f8f2;
+  --color-text-muted: #bdc0cf;
+  --color-text-subtle: #c4c6d0;
+  --color-text-nav: #f8f8f2;
+  --color-surface: #343746;
+  --color-surface-alt: #2f3240;
+  --color-surface-muted: #44475a;
+  --color-surface-header: #383b4a;
+  --color-surface-hover: #505367;
+  --color-border: #505367;
+  --color-border-strong: #6272a4;
+  --color-border-soft: #565c78;
+  --color-primary: #bd93f9;
+  --color-selected-bg: #44475a;
+  --color-selected-strong-bg: #53566a;
+  --color-selected-outline: #bd93f9;
+  --color-highlight: #f1fa8c;
+  --color-warning-bg: #5c5200;
+  --color-warning-bg-hover: #716400;
+  --color-error: #ff5555;
+  --color-error-dark: #ff6e6e;
+  --color-success-marker: #50fa7b;
+
+  --status-complete-bg: #50fa7b;
+  --status-complete-text: #282a36;
+  --status-draft-bg: #8be9fd;
+  --status-draft-text: #282a36;
+  --status-acknowledged-bg: #bd93f9;
+  --status-acknowledged-text: #282a36;
+  --status-queued-bg: #ffb86c;
+  --status-queued-text: #282a36;
+  --status-produced-bg: #f1fa8c;
+  --status-produced-text: #282a36;
+
+  --button-default-bg: #44475a;
+  --button-default-bg-hover: #565a6e;
+  --button-default-border: #6272a4;
+  --button-default-text: #f8f8f2;
+  --button-text-on-color: #282a36;
+  --button-focus-outline: #bd93f9;
+  --button-constructive-bg: #50fa7b;
+  --button-constructive-bg-hover: #3ee86c;
+  --button-destructive-bg: #ff5555;
+  --button-destructive-bg-hover: #ff6e6e;
+  --button-view-bg: #8be9fd;
+  --button-view-bg-hover: #63d7ee;
+}
+
+:root[data-theme="fugly"] {
+  color-scheme: light;
+
+  --color-bg: #00ffff;
+  --color-text: #30002c;
+  --color-text-muted: #52004b;
+  --color-text-subtle: #4c0046;
+  --color-text-nav: #30002c;
+  --color-surface: #ff00ff;
+  --color-surface-alt: #ff5cff;
+  --color-surface-muted: #ff70ec;
+  --color-surface-header: #ff4de1;
+  --color-surface-hover: #ff9aee;
+  --color-border: #71005f;
+  --color-border-strong: #4f0048;
+  --color-border-soft: #8a0078;
+  --color-primary: #7700a8;
+  --color-selected-bg: #66ffff;
+  --color-selected-strong-bg: #00e5e5;
+  --color-selected-outline: #9d00cc;
+  --color-highlight: #fff200;
+  --color-warning-bg: #ff00ff;
+  --color-warning-bg-hover: #ff66ee;
+  --color-error: #9b0038;
+  --color-error-dark: #660027;
+  --color-success-marker: #ff00ff;
+
+  --status-complete-bg: #00ffff;
+  --status-complete-text: #30002c;
+  --status-draft-bg: #ff00ff;
+  --status-draft-text: #30002c;
+  --status-acknowledged-bg: #ff66ee;
+  --status-acknowledged-text: #30002c;
+  --status-queued-bg: #00e5e5;
+  --status-queued-text: #30002c;
+  --status-produced-bg: #ff70ec;
+  --status-produced-text: #30002c;
+
+  --button-default-bg: #ff00ff;
+  --button-default-bg-hover: #ff66ee;
+  --button-default-border: #71005f;
+  --button-default-text: #30002c;
+  --button-text-on-color: #30002c;
+  --button-focus-outline: #7700a8;
+  --button-constructive-bg: #00ffff;
+  --button-constructive-bg-hover: #66ffff;
+  --button-destructive-bg: #ff00ff;
+  --button-destructive-bg-hover: #ff66ee;
+  --button-view-bg: #ff00ff;
+  --button-view-bg-hover: #ff66ee;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -107,6 +211,14 @@ body {
 }
 
 button, input { font: inherit; }
+:root[data-theme="fugly"] input,
+:root[data-theme="fugly"] select,
+:root[data-theme="fugly"] textarea {
+  border-color: var(--color-border-strong);
+  background-color: #ff8cff;
+  color: var(--color-text);
+}
+:root[data-theme="fugly"] input { accent-color: #ff00ff; }
 button {
   padding: .45rem .8rem;
   border: 1px solid var(--button-default-border);
@@ -305,6 +417,7 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlements-subheading h2 { margin: 0; font-size: 1.1rem; }
 .entitlements-page .entitlement-filter { box-sizing: border-box; width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
 .entitlements-page mark { padding: 0 .08em; background: var(--color-highlight); color: var(--color-text); }
+:root[data-theme="dracula"] .entitlements-page mark { color: #282a36; }
 .entitlements-page .table-wrap { overflow-x: auto; }
 .entitlements-page .table-wrap > table { width: calc(100% - 2rem); margin: 1rem; }
 .entitlements-page .entitlements-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(20rem, 1fr); gap: 1rem; align-items: start; padding: 1rem; }

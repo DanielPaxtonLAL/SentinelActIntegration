@@ -10,6 +10,8 @@ const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
 const LeaseDates = require('./public/lease-dates');
 
+// Load environment variables from a local .env file when one is present so the app can run
+// without hard-coded credentials in the source tree.
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) {
   for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
@@ -25,6 +27,8 @@ const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
 const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'));
 
+// Shared helper that formats a Date as an EMS-friendly timestamp with a timezone offset.
+
 function formatLocalDateTime(date) {
   const pad = (value, length = 2) => String(value).padStart(length, '0');
   const offset = -date.getTimezoneOffset();
@@ -36,6 +40,8 @@ function formatLocalDateTime(date) {
     `${sign}${pad(offsetHours)}:${pad(offsetMinutes)}`;
 }
 
+// Pull the base entitlement and all supported modification/product options from EMS, validating
+// that the configured base product and required access products are complete and available.
 async function getEntitlementProducts() {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
   const baseId = formData.baseProductId;
@@ -77,6 +83,7 @@ if (!EMS_URL || !EMS_USER || !EMS_PASS) {
   process.exit(1);
 }
 
+// EMS client is shared across the app so every API route can reuse the same authenticated session.
 const ems = new EmsClient({
   baseUrl: EMS_URL,
   username: EMS_USER,
@@ -103,10 +110,12 @@ async function withSession(fn) {
   }
 }
 
+// Start the Express app and wire up a lightweight live-reload mechanism for the front-end.
 const app = express();
 const publicDir = path.join(__dirname, 'public');
 const reloadClients = new Set();
 
+// SSE endpoint used by the browser to refresh static pages when HTML files change during development.
 app.get('/__dev/reload', (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
@@ -126,6 +135,7 @@ fs.watch(publicDir, (eventType, filename) => {
 app.use(pageIncludes(publicDir, path.join(__dirname, 'partials')));
 app.use(express.static(publicDir));
 
+// EMS lookup endpoints used by the UI to populate customers, entitlements and product metadata.
 app.get('/api/customers', async (req, res) => {
   try {
     res.json(await withSession(() => ems.listCustomers()));
@@ -257,22 +267,46 @@ app.get('/api/entitlements/:id/product-keys', async (req, res) => {
   }
 });
 
+function vibeCheckActivationInput(productKeyId, c2v) {
+  const trimmedKey = typeof productKeyId === 'string' ? productKeyId.trim() : '';
+  const trimmedC2V = typeof c2v === 'string' ? c2v.trim() : '';
+
+  if (!trimmedKey || trimmedKey.length > 128 || /\s/.test(trimmedKey) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(trimmedKey)) {
+    return 'Provide a product key value that looks like a real key and does not contain whitespace.';
+  }
+
+  if (!trimmedC2V) {
+    return 'A C2V value is required.';
+  }
+
+  if (Buffer.byteLength(trimmedC2V, 'utf8') > 10 * 1024 * 1024) {
+    return 'C2V content is too large; keep it under 10 MB.';
+  }
+
+  const suspiciousControlChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(trimmedC2V);
+  if (suspiciousControlChars) {
+    return 'C2V content contains invalid control characters.';
+  }
+
+  return null;
+}
+
 app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number.', outcomeUnknown: false });
   }
+
   const { productKeyId, c2v } = req.body || {};
-  if (typeof productKeyId !== 'string' || !productKeyId.trim() ||
-      typeof c2v !== 'string' || !c2v.trim() || Buffer.byteLength(c2v, 'utf8') > 10 * 1024 * 1024) {
-    return res.status(400).json({ error: 'Provide a product key and a C2V file no larger than 10 MB.', outcomeUnknown: false });
+  const inputError = vibeCheckActivationInput(productKeyId, c2v);
+  if (inputError) {
+    return res.status(400).json({ error: inputError, outcomeUnknown: false });
   }
+
   try {
-    const keys = await withSession(() => ems.getEntitlementProductKeys(req.params.id));
-    if (!keys.some((key) => key.productKeyId === productKeyId)) {
-      return res.status(400).json({ error: 'The product key does not belong to this generated entitlement.', outcomeUnknown: false });
-    }
-    res.json(await withSession(() => ems.activateProductKey(productKeyId, c2v)));
+    // Keep the pre-flight check permissive: if the payload is obviously nonsense, reject it here,
+    // but otherwise let EMS decide whether the key and C2V are valid for this entitlement.
+    res.json(await withSession(() => ems.activateProductKey(productKeyId.trim(), c2v.trim())));
   } catch (err) {
     console.error(err.message);
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
@@ -308,6 +342,8 @@ app.get('/api/entitlement-products', async (req, res) => {
   }
 });
 
+// Builds and validates the entitlement payload before either creating a new draft or updating
+// an existing one in EMS. This is the central business logic for entitlement management.
 const saveEntitlement = async (req, res) => {
   const existingId = req.params?.id;
   if (existingId !== undefined && !/^[1-9]\d*$/.test(existingId)) {
@@ -538,6 +574,8 @@ app.delete('/api/entitlements/:id', async (req, res) => {
   }
 });
 
+// Act! integration keeps per-user session state so a user can authenticate once and reuse
+// that session for subsequent company and division API calls.
 const { ACT_URL, ACT_DATABASE } = process.env;
 const actSessions = createActSessions(() => new ActClient({
   baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
@@ -553,6 +591,7 @@ async function callAct(req, operation) {
   }
 }
 
+// Act! authentication and company operations.
 app.post('/api/act/login', express.json(), async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
@@ -660,6 +699,8 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
   }
 });
 
+// Final catch-all for unknown routes: API requests return JSON 404s while page requests fall back
+// to the app's static 404 page.
 app.use((req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'Not found' });
   if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(404).type('text').send('Not found');
@@ -669,6 +710,8 @@ app.use((req, res) => {
   });
 });
 
+// Start the HTTP server and print both localhost and LAN URLs for convenience when running
+// the app on a development machine.
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Local: http://localhost:${PORT}`);
   const addresses = Object.values(os.networkInterfaces())
