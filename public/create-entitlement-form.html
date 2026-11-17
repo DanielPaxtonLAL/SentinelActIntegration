@@ -110,7 +110,7 @@
           </label>
           <div v-if="leaseSelected" class="lease-options">
             <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
-              Lease Expiry Date (Local time)
+              Lease Expiry Date (UTC)
               <input v-model="leaseExpiryDate" type="date" :min="leaseBounds.min" :max="leaseBounds.max" required :disabled="loading || leaseBounds.min > leaseBounds.max">
               <span v-if="leaseBounds.min <= leaseBounds.max" class="form-hint">Allowed from {{ leaseBounds.min }} to {{ leaseBounds.max }} (inclusive).</span>
               <span v-else class="form-error" role="alert">No valid lease expiry dates are available for this start date.</span>
