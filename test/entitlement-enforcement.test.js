@@ -18,6 +18,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let handler;
   let updateHandler;
   let serialHandler;
+  let usedSerialsHandler;
   let productKeysHandler;
   let activateHandler;
   let produceHandler;
@@ -28,6 +29,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   class EmsClient {
     constructor() { this.authenticated = true; }
     async listCustomers() { return [{ customerId: '5' }]; }
+    async listEntitlements() { return serialOptions.entitlements || []; }
     async getLargestProductKeySerial() { events.push('get'); if (serialOptions.getError) throw new Error('serial read failed'); return largest; }
     async setLargestProductKeySerial(value) { events.push(`set:${value}`); if (serialOptions.setError) throw new Error('serial write failed'); if (serialOptions.beforeSet) await serialOptions.beforeSet(value); largest = value; }
     async getProductSummary(id) {
@@ -47,7 +49,9 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     async listEnforcements() { return enforcements; }
     async getProductReadOnlyMemory(id) { return String(id) === '60' ? [...baseMemory, { kind: 'product', segments: [{ id: '999', name: 'Serial Number', size: '4', saot: true }] }] : []; }
     async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
-    async getEntitlementDetails() { return { entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate }; }
+    async getEntitlementDetails(id) {
+      return serialOptions.entitlementDetails?.[id] || { id, entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate };
+    }
     async getEntitlementProductKeys(id) { return [{ productKeyId: 'key-001', entitlementId: id }]; }
     async activateProductKey(key, c2v) {
       events.push(`activate:${key}`);
@@ -69,6 +73,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   const app = {
     get(route, ...handlers) {
       if (route === '/api/product-key-serial-number') serialHandler = handlers.at(-1);
+      if (route === '/api/product-key-serial-numbers') usedSerialsHandler = handlers.at(-1);
       if (route === '/api/entitlements/:id/product-keys') productKeysHandler = handlers.at(-1);
     },
     post(route, ...handlers) {
@@ -158,12 +163,22 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       await serialHandler({}, res);
       return res;
     },
+    async getUsedSerials() {
+      const res = {
+        statusCode: 200,
+        set(name, value) { this.headers = { [name]: value }; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await usedSerialsHandler({}, res);
+      return res;
+    },
     async submit(overrides = {}, update = false) {
       const req = { params: update ? { id: '123' } : undefined, body: {
         customerId: '5', productIds: ['6048'],
         description: '', ...(!update ? { refId1: 'ORDER' } : {}), ...overrides,
       } };
-      req.body.memoryValues = [...(req.body.memoryValues || []), { productId: '60', segmentId: '999', content: overrides.serialTestContent ?? serialOptions.serialContent ?? '30303242' }];
+      req.body.memoryValues = [...(req.body.memoryValues || []), { productId: '60', segmentId: '999', content: overrides.serialTestContent ?? serialOptions.serialContent ?? '31373731' }];
       const res = {
         statusCode: 200,
         status(code) { this.statusCode = code; return this; },
@@ -241,17 +256,54 @@ test('serial number endpoint returns the highest stored serial without caching',
   assert.equal(res.headers['Cache-Control'], 'no-store');
 });
 
-test('creating and updating entitlements does not change the recorded highest serial', async () => {
+test('used serial endpoint returns a flat list decoded from base entitlement memory', async () => {
+  const route = createRoute([], undefined, [], true, true, true, undefined, {
+    entitlements: [{ id: '100' }, { id: '101' }, { id: '102' }, { id: '103' }],
+    entitlementDetails: {
+      100: {
+        id: '100', refId1: 'ORDER-100',
+        products: [{ productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: '30303032' }] }],
+      },
+      101: {
+        id: '101', refId1: 'ORDER-101',
+        products: [{ productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: '30303033' }] }],
+      },
+      102: {
+        id: '102', refId1: 'ORDER-102',
+        products: [{ productId: '6048', memorySegments: [{ name: 'Serial Number', saot: true, text: '30303032' }] }],
+      },
+      103: {
+        id: '103', refId1: 'ORDER-103',
+        products: [{ productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: '0004' }] }],
+      },
+    },
+  });
+  const response = await route.getUsedSerials();
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['Cache-Control'], 'no-store');
+  assert.deepEqual(Array.from(response.body), [2, 3, 4]);
+});
+
+test('increments serial after creating a draft but not after updating or failing to create', async () => {
   const route = createRoute([{ id: '1' }]);
   const result = await route.submit();
   assert.equal(result.res.statusCode, 201);
-  assert.deepEqual(route.events, ['create']);
-  const edited = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { serialContent: '30303634' });
+  assert.equal(result.res.body.serialNumber, 43);
+  assert.equal(result.res.body.serialNumberUpdated, true);
+  assert.deepEqual(route.events, ['create', 'get', 'set:43']);
+  const edited = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { serialContent: '31373730' });
   assert.equal((await edited.submit()).res.statusCode, 201);
-  assert.deepEqual(edited.events, ['create']);
+  assert.deepEqual(edited.events, ['create', 'get', 'set:43']);
   const failed = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { createError: true });
   assert.equal((await failed.submit()).res.statusCode, 502);
   assert.deepEqual(failed.events, ['create']);
+  const counterFailure = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { setError: true });
+  const saved = await counterFailure.submit();
+  assert.equal(saved.res.statusCode, 201);
+  assert.equal(saved.res.body.saved, true);
+  assert.equal(saved.res.body.serialNumberUpdated, false);
+  assert.match(saved.res.body.serialNumberError, /serial write failed/);
+  assert.deepEqual(counterFailure.events, ['create', 'get', 'set:43']);
   const update = createRoute([{ id: '1' }]);
   await update.submit({}, true);
   assert.deepEqual(update.events, []);
@@ -261,6 +313,16 @@ test('rejects invalid encoded serial numbers before creation', async () => {
   const route = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, { serialContent: 'FFFFFFFF' });
   assert.equal((await route.submit()).res.statusCode, 400);
   assert.deepEqual(route.events, []);
+});
+
+test('rejects new draft serials below 6,000 but permits 6,000', async () => {
+  const tooSmall = await createRoute([{ id: '1' }]).submit({ serialTestContent: '30303546' });
+  assert.equal(tooSmall.res.statusCode, 400);
+  assert.match(tooSmall.res.body.error, /at least 6,000/);
+  assert.deepEqual(tooSmall.res.body.saved, undefined);
+
+  const minimum = await createRoute([{ id: '1' }]).submit({ serialTestContent: '31373730' });
+  assert.equal(minimum.res.statusCode, 201);
 });
 
 test('forwards order code on creation and preserves it when editing', async () => {

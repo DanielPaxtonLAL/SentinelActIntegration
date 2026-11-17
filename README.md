@@ -28,6 +28,22 @@ Activation errors include EMS's readable diagnostics when available.
 In entitlement verbose details, base product memory shows EMS memory access
 and ASCII-decoded values. Non-printable bytes are shown as `\xNN`.
 
+## Product key serial number
+
+The customer configured by `highest-product-key-serial-number-customer-id` in
+`entitlement-form-data.json` stores a serial counter in EMS Ref ID 1, which is
+incremented after a new draft is saved. The form independently scans serial
+numbers encoded in all existing base-product entitlements, selects the lowest
+unused value above 06000 (06001 or higher). Serial numbers below 06000 cannot
+be submitted. The form checks the input live against the used list. A
+duplicate serial is marked invalid and disables saving. Editing an existing
+draft does not change the counter.
+
+If the used-serial list cannot be loaded, saving remains disabled until the
+lookup succeeds. If EMS saves the draft but the counter cannot be updated, the
+draft is still saved; the entitlements page displays a warning with the update
+error.
+
 ## Run with Docker
 
 Copy `.env.example` to `.env` and set the EMS credentials and URLs for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.

@@ -44,11 +44,13 @@
         </div>
         <p v-if="!customersLoading && customers.length && !filteredCustomers.length" class="form-hint" role="status">No customers match your search.</p>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :invalid="serialTooLarge">
-          <span v-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
+        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :invalid="serialTooSmall || serialTooLarge || serialUsed">
+          <span v-if="serialTooSmall" id="serial-error" class="form-error" role="alert">Serial number must be at least 6,000.</span>
+          <span v-else-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
+          <span v-else-if="serialUsed" class="form-error" role="alert">This serial number is already claimed by another entitlement.</span>
         </serial-number-input>
-        <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
-        <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
+        <p v-if="!baseSerialSegment && productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
+        <p v-else-if="!baseSerialSegment" class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <p v-if="serialLoading" class="form-hint" role="status">Loading the serial number...</p>
         <div v-if="serialError">
           <p class="form-error" role="alert">{{ serialError }}</p>
@@ -136,7 +138,7 @@
         <p class="form-hint">Saving creates a draft Product Key entitlement with one key and one activation, starting today (UTC).</p>
         <div class="entitlement-form-actions">
           <button type="button" class="button--destructive" @click="cancel" :disabled="loading">Cancel</button>
-          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !form.customerId || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooLarge || (leaseSelected && leaseBounds.min > leaseBounds.max)">
+          <button type="submit" class="button--constructive" :disabled="loading || customersLoading || productsLoading || productError || serialLoading || serialError || !form.customerId || !customers.length || !hasAccessProduct || !productMemoryReady || serialTooSmall || serialTooLarge || serialUsed || (leaseSelected && leaseBounds.min > leaseBounds.max)">
             {{ loading ? 'Saving…' : 'Save draft entitlement' }}
           </button>
         </div>
@@ -149,6 +151,8 @@
   <script>
     const { createApp } = Vue;
     const DEFAULT_LEASE_LENGTH_YEARS = 1;
+    const FIRST_SERIAL_NUMBER = 6001;
+    const MAX_SERIAL_NUMBER = 65535;
 
     createApp({
       components: { SerialNumberInput },
@@ -167,6 +171,7 @@
           serialNumber: '',
           serialLoading: false,
           serialError: '',
+          usedSerialNumbers: [],
           baseProductId: '',
           productMemory: {},
           loading: false,
@@ -228,6 +233,12 @@
         },
         serialTooLarge() {
           return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) > this.serialMax;
+        },
+        serialTooSmall() {
+          return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) < 6000n;
+        },
+        serialUsed() {
+          return /^\d+$/.test(this.serialNumber) && this.usedSerialNumbers.includes(Number(this.serialNumber));
         },
         memoryProductIds() {
           return this.baseProductId ? [this.baseProductId, ...this.form.productIds] : [];
@@ -395,13 +406,22 @@
           this.serialLoading = true;
           this.serialError = '';
           try {
-            const response = await fetch('/api/product-key-serial-number', { cache: 'no-store' });
+            const response = await fetch('/api/product-key-serial-numbers', { cache: 'no-store' });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
-            if (!data || !Number.isInteger(data.largest) || data.largest < 0 || data.largest > 65535) {
-              throw new Error('The server returned an invalid serial number.');
+            if (!Array.isArray(data) || data.some((serial) =>
+              !Number.isInteger(serial) || serial < 0 || serial > MAX_SERIAL_NUMBER
+            )) {
+              throw new Error('The server returned an invalid used-serial list.');
             }
-            this.serialNumber = String(data.largest).padStart(5, '0');
+            this.usedSerialNumbers = [...new Set(data)];
+            const used = new Set(this.usedSerialNumbers);
+            let nextSerial = FIRST_SERIAL_NUMBER;
+            while (nextSerial <= MAX_SERIAL_NUMBER && used.has(nextSerial)) nextSerial++;
+            if (nextSerial > MAX_SERIAL_NUMBER) {
+              throw new Error('No unused serial numbers remain above 06000.');
+            }
+            this.serialNumber = String(nextSerial).padStart(5, '0');
           } catch (err) {
             this.serialError = 'Failed to load the serial number: ' + err.message;
           } finally {
@@ -493,7 +513,10 @@
             this.leaseExpiryDate = '';
             this.serialNumber = '';
             this.productMemory = {};
-            window.location.assign('/entitlements.html?created=1');
+            const serialWarning = data.serialNumberUpdated === false
+              ? '&serialWarning=' + encodeURIComponent(data.serialNumberError || 'Unknown serial counter update error')
+              : '';
+            window.location.assign('/entitlements.html?created=1' + serialWarning);
           } catch (err) {
             this.error = 'Failed to create entitlement: ' + err.message;
           } finally {

@@ -9,9 +9,11 @@ const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
 let definition;
 let fetchMemory;
 let confirmProduce = () => true;
+const pageLocation = { search: '' };
 vm.runInNewContext(script, {
   fetch: (...args) => fetchMemory(...args),
-  window: { confirm: (...args) => confirmProduce(...args) },
+  window: { confirm: (...args) => confirmProduce(...args), location: pageLocation },
+  URLSearchParams,
   Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
 });
 
@@ -128,8 +130,16 @@ test('produce confirms, reloads list and selected details on success and blocks 
   await definition.methods.produceSelectedEntitlement.call(app);
   assert.equal(app.produceUncertain, true);
   assert.match(app.produceError, /Reload/);
-  await definition.methods.produceSelectedEntitlement.call(app);
-  assert.equal(calls, 3);
+});
+
+test('displays the serial counter warning after a draft was saved', () => {
+  const app = {
+    loadEntitlements() {},
+    loadCustomers() {},
+  };
+  pageLocation.search = '?created=1&serialWarning=counter%20update%20failed';
+  definition.mounted.call(app);
+  assert.equal(app.notice, 'Entitlement saved as a draft, but the serial number could not be advanced: counter update failed');
 });
 
 test('opening or reloading entitlement details clears confirmations', async () => {

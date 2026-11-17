@@ -419,7 +419,7 @@ class EmsClient {
     return [...staticFiles, ...files.filter(Boolean)];
   }
 
-  async getEntitlementDetails(id) {
+  async getEntitlementDetails(id, { includeCustomer = true } = {}) {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({
       ignoreAttributes: false, attributeNamePrefix: '',
@@ -431,7 +431,7 @@ class EmsClient {
       throw new Error('EMS returned an invalid entitlement detail');
     }
 
-    const customers = await this.listCustomers();
+    const customers = includeCustomer ? await this.listCustomers() : [];
     const customer = customers.find((entry) =>
       String(entry.customerId ?? entry.id ?? '') === String(entitlement.customerId ?? '')
     );
@@ -459,7 +459,7 @@ class EmsClient {
             return {
               id: String(segment.id),
               name: segment.name,
-              saot: String(segment.saot) === 'true',
+              saot: ['true', '1'].includes(String(segment.saot).toLowerCase()),
               memoryTypes: asList(segment.memoryType).map((type) => String(type?.id ?? '')),
               size: segment.size,
               offset: segment.offset,

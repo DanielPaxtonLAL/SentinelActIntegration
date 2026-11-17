@@ -475,6 +475,7 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .serial-number-label { font-size: .9rem; font-weight: 600; }
 .entitlements-page .serial-number-digits { display: flex; flex-wrap: nowrap; gap: .35rem; overflow-x: auto; }
 .entitlements-page .entitlement-form .serial-number-digits input[type="text"] { flex: 0 0 2.5rem; width: 2.5rem; text-align: center; }
+.entitlements-page .serial-number-digits input[aria-invalid="true"] { border-color: var(--color-error); box-shadow: 0 0 0 1px var(--color-error); }
 .entitlements-page .form-hint, .entitlements-page .form-error { margin: 0; font-size: .9rem; }
 .entitlements-page .form-hint { color: var(--color-text-muted); }
 .entitlements-page .character-count { font-weight: 400; }

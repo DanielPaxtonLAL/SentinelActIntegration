@@ -3,7 +3,7 @@
 
     "base-product-id": "6047",
 
-    "_highest-product-key-serial-number-customer-id-comment": "This customer's Ref ID 1 contains the highest used product key serial number. Will be excluded from being able to have entitlements",
+    "_highest-product-key-serial-number-customer-id-comment": "This customer's Ref ID 1 is a serial counter incremented after a new draft is saved. The form selects serials from the actual entitlement memory values. The customer will be excluded from being able to have entitlements.",
     "highest-product-key-serial-number-customer-id": "1",
 
     "lease-expiry-range": {

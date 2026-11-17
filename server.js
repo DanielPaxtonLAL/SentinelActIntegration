@@ -114,6 +114,28 @@ async function withSession(fn) {
 const app = express();
 const publicDir = path.join(__dirname, 'public');
 const reloadClients = new Set();
+let serialNumberUpdateQueue = Promise.resolve();
+
+async function incrementProductKeySerial() {
+  let release;
+  const previousUpdate = serialNumberUpdateQueue;
+  serialNumberUpdateQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previousUpdate;
+
+  try {
+    const largest = await withSession(() => ems.getLargestProductKeySerial());
+    if (!Number.isInteger(largest) || largest < 0 || largest >= 65535) {
+      throw new Error('The serial number customer must contain a whole number below 65,535 before it can be incremented.');
+    }
+    const next = largest + 1;
+    await withSession(() => ems.setLargestProductKeySerial(next));
+    return next;
+  } finally {
+    release();
+  }
+}
 
 // SSE endpoint used by the browser to refresh static pages when HTML files change during development.
 app.get('/__dev/reload', (req, res) => {
@@ -151,6 +173,53 @@ app.get('/api/product-key-serial-number', async (req, res) => {
     const largest = await withSession(() => ems.getLargestProductKeySerial());
     res.json({ largest });
   } catch (err) {
+    console.error(err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+app.get('/api/product-key-serial-numbers', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const entitlements = await withSession(() => ems.listEntitlements());
+    const entitlementIds = entitlements.map((entitlement) =>
+      String(entitlement.id ?? entitlement.entitlementId ?? '')
+    );
+    if (entitlementIds.some((id) => !/^[1-9]\d*$/.test(id))) {
+      throw new Error('EMS returned an entitlement without a valid ID.');
+    }
+
+    const serialNumbers = new Set();
+    for (let index = 0; index < entitlementIds.length; index += 10) {
+      const batch = await Promise.all(entitlementIds.slice(index, index + 10).map((id) =>
+        withSession(() => ems.getEntitlementDetails(id, { includeCustomer: false }))
+      ));
+      for (const details of batch) {
+        for (const product of details.products || []) {
+          if (String(product.productId) !== String(formData.baseProductId)) continue;
+          for (const segment of product.memorySegments || []) {
+            if (!segment.saot || typeof segment.name !== 'string' ||
+                segment.name.trim().toLowerCase() !== 'serial number') continue;
+            const text = String(segment.text ?? '').trim();
+            if (!text) continue;
+            if (!/^(?:[0-9a-f]{2})+$/i.test(text)) {
+              throw new Error(`EMS returned an invalid Serial Number value in entitlement ${details.id}.`);
+            }
+            const decoded = Buffer.from(text, 'hex').toString('latin1');
+            const serialValue = /^[0-9a-f]+$/i.test(decoded)
+              ? BigInt(`0x${decoded}`)
+              : BigInt(`0x${text}`);
+            if (serialValue <= 65535n) serialNumbers.add(Number(serialValue));
+          }
+        }
+      }
+    }
+    res.json([...serialNumbers].sort((left, right) => left - right));
+  } catch (err) {
+    if (err.status === 401) {
+      ems.authenticated = false;
+      ems.cookies.clear();
+    }
     console.error(err.message);
     res.status(502).json({ error: err.message });
   }
@@ -465,6 +534,9 @@ const saveEntitlement = async (req, res) => {
       if (!/^[0-9a-f]{4}$/i.test(digits)) {
         return res.status(400).json({ error: 'The serial number segment must contain four ASCII hexadecimal digits.' });
       }
+      if (BigInt(`0x${digits}`) < 6000n) {
+        return res.status(400).json({ error: 'The serial number must be at least 6,000.' });
+      }
     }
 
     const today = new Date();
@@ -517,7 +589,18 @@ const saveEntitlement = async (req, res) => {
       const result = await ems.updateEntitlement(existingId, entitlementData);
       return res.status(200).json(result);
     }
-    return res.status(201).json(await ems.createEntitlement(entitlementData));
+    const result = await ems.createEntitlement(entitlementData);
+    try {
+      const serialNumber = await incrementProductKeySerial();
+      return res.status(201).json({ ...result, serialNumber, serialNumberUpdated: true });
+    } catch (err) {
+      console.error(`Draft saved, but the serial number customer could not be updated: ${err.message}`);
+      return res.status(201).json({
+        ...result,
+        serialNumberUpdated: false,
+        serialNumberError: err.message,
+      });
+    }
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;

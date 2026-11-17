@@ -727,8 +727,13 @@
         },
       },
       mounted() {
-        if (new URLSearchParams(window.location.search).has('created')) this.notice = 'Entitlement saved as a draft.';
-        else if (new URLSearchParams(window.location.search).has('updated')) this.notice = 'Entitlement updated.';
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('created')) {
+          const serialWarning = params.get('serialWarning');
+          this.notice = serialWarning
+            ? 'Entitlement saved as a draft, but the serial number could not be advanced: ' + serialWarning
+            : 'Entitlement saved as a draft.';
+        } else if (params.has('updated')) this.notice = 'Entitlement updated.';
         this.loadEntitlements();
         this.loadCustomers();
       },

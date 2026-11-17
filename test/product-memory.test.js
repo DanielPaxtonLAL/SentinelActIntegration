@@ -50,9 +50,8 @@ test('uses entitlement item memory values for product memory segments', async ()
         <memorySegment><id>92</id><name>Unspecified</name><size>1</size><text>00</text><saot>false</saot></memorySegment>
       </product></itemProduct>
     </entitlementItem></entitlement>`,
-    '/customer.xml': '<listResponse></listResponse>',
   });
-  const details = await client.getEntitlementDetails('5057');
+  const details = await client.getEntitlementDetails('5057', { includeCustomer: false });
   assert.equal(details.products[0].memorySegments[0].text, '35383544');
   assert.deepEqual(details.products[0].memorySegments.map((segment) => segment.memoryTypes), [['2'], ['1'], []]);
 });
@@ -190,6 +189,7 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html', clock) {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
   const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
   let definition;
+  const location = { target: '', assign(url) { this.target = url; }, search: '' };
   vm.runInNewContext(script, {
     fetch,
     URLSearchParams,
@@ -198,11 +198,12 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html', clock) {
     Date: clock ? class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }
     } : Date,
-    window: { location: { assign() {}, search: '' } },
+    window: { location },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const app = { ...definition.methods };
   Object.assign(app, definition.data.call(app));
+  app.location = location;
   app.leaseExpiryRange = { minMonths: 6, maxMonths: 24 };
   Object.defineProperty(app, 'memoryProductIds', { get: () => definition.computed.memoryProductIds.call(app) });
   if (definition.computed.filteredCustomers) {
@@ -218,6 +219,10 @@ function entitlementApp(fetch, page = 'create-entitlement-form.html', clock) {
   Object.defineProperty(app, 'baseSerialSegment', { get: () => definition.computed.baseSerialSegment.call(app) });
   Object.defineProperty(app, 'serialMax', { get: () => definition.computed.serialMax.call(app) });
   Object.defineProperty(app, 'serialTooLarge', { get: () => definition.computed.serialTooLarge.call(app) });
+  if (definition.computed.serialTooSmall) {
+    Object.defineProperty(app, 'serialTooSmall', { get: () => definition.computed.serialTooSmall.call(app) });
+  }
+  Object.defineProperty(app, 'serialUsed', { get: () => definition.computed.serialUsed.call(app) });
   Object.defineProperty(app, 'productMemoryReady', { get: () => definition.computed.productMemoryReady.call(app) });
   return app;
 }
@@ -268,37 +273,46 @@ test('customer search toggle focuses the input and clears the filter when closed
   assert.match(css, /\.customer-search-toggle\[aria-expanded="true"\]/);
 });
 
-test('creation form loads the recorded serial and exposes failures for retry', async () => {
+test('creation form selects the lowest available serial above 06000', async () => {
   let resolve;
   const app = entitlementApp(() => new Promise((done) => { resolve = done; }));
   const pending = app.loadSerialNumber();
   assert.equal(app.serialLoading, true);
-  resolve({ ok: true, json: async () => ({ largest: 1234 }) });
+  resolve({ ok: true, json: async () => [6001, 6002, 6004] });
   await pending;
-  assert.equal(app.serialNumber, '01234');
+  assert.equal(app.serialNumber, '06003');
+  assert.deepEqual(Array.from(app.usedSerialNumbers), [6001, 6002, 6004]);
   assert.equal(app.serialLoading, false);
   assert.equal(app.serialError, '');
 
-  const first = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: 1 }) }));
+  app.baseProductId = '60';
+  app.productMemory['60'] = { files: [serialFile()] };
+  app.serialNumber = '06002';
+  assert.equal(app.serialUsed, true);
+  app.serialNumber = '06003';
+  assert.equal(app.serialUsed, false);
+
+  const first = entitlementApp(async () => ({ ok: true, json: async () => ([]) }));
   await first.loadSerialNumber();
-  assert.equal(first.serialNumber, '00001');
-  assert.equal(first.encodeSerialNumber(first.serialNumber, '4'), '30303031');
+  assert.equal(first.serialNumber, '06001');
+  assert.equal(first.encodeSerialNumber(first.serialNumber, '4'), '31373731');
 
   const failed = entitlementApp(async () => ({ ok: false, json: async () => ({ error: 'EMS unavailable' }) }));
   await failed.loadSerialNumber();
   assert.match(failed.serialError, /EMS unavailable/);
   assert.equal(failed.serialNumber, '');
-  const bad = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: '42' }) }));
+  const bad = entitlementApp(async () => ({ ok: true, json: async () => ['42'] }));
   await bad.loadSerialNumber();
-  assert.match(bad.serialError, /invalid serial number/);
-  const maximum = entitlementApp(async () => ({ ok: true, json: async () => ({ largest: 65535 }) }));
-  maximum.baseProductId = '60';
-  maximum.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
-  await maximum.loadSerialNumber();
-  assert.equal(maximum.serialNumber, '65535');
-  assert.equal(maximum.serialTooLarge, false);
+  assert.match(bad.serialError, /invalid used-serial list/);
+  const noGap = entitlementApp(async () => ({
+    ok: true, json: async () => Array.from({ length: 65535 - 6001 + 1 }, (_value, index) => index + 6001),
+  }));
+  await noGap.loadSerialNumber();
+  assert.match(noGap.serialError, /No unused serial numbers remain/);
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /productError \|\| serialLoading \|\| serialError \|\|/);
+  assert.match(html, /serialTooLarge \|\| serialUsed/);
+  assert.match(html, /!productMemoryReady \|\| serialTooSmall \|\| serialTooLarge \|\| serialUsed \|\|/);
   assert.match(html, /@click="loadSerialNumber"/);
 });
 
@@ -605,9 +619,19 @@ test('serial input flags out-of-range values on both forms', () => {
       app.serialNumber = value;
       assert.equal(app.serialTooLarge, tooLarge);
     }
+    if (page === 'create-entitlement-form.html') {
+      for (const [value, tooSmall] of [['05999', true], ['06000', false], ['06001', false], ['', false]]) {
+        app.serialNumber = value;
+        assert.equal(app.serialTooSmall, tooSmall);
+      }
+    }
     const html = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
-    assert.match(html, /v-if="serialTooLarge" id="serial-error" class="form-error" role="alert"/);
-    assert.match(html, /!productMemoryReady \|\| serialTooLarge \|\|/);
+    assert.match(html, /v-(?:if|else-if)="serialTooLarge" id="serial-error" class="form-error" role="alert"/);
+    if (page === 'create-entitlement-form.html') {
+      assert.match(html, /!productMemoryReady \|\| serialTooSmall \|\| serialTooLarge \|\|/);
+    } else {
+      assert.match(html, /!productMemoryReady \|\| serialTooLarge \|\|/);
+    }
     assert.match(html, /<serial-number-input v-if="baseSerialSegment" v-model="serialNumber"/);
     assert.match(html, /src="\/serial-number-input\.js"/);
   }
@@ -722,8 +746,12 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   let submitted;
   const app = entitlementApp(async (_url, options) => {
     submitted = JSON.parse(options.body);
-    return { ok: true, json: async () => ({}) };
+    return {
+      ok: true,
+      json: async () => ({ serialNumberUpdated: false, serialNumberError: 'counter update failed & needs review' }),
+    };
   });
+
   app.loadEntitlements = async () => {};
   app.form.productIds = ['12'];
   app.baseProductId = '60';
@@ -742,6 +770,8 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   app.form.description = ' Description ';
   app.utcToday = () => '2026-11-12';
   await app.createEntitlement();
+  assert.equal(app.location.target,
+    '/entitlements.html?created=1&serialWarning=counter%20update%20failed%20%26%20needs%20review');
   assert.equal(submitted.refId1, 'ORDER-123');
   assert.equal(submitted.description, 'Description');
   assert.equal(Object.hasOwn(submitted, 'enforcementId'), false);
