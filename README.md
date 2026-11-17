@@ -28,6 +28,20 @@ Activation errors include EMS's readable diagnostics when available.
 In entitlement verbose details, base product memory shows EMS memory access
 and ASCII-decoded values. Non-printable bytes are shown as `\xNN`.
 
+## List EMS product IDs
+
+Use the PowerShell script to list product names and internal IDs for
+`entitlement-form-data.json`. Pass the EMS server origin (without `/ems`):
+
+```powershell
+.\config-helper-scripts\get-ems-products.ps1 https://your-ems-host:8080
+```
+
+The script uses `EMS_USER` and `EMS_PASS` from the process environment or the
+local `.env` file. If either is missing, it prompts for EMS credentials.
+`EMS_API_VERSION` and `EMS_VENDOR_ID` are also read from `.env` when set; they
+default to `v90` and `2`.
+
 ## Product key serial number
 
 The customer configured by `highest-product-key-serial-number-customer-id` in
