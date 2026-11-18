@@ -23,6 +23,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let activateHandler;
   let produceHandler;
   let reopenHandler;
+  let deleteHandler;
   let saved;
   const events = [];
   let largest = serialOptions.largest ?? 42;
@@ -69,6 +70,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       if (serialOptions.reopenError) throw serialOptions.reopenError;
       return { reopened: true, entId: id, state: 'DRAFT' };
     }
+    async deleteEntitlement(id) { events.push(`delete:${id}`); return { deleted: true, entId: id }; }
   }
   const app = {
     get(route, ...handlers) {
@@ -83,7 +85,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       if (route === '/api/entitlements/:id/reopen') reopenHandler = handlers.at(-1);
     },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
-    delete() {},
+    delete(route, ...handlers) { if (route === '/api/entitlements/:id') deleteHandler = handlers.at(-1); },
     use() {},
     listen() {},
   };
@@ -151,6 +153,15 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         json(data) { this.body = data; return this; },
       };
       await reopenHandler({ params: { id } }, res);
+      return res;
+    },
+    async delete(id) {
+      const res = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await deleteHandler({ params: { id } }, res);
       return res;
     },
     async getSerial() {
@@ -247,6 +258,20 @@ test('reopen route validates IDs and reports uncertain outcomes', async () => {
   const response = await failed.reopen('123');
   assert.equal(response.statusCode, 502);
   assert.equal(response.body.outcomeUnknown, true);
+});
+
+test('delete route only deletes draft entitlements', async () => {
+  const draft = createRoute([]);
+  assert.equal((await draft.delete('123')).body.deleted, true);
+  assert.deepEqual(draft.events, ['delete:123']);
+
+  const produced = createRoute([], undefined, [], true, true, true, undefined, {
+    entitlementDetails: { 123: { entState: 'PRODUCT_KEY_GENERATED' } },
+  });
+  const response = await produced.delete('123');
+  assert.equal(response.statusCode, 400);
+  assert.match(response.body.error, /Only draft entitlements can be deleted/);
+  assert.deepEqual(produced.events, []);
 });
 
 test('serial number endpoint returns the highest stored serial without caching', async () => {

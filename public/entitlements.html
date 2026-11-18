@@ -165,14 +165,14 @@
             </details>
             <details class="detail-collapsible danger-zone">
               <summary>DANGER ZONE</summary>
-              <p v-if="canReopen" class="form-hint">Reopening returns this entitlement to draft state.</p>
+              <p v-if="canReopen" class="form-hint">Reopening returns this entitlement to draft state, where it can be deleted.</p>
               <button v-if="canReopen" type="button" class="button--destructive"
                 :disabled="reopening || deleting || producing || activating || loading || reopenUncertain" @click="reopenSelectedEntitlement">
                 {{ reopening ? 'Reopening…' : 'Reopen entitlement' }}
               </button>
               <p v-if="reopenError" class="form-error" role="alert">{{ reopenError }}</p>
               <p class="form-hint">Deleting an entitlement cannot be undone.</p>
-              <button type="button" class="button--destructive" :disabled="deleting || producing || reopening || activating" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
+              <button type="button" class="button--destructive" :disabled="!canDelete || deleting || producing || reopening || activating" @click="deleteSelectedEntitlement">{{ deleting ? 'Deleting…' : 'Delete entitlement' }}</button>
             </details>
           </template>
         </template>
@@ -240,6 +240,9 @@
           return ['PRODUCT_KEY_GENERATED', 'QUEUED'].includes(
             String(this.selectedEntitlement?.entState ?? '').toUpperCase()
           );
+        },
+        canDelete() {
+          return String(this.selectedEntitlement?.entState || this.selectedEntitlement?.state || '').toUpperCase() === 'DRAFT';
         },
         showDetailConfirmations() {
           const state = String(this.selectedEntitlement?.entState || this.selectedEntitlement?.state || '').toUpperCase();
@@ -489,7 +492,7 @@
         },
         async deleteSelectedEntitlement() {
           const entitlement = this.selectedEntitlement;
-          if (!entitlement || this.deleting || this.activating) return;
+          if (!entitlement || !this.canDelete || this.deleting || this.activating) return;
           const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
           if (!window.confirm('Delete entitlement ' + entitlement.id + ' for ' + name + '? This cannot be undone.')) return;
           this.deleting = true;
@@ -513,7 +516,7 @@
           if (!entitlement || !this.canReopen || this.reopening || this.deleting ||
               this.producing || this.activating || this.loading || this.reopenUncertain) return;
           const name = this.displayValue(entitlement.customerName || entitlement.customer || entitlement.customerId);
-          if (!window.confirm('Reopen entitlement ' + entitlement.id + ' for ' + name + '? This changes its state back to DRAFT.')) return;
+          if (!window.confirm('Reopen entitlement ' + entitlement.id + ' for ' + name + '? This changes its state back to DRAFT. The product key and its text file will become invalid.')) return;
           this.reopening = true;
           this.reopenError = '';
           let outcomeUnknown = true;

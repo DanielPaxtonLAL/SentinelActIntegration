@@ -41,12 +41,32 @@ test('hides confirmation checkboxes for produced entitlement states', () => {
   assert.equal(cells.length, 12);
 });
 
+test('deletion is available only for draft entitlements', async () => {
+  const app = {
+    selectedEntitlement: { id: '123', entState: 'DRAFT' },
+    deleting: false,
+    activating: false,
+    displayValue: definition.methods.displayValue,
+  };
+  Object.defineProperty(app, 'canDelete', { get: () => definition.computed.canDelete.call(app) });
+  assert.equal(definition.computed.canDelete.call(app), true);
+  app.selectedEntitlement = { id: '123', state: 'PRODUCT_KEY_GENERATED' };
+  assert.equal(definition.computed.canDelete.call(app), false);
+  assert.match(html, /:disabled="!canDelete \|\| deleting \|\| producing \|\| reopening \|\| activating"/);
+
+  let calls = 0;
+  fetchMemory = async () => { calls++; };
+  await definition.methods.deleteSelectedEntitlement.call(app);
+  assert.equal(calls, 0);
+});
+
 test('reopen is limited to eligible states, confirmed, and blocks uncertain retries', async () => {
   for (const state of ['PRODUCT_KEY_GENERATED', 'QUEUED']) {
     assert.equal(definition.computed.canReopen.call({ selectedEntitlement: { entState: state } }), true);
   }
   assert.equal(definition.computed.canReopen.call({ selectedEntitlement: { entState: 'DRAFT' } }), false);
   assert.match(html, /<button v-if="canReopen"[^>]*@click="reopenSelectedEntitlement">[\s\S]*?Reopen entitlement/);
+  assert.match(html, /v-if="canReopen" class="form-hint">Reopening returns this entitlement to draft state, where it can be deleted\./);
 
   const app = {
     selectedEntitlement: { id: '123', entState: 'PRODUCT_KEY_GENERATED', customerName: 'Acme' },
@@ -57,6 +77,7 @@ test('reopen is limited to eligible states, confirmed, and blocks uncertain retr
     async loadEntitlements() {},
   };
   let calls = 0;
+  const confirmations = [];
   fetchMemory = async (url, options) => {
     calls++;
     assert.equal(url, '/api/entitlements/123/reopen');
@@ -66,8 +87,9 @@ test('reopen is limited to eligible states, confirmed, and blocks uncertain retr
   confirmProduce = () => false;
   await definition.methods.reopenSelectedEntitlement.call(app);
   assert.equal(calls, 0);
-  confirmProduce = () => true;
+  confirmProduce = (message) => { confirmations.push(message); return true; };
   await definition.methods.reopenSelectedEntitlement.call(app);
+  assert.match(confirmations[0], /product key and its text file will become invalid/i);
   assert.equal(calls, 1);
   assert.equal(app.selectedEntitlement.entState, 'DRAFT');
   assert.equal(app.productKeys.length, 0);

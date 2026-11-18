@@ -646,6 +646,10 @@ app.delete('/api/entitlements/:id', async (req, res) => {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
   }
   try {
+    const entitlement = await withSession(() => ems.getEntitlementDetails(req.params.id));
+    if (String(entitlement.entState ?? '').toUpperCase() !== 'DRAFT') {
+      return res.status(400).json({ error: 'Only draft entitlements can be deleted.' });
+    }
     res.json(await withSession(() => ems.deleteEntitlement(req.params.id)));
   } catch (err) {
     if (err.status === 401) {
