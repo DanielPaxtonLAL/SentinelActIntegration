@@ -373,8 +373,16 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
   }
 
   try {
-    // Keep the pre-flight check permissive: if the payload is obviously nonsense, reject it here,
-    // but otherwise let EMS decide whether the key and C2V are valid for this entitlement.
+    const entitlementKeyId = productKeyId.trim();
+    const entitlementKeys = await withSession(() =>
+      ems.getEntitlementProductKeys(req.params.id)
+    );
+    if (!entitlementKeys.some((key) => String(key.productKeyId) === entitlementKeyId)) {
+      return res.status(400).json({
+        error: 'The product key does not belong to this entitlement.',
+        outcomeUnknown: false,
+      });
+    }
     res.json(await withSession(() => ems.activateProductKey(productKeyId.trim(), c2v.trim())));
   } catch (err) {
     console.error(err.message);

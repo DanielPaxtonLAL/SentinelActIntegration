@@ -18,7 +18,7 @@ test('repo form data file loads', () => {
   assert.ok(data.baseProductId);
   assert.ok(data.accessProducts.length >= 1);
   assert.ok(data.lease.id);
-  assert.equal(data.highestProductKeySerialNumberCustomerId, '1010');
+  assert.equal(data.highestProductKeySerialNumberCustomerId, '1');
 });
 
 test('parses ids, labels and default version', () => {

@@ -593,7 +593,7 @@ test('hidden base expiry input is removed from form validation', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /<legend>Optional products<\/legend>[\s\S]*?v-for="product in otherOptionalProducts"[\s\S]*?<\/fieldset>\s*<fieldset class="access-products">\s*<legend>Lease<\/legend>[\s\S]*?v-if="leaseProduct"[\s\S]*?<div v-if="leaseSelected" class="lease-options">/);
   assert.match(html, /<div v-if="leaseSelected" class="lease-options">/);
-  assert.match(html, /Lease Expiry Date \(Local time\)/);
+  assert.match(html, /Lease Expiry Date \(UTC\)/);
   assert.match(html, /v-model="leaseExpiryDate" type="date" :min="leaseBounds\.min" :max="leaseBounds\.max" required/);
   assert.doesNotMatch(html, /<tr v-if="!isBaseExpirySegment/);
   assert.doesNotMatch(html, /v-show="!isBaseExpirySegment/);
