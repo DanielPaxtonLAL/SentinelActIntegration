@@ -428,6 +428,29 @@ test('lease requires the base expiry value and non-lease uses the EMS default', 
   assert.match(noAccess.res.body.error, /Standalone, Link/);
 });
 
+test('updating a non-lease draft without saved expiry memory uses the EMS default', async () => {
+  const defaultExpiry = 'A1B2C3D4';
+  for (const memorySegments of [[], [{ id: '90', text: '' }]]) {
+    const route = createRoute([{ id: '1' }], new Date(2026, 10, 10, 12), [{
+      kind: 'product',
+      segments: [{ id: '90', size: '4', name: 'Expiry Date', content: defaultExpiry, saot: true }],
+    }], true, true, true, undefined, {
+      entitlementDetails: {
+        123: {
+          id: '123',
+          entState: 'DRAFT',
+          eid: 'test-eid',
+          startDate: '2026-11-10',
+          products: memorySegments.length ? [{ productId: '60', memorySegments }] : [],
+        },
+      },
+    });
+    const result = await route.submit({}, true);
+    assert.equal(result.res.statusCode, 200);
+    assert.equal(result.saved.memorySegments.find((segment) => segment.id === '90').content, defaultExpiry);
+  }
+});
+
 test('rejects lease expiry dates outside the configured inclusive range', async () => {
   const memory = [{ kind: 'product', segments: [{ id: '90', size: '4', name: 'Expiry Date', saot: true }] }];
   const encode = (year, month, day) => {

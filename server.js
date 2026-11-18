@@ -509,8 +509,8 @@ const saveEntitlement = async (req, res) => {
       const hadLease = existing?.products?.some((product) => String(product.productId) === formData.lease.id);
       const previousExpiry = existing?.products?.find((product) => String(product.productId) === baseProductId)
         ?.memorySegments?.find((segment) => String(segment.id) === String(expiry.id))?.text;
-      const expiryContent = existing && !hadLease ? previousExpiry : expiry.content;
-      if (existing && !hadLease && expiryContent === undefined) {
+      const expiryContent = existing && !hadLease ? previousExpiry || expiry.content : expiry.content;
+      if (expiryContent === undefined) {
         return res.status(400).json({ error: 'Cannot determine the existing expiry memory value; edit this draft in EMS.' });
       }
       resolvedMemoryValues = memoryValues.filter((value) =>
