@@ -10,9 +10,15 @@ let definition;
 let fetchMemory;
 let confirmProduce = () => true;
 const pageLocation = { search: '' };
+const pageWindow = {
+  confirm: (...args) => confirmProduce(...args),
+  location: pageLocation,
+  setTimeout,
+  clearTimeout,
+};
 vm.runInNewContext(script, {
   fetch: (...args) => fetchMemory(...args),
-  window: { confirm: (...args) => confirmProduce(...args), location: pageLocation },
+  window: pageWindow,
   URLSearchParams,
   Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
 });
@@ -28,17 +34,47 @@ test('produce eligibility requires a draft and only Product Key line items', () 
   assert.equal(definition.computed.canProduce.call(app), false);
 });
 
-test('hides confirmation checkboxes for produced entitlement states', () => {
-  const app = { selectedEntitlement: { entState: 'DRAFT' } };
-  assert.equal(definition.computed.showDetailConfirmations.call(app), true);
-  for (const state of ['PRODUCT_KEY_PRODUCED', 'PRODUCT_KEY_GENERATED', 'PRODUCED']) {
-    app.selectedEntitlement.entState = state;
-    assert.equal(definition.computed.showDetailConfirmations.call(app), false);
+test('uses one confirmation button instead of per-field checkboxes', () => {
+  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div class="detail-footer"/)[1];
+  assert.doesNotMatch(details, /<input type="checkbox"/);
+  assert.match(html, /<button type="button"[^>]*:aria-pressed="detailsConfirmed" @click="confirmDetailsReviewed">I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
+});
+
+test('review confirmation expires after five seconds and can be reset early', () => {
+  const originalSetTimeout = pageWindow.setTimeout;
+  const originalClearTimeout = pageWindow.clearTimeout;
+  let timeoutCallback;
+  let timeoutDelay;
+  let clearedTimeout;
+  pageWindow.setTimeout = (callback, delay) => {
+    timeoutCallback = callback;
+    timeoutDelay = delay;
+    return 42;
+  };
+  pageWindow.clearTimeout = (timeout) => { clearedTimeout = timeout; };
+  try {
+    const app = {
+      canProduce: true,
+      detailsConfirmed: false,
+      detailsConfirmationTimeout: null,
+      detailLoading: false,
+      detailError: '',
+    };
+    definition.methods.confirmDetailsReviewed.call(app);
+    assert.equal(app.detailsConfirmed, true);
+    assert.equal(timeoutDelay, 5000);
+    timeoutCallback();
+    assert.equal(app.detailsConfirmed, false);
+    assert.equal(app.detailsConfirmationTimeout, null);
+
+    definition.methods.confirmDetailsReviewed.call(app);
+    definition.methods.clearDetailsConfirmation.call(app);
+    assert.equal(clearedTimeout, 42);
+    assert.equal(app.detailsConfirmed, false);
+  } finally {
+    pageWindow.setTimeout = originalSetTimeout;
+    pageWindow.clearTimeout = originalClearTimeout;
   }
-  app.selectedEntitlement = { state: 'PRODUCT_KEY_GENERATED' };
-  assert.equal(definition.computed.showDetailConfirmations.call(app), false);
-  const cells = [...html.matchAll(/<div v-if="showDetailConfirmations" class="detail-check" role="cell"><input type="checkbox"/g)];
-  assert.equal(cells.length, 12);
 });
 
 test('deletion is available only for draft entitlements', async () => {
@@ -74,6 +110,7 @@ test('reopen is limited to eligible states, confirmed, and blocks uncertain retr
     productKeys: [{ productKeyId: 'key-001' }], notice: '',
     canReopen: true,
     displayValue: definition.methods.displayValue,
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
     async loadEntitlements() {},
   };
   let calls = 0;
@@ -108,11 +145,11 @@ test('reopen is limited to eligible states, confirmed, and blocks uncertain retr
 });
 
 test('produce confirms, reloads list and selected details on success and blocks uncertain retries', async () => {
-  const keys = [...html.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
   const app = {
     selectedEntitlement: { id: '123', entState: 'DRAFT', lineItemTypes: ['Product_Key'] },
-    confirmedDetails: [],
+    detailsConfirmed: false,
     producing: false, deleting: false, detailLoading: false, detailError: '', produceUncertain: false,
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
     loadEntitlements: definition.methods.loadEntitlements,
     openEntitlementDetails: async (entitlement) => {
       assert.equal(app.producing, false);
@@ -120,7 +157,6 @@ test('produce confirms, reloads list and selected details on success and blocks 
     },
   };
   Object.defineProperty(app, 'canProduce', { get: () => definition.computed.canProduce.call(app) });
-  Object.defineProperty(app, 'allDetailsConfirmed', { get: () => definition.computed.allDetailsConfirmed.call(app) });
   let calls = 0;
   fetchMemory = async (url, options) => {
     calls++;
@@ -134,11 +170,7 @@ test('produce confirms, reloads list and selected details on success and blocks 
   confirmProduce = () => true;
   await definition.methods.produceSelectedEntitlement.call(app);
   assert.equal(calls, 0);
-  app.confirmedDetails = keys.slice(0, -1);
-  await definition.methods.produceSelectedEntitlement.call(app);
-  assert.equal(calls, 0);
-  app.confirmedDetails = keys;
-  assert.equal(app.allDetailsConfirmed, true);
+  app.detailsConfirmed = true;
   confirmProduce = () => false;
   await definition.methods.produceSelectedEntitlement.call(app);
   assert.equal(calls, 0);
@@ -148,6 +180,7 @@ test('produce confirms, reloads list and selected details on success and blocks 
   assert.equal(app.selectedEntitlement.entState, 'PRODUCT_KEY_GENERATED');
   assert.equal(app.entitlements[0].state, 'PRODUCT_KEY_GENERATED');
   app.selectedEntitlement = { id: '123', entState: 'DRAFT', lineItemTypes: ['Product_Key'] };
+  app.detailsConfirmed = true;
   fetchMemory = async () => { calls++; throw new Error('network error'); };
   await definition.methods.produceSelectedEntitlement.call(app);
   assert.equal(app.produceUncertain, true);
@@ -164,17 +197,18 @@ test('displays the serial counter warning after a draft was saved', () => {
   assert.equal(app.notice, 'Entitlement saved as a draft, but the serial number could not be advanced: counter update failed');
 });
 
-test('opening or reloading entitlement details clears confirmations', async () => {
+test('opening or reloading entitlement details clears the review confirmation', async () => {
   const app = {
-    producing: false, detailRequest: 0, confirmedDetails: ['customer'],
+    producing: false, detailRequest: 0, detailsConfirmed: true,
     customers: [], loadVersionMemory: async () => undefined,
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
   };
   fetchMemory = async () => ({ ok: true, json: async () => ({ products: [] }) });
   await definition.methods.openEntitlementDetails.call(app, { id: '1' });
-  assert.equal(app.confirmedDetails.length, 0);
-  app.confirmedDetails = ['customer'];
+  assert.equal(app.detailsConfirmed, false);
+  app.detailsConfirmed = true;
   await definition.methods.openEntitlementDetails.call(app, { id: '2' });
-  assert.equal(app.confirmedDetails.length, 0);
+  assert.equal(app.detailsConfirmed, false);
 });
 
 test('loads product key details and ignores responses for a previous selection', async () => {
@@ -206,7 +240,8 @@ test('loads product key details and ignores responses for a previous selection',
 test('opening a generated entitlement loads its product keys', async () => {
   assert.match(html, /<details v-if="isProductKeyGenerated" class="detail-collapsible product-key-details">\s*<summary>Product Key<\/summary>[\s\S]*?<\/details>/);
   const app = {
-    producing: false, detailRequest: 0, customers: [], confirmedDetails: [],
+    producing: false, detailRequest: 0, customers: [], detailsConfirmed: true,
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
     loadVersionMemory: async () => undefined,
     loadProductKeys: definition.methods.loadProductKeys,
   };
@@ -358,18 +393,8 @@ test('shows customer, serial number, and expiry date in order in entitlement det
   assert.match(html, /<th>Irricad Order Code \(Ref ID 1\)<\/th>/);
   const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div class="detail-footer"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
-  const checkboxes = details.match(/<input type="checkbox"/g) || [];
-  assert.equal(checkboxes.length, labels.length);
-  const keys = [...details.matchAll(/v-model="confirmedDetails" value="([^"]+)"/g)].map((match) => match[1]);
-  assert.equal(keys.length, checkboxes.length);
-  assert.equal(new Set(keys).size, checkboxes.length);
-  const appChecks = { confirmedDetails: keys };
-  assert.equal(definition.computed.allDetailsConfirmed.call(appChecks), true);
-  for (const key of keys) {
-    appChecks.confirmedDetails = keys.filter((item) => item !== key);
-    assert.equal(definition.computed.allDetailsConfirmed.call(appChecks), false);
-  }
-  assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">[\s\S]*?<\/p>\s*<button v-if="canProduce"[^>]*:disabled="!allDetailsConfirmed/);
+  assert.doesNotMatch(details, /<input type="checkbox"/);
+  assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">[\s\S]*?<\/p>\s*<div v-if="canProduce" class="detail-actions">\s*<button type="button"[^>]*>I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
   assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Irricad Order Code (Ref ID 1)', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
   assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div><div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
   const app = { selectedEntitlement: {
