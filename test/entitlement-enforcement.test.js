@@ -213,7 +213,16 @@ test('product key details route validates entitlement ID and prevents caching', 
 });
 
 test('activation validates the entitlement and key and does not retry uncertain outcomes', async () => {
-  const route = createRoute([]);
+  const activationEntitlement = {
+    entitlementDetails: {
+      123: {
+        id: '123',
+        entState: 'PRODUCT_KEY_GENERATED',
+        entitlementItem: { lineItemType: 'Product_Key', productKeyId: 'key-001' },
+      },
+    },
+  };
+  const route = createRoute([], undefined, [], true, true, true, undefined, activationEntitlement);
   const body = { productKeyId: 'key-001', c2v: '<hasp_info/>' };
   assert.equal((await route.activate('0', body)).statusCode, 400);
   assert.equal((await route.activate('123', { ...body, productKeyId: 'other' })).statusCode, 400);
@@ -225,7 +234,10 @@ test('activation validates the entitlement and key and does not retry uncertain 
   assert.deepEqual(route.events, ['activate:key-001']);
 
   const error = Object.assign(new Error('outcome unknown'), { outcomeUnknown: true, status: 401 });
-  const failed = createRoute([], undefined, [], true, true, true, undefined, { activateError: error });
+  const failed = createRoute([], undefined, [], true, true, true, undefined, {
+    ...activationEntitlement,
+    activateError: error,
+  });
   const response = await failed.activate('123', body);
   assert.equal(response.statusCode, 502);
   assert.equal(response.body.error, 'outcome unknown');

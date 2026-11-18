@@ -374,10 +374,24 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
 
   try {
     const entitlementKeyId = productKeyId.trim();
-    const entitlementKeys = await withSession(() =>
-      ems.getEntitlementProductKeys(req.params.id)
+    const entitlement = await withSession(() =>
+      ems.getEntitlementDetails(req.params.id, { includeCustomer: false })
     );
-    if (!entitlementKeys.some((key) => String(key.productKeyId) === entitlementKeyId)) {
+    if (String(entitlement.entState ?? entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED') {
+      return res.status(400).json({
+        error: 'Only generated Product Key entitlements can be activated.',
+        outcomeUnknown: false,
+      });
+    }
+    const items = Array.isArray(entitlement.entitlementItem)
+      ? entitlement.entitlementItem
+      : [entitlement.entitlementItem];
+    const keyBelongsToEntitlement = items.some((item) =>
+      item?.lineItemType === 'Product_Key' &&
+      (Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId])
+        .some((key) => String(key) === entitlementKeyId)
+    );
+    if (!keyBelongsToEntitlement) {
       return res.status(400).json({
         error: 'The product key does not belong to this entitlement.',
         outcomeUnknown: false,
