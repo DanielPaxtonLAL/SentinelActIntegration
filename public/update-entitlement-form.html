@@ -34,6 +34,10 @@
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
         <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <label>
+          <span>Irricad Order Code (refID 1) <span id="ref-id-remaining" class="form-hint character-count">- {{ 250 - form.refId1.length }} chars left</span></span>
+          <input v-model="form.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">
+        </label>
+        <label>
           <span>Description <span id="description-remaining" class="form-hint character-count">- {{ 510 - form.description.length }} chars left</span></span>
           <textarea v-model="form.description" maxlength="510" rows="3" aria-describedby="description-remaining" :disabled="loading"></textarea>
         </label>
@@ -217,6 +221,7 @@
           return {
             customerId: '',
             productIds: [],
+            refId1: '',
             description: '',
           };
         },
@@ -420,6 +425,7 @@
             const productIds = [...new Set((data.products || []).map((product) => String(product.productId)))]
               .filter((id) => known.has(id));
             this.form.customerId = String(data.customerId ?? '');
+            this.form.refId1 = String(data.refId1 ?? '');
             this.form.description = data.description ?? data.descr ?? '';
             this.entitlementStartDate = String(data.startDate ?? '').slice(0, 10);
             LeaseDates.bounds(this.entitlementStartDate, this.localToday(), this.leaseExpiryRange);
@@ -449,6 +455,7 @@
             const payload = {
               ...this.form,
               productIds: this.form.productIds,
+              refId1: this.form.refId1.trim(),
               description: this.form.description.trim(),
               memoryValues: this.memoryProductIds.flatMap((productId) =>
                 this.productMemory[productId].files.flatMap((file) =>

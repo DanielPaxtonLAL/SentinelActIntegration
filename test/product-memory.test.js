@@ -339,7 +339,7 @@ test('update form pads the loaded serial without changing its encoded value', as
   const app = entitlementApp(async (url) => ({
     ok: true,
     json: async () => url.startsWith('/api/entitlements/')
-      ? { customerId: '5', startDate: '2026-11-12', products: [{
+      ? { customerId: '5', refId1: 'ORDER-123', startDate: '2026-11-12', products: [{
         productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: encoded }],
       }] }
       : [],
@@ -348,11 +348,40 @@ test('update form pads the loaded serial without changing its encoded value', as
   app.baseProductId = '60';
   await app.prefillFromEntitlement();
   assert.equal(app.entitlementLoaded, true);
+  assert.equal(app.form.refId1, 'ORDER-123');
   assert.equal(app.serialNumber, '06003');
   assert.equal(app.encodeSerialNumber(app.serialNumber, '4'), encoded);
   assert.equal(app.decodeSerialNumber('30303030'), '00000');
   assert.equal(app.decodeSerialNumber(''), '');
   assert.equal(app.decodeSerialNumber('invalid'), '');
+});
+
+test('update form submits the edited Irricad Order Code', async () => {
+  let submitted;
+  let requestUrl;
+  let requestMethod;
+  const app = entitlementApp(async (url, options) => {
+    requestUrl = url;
+    requestMethod = options.method;
+    submitted = JSON.parse(options.body);
+    return { ok: true, json: async () => ({}) };
+  }, 'update-entitlement-form.html');
+  app.editId = '123';
+  app.entitlementLoaded = true;
+  app.baseProductId = '60';
+  app.accessProducts = [{ id: '6048' }];
+  app.form.customerId = '5';
+  app.form.productIds = ['6048'];
+  app.form.refId1 = ' UPDATED-ORDER ';
+  app.productMemory['60'] = { loading: false, error: '', files: [serialFile()] };
+  app.productMemory['6048'] = { loading: false, error: '', files: [] };
+  app.serialNumber = '1234';
+
+  await app.createEntitlement();
+
+  assert.equal(requestUrl, '/api/entitlements/123');
+  assert.equal(requestMethod, 'PUT');
+  assert.equal(submitted.refId1, 'UPDATED-ORDER');
 });
 
 test('update form preserves saved values instead of using product memory defaults', async () => {
@@ -788,6 +817,8 @@ test('submits editable SAOT values without non-SAOT segments', async () => {
   ]);
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /Irricad Order Code \(refID 1\) \* <span id="ref-id-remaining" class="form-hint character-count">- \{\{ 250 - form\.refId1\.length \}\} chars left<\/span><\/span>\s*<input v-model="form\.refId1" type="text" maxlength="250" required pattern=".*\\S.*"/);
+  const updateHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'update-entitlement-form.html'), 'utf8');
+  assert.match(updateHtml, /Irricad Order Code \(refID 1\) <span id="ref-id-remaining" class="form-hint character-count">- \{\{ 250 - form\.refId1\.length \}\} chars left<\/span><\/span>\s*<input v-model="form\.refId1" type="text" maxlength="250"/);
   for (const page of ['create-entitlement-form.html', 'update-entitlement-form.html']) {
     const formHtml = fs.readFileSync(path.join(__dirname, '..', 'public', page), 'utf8');
     assert.match(formHtml, /<textarea v-model="form\.description" maxlength="510" rows="3" aria-describedby="description-remaining"/);
