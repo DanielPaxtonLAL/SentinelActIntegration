@@ -273,6 +273,8 @@ test('activates the selected generated product key and exposes the V2C download'
   app.isProductKeyGenerated = true;
   const key = { productKeyId: 'key-001' };
   const license = '<?xml version="1.0"?><hasp_info><v2c>YWJj</v2c></hasp_info>';
+  let confirmation;
+  confirmProduce = (message) => { confirmation = message; return true; };
   fetchMemory = async (url, options) => {
     assert.equal(url, '/api/entitlements/123/activate');
     assert.deepEqual(JSON.parse(options.body), { productKeyId: 'key-001', c2v: '<hasp_info/>' });
@@ -280,6 +282,7 @@ test('activates the selected generated product key and exposes the V2C download'
   };
   const event = { target: { files: [{ name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' }], value: 'file' } };
   await definition.methods.activateProductKey.call(app, key, event);
+  assert.match(confirmation, /Activate product key key-001 using the selected C2V file/);
   assert.equal(app.activationDownloads[0].license, license);
   assert.equal(definition.methods.licenseDownloadUrl(license), 'data:application/xml;charset=utf-8,' + encodeURIComponent(license));
   assert.equal(event.target.value, '');
@@ -298,6 +301,10 @@ test('blocks invalid files and prevents retries after an uncertain activation', 
   assert.match(app.activationError, /C2V/);
   assert.equal(calls, 0);
   const file = { name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' };
+  confirmProduce = () => false;
+  await definition.methods.activateProductKey.call(app, key, event(file));
+  assert.equal(calls, 0);
+  confirmProduce = () => true;
   await definition.methods.activateProductKey.call(app, key, event(file));
   assert.equal(calls, 1);
   assert.equal(app.activationUncertainKeys.includes('key-001'), true);

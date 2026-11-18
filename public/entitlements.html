@@ -360,6 +360,7 @@
             this.activationError = 'Choose a non-empty C2V file no larger than 10 MB.';
             return;
           }
+          if (!window.confirm('Activate product key ' + key.productKeyId + ' using the selected C2V file?')) return;
           this.activating = true;
           let outcomeUnknown = false;
           try {
