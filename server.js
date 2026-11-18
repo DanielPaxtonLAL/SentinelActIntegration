@@ -115,6 +115,38 @@ const app = express();
 const publicDir = path.join(__dirname, 'public');
 const reloadClients = new Set();
 let serialNumberUpdateQueue = Promise.resolve();
+let productKeySerialSaveQueue = Promise.resolve();
+
+async function withProductKeySerialLock(fn) {
+  const previous = productKeySerialSaveQueue;
+  let release;
+  productKeySerialSaveQueue = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous;
+
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+function decodeProductKeySerial(text) {
+  const value = String(text ?? '').trim();
+  if (!/^(?:[0-9a-f]{2})+$/i.test(value)) return null;
+  const decoded = Buffer.from(value, 'hex').toString('latin1');
+  const serial = /^[0-9a-f]+$/i.test(decoded)
+    ? BigInt(`0x${decoded}`)
+    : BigInt(`0x${value}`);
+  return serial <= 65535n ? Number(serial) : null;
+}
+
+function duplicateProductKeySerialError(serialNumber) {
+  const error = new Error(`Serial number ${String(serialNumber).padStart(5, '0')} is already claimed by another entitlement.`);
+  error.status = 409;
+  return error;
+}
 
 async function incrementProductKeySerial() {
   let release;
@@ -181,39 +213,7 @@ app.get('/api/product-key-serial-number', async (req, res) => {
 app.get('/api/product-key-serial-numbers', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const entitlements = await withSession(() => ems.listEntitlements());
-    const entitlementIds = entitlements.map((entitlement) =>
-      String(entitlement.id ?? entitlement.entitlementId ?? '')
-    );
-    if (entitlementIds.some((id) => !/^[1-9]\d*$/.test(id))) {
-      throw new Error('EMS returned an entitlement without a valid ID.');
-    }
-
-    const serialNumbers = new Set();
-    for (let index = 0; index < entitlementIds.length; index += 10) {
-      const batch = await Promise.all(entitlementIds.slice(index, index + 10).map((id) =>
-        withSession(() => ems.getEntitlementDetails(id, { includeCustomer: false }))
-      ));
-      for (const details of batch) {
-        for (const product of details.products || []) {
-          if (String(product.productId) !== String(formData.baseProductId)) continue;
-          for (const segment of product.memorySegments || []) {
-            if (!segment.saot || typeof segment.name !== 'string' ||
-                segment.name.trim().toLowerCase() !== 'serial number') continue;
-            const text = String(segment.text ?? '').trim();
-            if (!text) continue;
-            if (!/^(?:[0-9a-f]{2})+$/i.test(text)) {
-              throw new Error(`EMS returned an invalid Serial Number value in entitlement ${details.id}.`);
-            }
-            const decoded = Buffer.from(text, 'hex').toString('latin1');
-            const serialValue = /^[0-9a-f]+$/i.test(decoded)
-              ? BigInt(`0x${decoded}`)
-              : BigInt(`0x${text}`);
-            if (serialValue <= 65535n) serialNumbers.add(Number(serialValue));
-          }
-        }
-      }
-    }
+    const serialNumbers = await getUsedProductKeySerialNumbers();
     res.json([...serialNumbers].sort((left, right) => left - right));
   } catch (err) {
     if (err.status === 401) {
@@ -224,6 +224,43 @@ app.get('/api/product-key-serial-numbers', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
+
+async function getUsedProductKeySerialNumbers(excludedEntitlementId) {
+  const entitlements = await withSession(() => ems.listEntitlements());
+  const entitlementIds = entitlements.map((entitlement) =>
+    String(entitlement.id ?? entitlement.entitlementId ?? '')
+  );
+  if (entitlementIds.some((id) => !/^[1-9]\d*$/.test(id))) {
+    throw new Error('EMS returned an entitlement without a valid ID.');
+  }
+
+  const serialNumbers = new Set();
+  const idsToCheck = excludedEntitlementId === undefined
+    ? entitlementIds
+    : entitlementIds.filter((id) => id !== String(excludedEntitlementId));
+  for (let index = 0; index < idsToCheck.length; index += 10) {
+    const batch = await Promise.all(idsToCheck.slice(index, index + 10).map((id) =>
+      withSession(() => ems.getEntitlementDetails(id, { includeCustomer: false }))
+    ));
+    for (const details of batch) {
+      for (const product of details.products || []) {
+        if (String(product.productId) !== String(formData.baseProductId)) continue;
+        for (const segment of product.memorySegments || []) {
+          if (!segment.saot || typeof segment.name !== 'string' ||
+              segment.name.trim().toLowerCase() !== 'serial number') continue;
+          const text = String(segment.text ?? '').trim();
+          if (!text) continue;
+          if (!/^(?:[0-9a-f]{2})+$/i.test(text)) {
+            throw new Error(`EMS returned an invalid Serial Number value in entitlement ${details.id}.`);
+          }
+          const serialValue = decodeProductKeySerial(text);
+          if (serialValue !== null) serialNumbers.add(serialValue);
+        }
+      }
+    }
+  }
+  return serialNumbers;
+}
 
 app.get('/api/entitlements', async (req, res) => {
   try {
@@ -542,24 +579,29 @@ const saveEntitlement = async (req, res) => {
     }
     const memorySegments = validateMemoryValues(allProductIds, productFiles, resolvedMemoryValues);
 
-    if (!existingId) {
-      const serialSegments = productFiles[baseProductId]
-        .filter((file) => file.kind === 'product')
-        .flatMap((file) => file.segments)
-        .filter((segment) => segment.saot && typeof segment.name === 'string' &&
-          segment.name.trim().toLowerCase() === 'serial number');
-      if (serialSegments.length !== 1 || Number(serialSegments[0].size) !== 4) {
-        return res.status(400).json({ error: 'EMS must provide exactly one editable 4-byte base product Serial Number segment.' });
-      }
-      const serial = memorySegments.find((segment) => segment.id === String(serialSegments[0].id));
-      const digits = Buffer.from(serial.content, 'hex').toString('latin1');
-      if (!/^[0-9a-f]{4}$/i.test(digits)) {
-        return res.status(400).json({ error: 'The serial number segment must contain four ASCII hexadecimal digits.' });
-      }
-      if (BigInt(`0x${digits}`) < 6000n) {
-        return res.status(400).json({ error: 'The serial number must be at least 6,000.' });
-      }
+    const serialSegments = productFiles[baseProductId]
+      .filter((file) => file.kind === 'product')
+      .flatMap((file) => file.segments)
+      .filter((segment) => segment.saot && typeof segment.name === 'string' &&
+        segment.name.trim().toLowerCase() === 'serial number');
+    if (serialSegments.length !== 1 || Number(serialSegments[0].size) !== 4) {
+      return res.status(400).json({ error: 'EMS must provide exactly one editable 4-byte base product Serial Number segment.' });
     }
+    const serial = memorySegments.find((segment) => segment.id === String(serialSegments[0].id));
+    const digits = Buffer.from(serial.content, 'hex').toString('latin1');
+    if (!/^[0-9a-f]{4}$/i.test(digits)) {
+      return res.status(400).json({ error: 'The serial number segment must contain four ASCII hexadecimal digits.' });
+    }
+    const serialNumberValue = Number(BigInt(`0x${digits}`));
+    if (!existingId && serialNumberValue < 6000) {
+      return res.status(400).json({ error: 'The serial number must be at least 6,000.' });
+    }
+    const previousSerialText = existing?.products
+      ?.find((product) => String(product.productId) === baseProductId)
+      ?.memorySegments?.find((segment) => segment.saot &&
+        String(segment.name ?? '').trim().toLowerCase() === 'serial number')?.text;
+    const serialNumberChanged = !existingId ||
+      decodeProductKeySerial(previousSerialText) !== serialNumberValue;
 
     const today = new Date();
     const startDate = existing?.startDate ?? requestedStartDate ?? today.toISOString().slice(0, 10);
@@ -608,10 +650,24 @@ const saveEntitlement = async (req, res) => {
         }
       }
       entitlementData.changedMemorySegmentIds = [...changedMemoryIds];
-      const result = await ems.updateEntitlement(existingId, entitlementData);
+      const result = await withProductKeySerialLock(async () => {
+        if (serialNumberChanged) {
+          const usedSerialNumbers = await getUsedProductKeySerialNumbers(existingId);
+          if (usedSerialNumbers.has(serialNumberValue)) {
+            throw duplicateProductKeySerialError(serialNumberValue);
+          }
+        }
+        return ems.updateEntitlement(existingId, entitlementData);
+      });
       return res.status(200).json(result);
     }
-    const result = await ems.createEntitlement(entitlementData);
+    const result = await withProductKeySerialLock(async () => {
+      const usedSerialNumbers = await getUsedProductKeySerialNumbers();
+      if (usedSerialNumbers.has(serialNumberValue)) {
+        throw duplicateProductKeySerialError(serialNumberValue);
+      }
+      return ems.createEntitlement(entitlementData);
+    });
     try {
       const serialNumber = await incrementProductKeySerial();
       return res.status(201).json({ ...result, serialNumber, serialNumberUpdated: true });
@@ -629,7 +685,7 @@ const saveEntitlement = async (req, res) => {
       ems.cookies.clear();
     }
     console.error(err.message);
-    res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
+    res.status(err.status === 400 || err.status === 409 ? err.status : 502).json({ error: err.message });
   }
 };
 app.post('/api/entitlements', express.json(), saveEntitlement);

@@ -26,11 +26,13 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let deleteHandler;
   let saved;
   const events = [];
+  const entitlements = serialOptions.entitlements || [];
+  const entitlementDetails = { ...(serialOptions.entitlementDetails || {}) };
   let largest = serialOptions.largest ?? 42;
   class EmsClient {
     constructor() { this.authenticated = true; }
     async listCustomers() { return [{ customerId: '5' }]; }
-    async listEntitlements() { return serialOptions.entitlements || []; }
+    async listEntitlements() { return entitlements; }
     async getLargestProductKeySerial() { events.push('get'); if (serialOptions.getError) throw new Error('serial read failed'); return largest; }
     async setLargestProductKeySerial(value) { events.push(`set:${value}`); if (serialOptions.setError) throw new Error('serial write failed'); if (serialOptions.beforeSet) await serialOptions.beforeSet(value); largest = value; }
     async getProductSummary(id) {
@@ -49,9 +51,29 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     }
     async listEnforcements() { return enforcements; }
     async getProductReadOnlyMemory(id) { return String(id) === '60' ? [...baseMemory, { kind: 'product', segments: [{ id: '999', name: 'Serial Number', size: '4', saot: true }] }] : []; }
-    async createEntitlement(data) { events.push('create'); if (serialOptions.createError) throw new Error('create failed'); saved = data; return { saved: true }; }
+    async createEntitlement(data) {
+      events.push('create');
+      if (serialOptions.createError) throw new Error('create failed');
+      saved = data;
+      if (serialOptions.recordCreatedEntitlements) {
+        const id = String(1000 + entitlements.length);
+        entitlements.push({ id });
+        entitlementDetails[id] = {
+          id,
+          products: [{
+            productId: '60',
+            memorySegments: data.memorySegments.map((segment) => ({
+              name: 'Serial Number',
+              saot: true,
+              text: segment.content,
+            })),
+          }],
+        };
+      }
+      return { saved: true };
+    }
     async getEntitlementDetails(id) {
-      return serialOptions.entitlementDetails?.[id] || { id, entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate };
+      return entitlementDetails[id] || { id, entState: 'DRAFT', eid: 'test-eid', refId1: '00123', startDate: existingStartDate };
     }
     async getEntitlementProductKeys(id) { return [{ productKeyId: 'key-001', entitlementId: id }]; }
     async activateProductKey(key, c2v) {
@@ -319,6 +341,65 @@ test('used serial endpoint returns a flat list decoded from base entitlement mem
   assert.equal(response.statusCode, 200);
   assert.equal(response.headers['Cache-Control'], 'no-store');
   assert.deepEqual(Array.from(response.body), [2, 3, 4]);
+});
+
+test('rejects a serial number already used by an existing entitlement', async () => {
+  const route = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, {
+    entitlements: [{ id: '100' }],
+    entitlementDetails: {
+      100: {
+        id: '100',
+        products: [{
+          productId: '60',
+          memorySegments: [{ name: 'Serial Number', saot: true, text: '31373731' }],
+        }],
+      },
+    },
+  });
+  const { res, saved } = await route.submit();
+  assert.equal(res.statusCode, 409, JSON.stringify(res.body));
+  assert.match(res.body.error, /Serial number 06001 is already claimed/);
+  assert.equal(saved, undefined);
+  assert.deepEqual(route.events, []);
+});
+
+test('rejects changing a draft to a serial number used by another entitlement', async () => {
+  const route = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, {
+    entitlements: [{ id: '123' }, { id: '100' }],
+    entitlementDetails: {
+      123: {
+        id: '123',
+        entState: 'DRAFT',
+        eid: 'test-eid',
+        startDate: '2026-11-10',
+        products: [{
+          productId: '60',
+          memorySegments: [{ name: 'Serial Number', saot: true, text: '31373730' }],
+        }],
+      },
+      100: {
+        id: '100',
+        products: [{
+          productId: '60',
+          memorySegments: [{ name: 'Serial Number', saot: true, text: '31373731' }],
+        }],
+      },
+    },
+  });
+  const { res, saved } = await route.submit({}, true);
+  assert.equal(res.statusCode, 409);
+  assert.match(res.body.error, /Serial number 06001 is already claimed/);
+  assert.equal(saved, undefined);
+});
+
+test('serializes duplicate checks with concurrent entitlement creation', async () => {
+  const route = createRoute([{ id: '1' }], undefined, [], true, true, true, undefined, {
+    recordCreatedEntitlements: true,
+  });
+  const results = await Promise.all([route.submit(), route.submit()]);
+  assert.deepEqual(results.map(({ res }) => res.statusCode).sort(), [201, 409],
+    JSON.stringify(results.map(({ res }) => res.body)));
+  assert.equal(route.events.filter((event) => event === 'create').length, 1);
 });
 
 test('increments serial after creating a draft but not after updating or failing to create', async () => {
