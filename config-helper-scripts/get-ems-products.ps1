@@ -5,6 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$previousCertificateCallback = $null
+$restoreCertificateCallback = $false
 
 function Get-ConfigValue([string]$Name) {
   if (Test-Path "Env:$Name") {
@@ -28,6 +30,50 @@ try {
     throw 'Base URL must use http or https.'
   }
   $base = $BaseUrl.TrimEnd('/')
+  $requestOptions = @{}
+  if ($uri.Scheme -eq 'https' -and (Get-ConfigValue 'EMS_INSECURE') -eq '1') {
+    Write-Warning 'EMS_INSECURE=1 disables certificate verification for EMS requests, including redirects. Use only temporarily on a trusted network.'
+    $requestOptions.DisableKeepAlive = $true
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+      $requestOptions.SkipCertificateCheck = $true
+    } else {
+      if (-not ('SentinelEmsCertificateValidator' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public sealed class SentinelEmsCertificateValidator {
+  private readonly string host;
+  private readonly int port;
+  private readonly RemoteCertificateValidationCallback previous;
+
+  private SentinelEmsCertificateValidator(string host, int port, RemoteCertificateValidationCallback previous) {
+    this.host = host;
+    this.port = port;
+    this.previous = previous;
+  }
+
+  public static RemoteCertificateValidationCallback Create(string host, int port, RemoteCertificateValidationCallback previous) {
+    return new RemoteCertificateValidationCallback(new SentinelEmsCertificateValidator(host, port, previous).Validate);
+  }
+
+  private bool Validate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
+    var request = sender as HttpWebRequest;
+    if (request != null && request.RequestUri.Port == port &&
+        String.Equals(request.RequestUri.Host, host, StringComparison.OrdinalIgnoreCase)) return true;
+    return previous != null ? previous(sender, certificate, chain, errors) : errors == SslPolicyErrors.None;
+  }
+}
+'@
+      }
+      $previousCertificateCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+      [System.Net.ServicePointManager]::ServerCertificateValidationCallback =
+        [SentinelEmsCertificateValidator]::Create($uri.Host, $uri.Port, $previousCertificateCallback)
+      $restoreCertificateCallback = $true
+    }
+  }
   $apiVersion = Get-ConfigValue 'EMS_API_VERSION'
   if (-not $apiVersion) { $apiVersion = 'v90' }
   if ($apiVersion -notmatch '^v\d+$') { throw 'EMS_API_VERSION must look like v90.' }
@@ -49,13 +95,13 @@ try {
 
   # TODO: Revisit this login flow and swap the order of authentication.
   $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
-  Invoke-WebRequest -Uri "$base/ems/login.html" -WebSession $session -UseBasicParsing | Out-Null
+  Invoke-WebRequest -Uri "$base/ems/login.html" -WebSession $session -UseBasicParsing @requestOptions | Out-Null
   $login = Invoke-WebRequest -Uri "$base/ems/verifyLogin.html" `
     -Method Post `
     -ContentType 'application/x-www-form-urlencoded' `
     -Body @{ username = $username; password = $password; user_type = $userType } `
     -WebSession $session `
-    -UseBasicParsing
+    -UseBasicParsing @requestOptions
 
   if ($login.BaseResponse.ResponseUri.AbsolutePath -notmatch 'homePage' -or
       -not ($session.Cookies.GetCookies([Uri]"$base/ems/") | Where-Object Name -eq 'JSESSIONID')) {
@@ -68,7 +114,7 @@ try {
   for ($page = 1; ; $page++) {
     $productUrl = "$base/ems/$apiVersion/ws/vendor/$vendorId/product.ws?pageIndex=$page&pageSize=$pageSize"
     $response = Invoke-WebRequest -Uri $productUrl -Headers @{ Accept = 'application/xml' } `
-      -WebSession $session -UseBasicParsing
+      -WebSession $session -UseBasicParsing @requestOptions
     if ($response.BaseResponse.ResponseUri.AbsolutePath -match 'login') {
       throw 'EMS session expired while retrieving products.'
     }
@@ -103,4 +149,8 @@ try {
 } catch {
   Write-Error $_.Exception.Message
   exit 1
+} finally {
+  if ($restoreCertificateCallback) {
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCertificateCallback
+  }
 }

@@ -1,0 +1,54 @@
+{
+    "_comment": "EMS internal product IDs and form labels. Keys starting with _ are comments. Point EMS_FORM_DATA in .env at a different copy of this file for another EMS server.",
+
+    "base-product-id": "1",
+
+    "_highest-product-key-serial-number-customer-id-comment": "This customer's Ref ID 1 is a serial counter incremented after a new draft is saved. The form selects serials from the actual entitlement memory values. The customer will be excluded from being able to have entitlements.",
+    "highest-product-key-serial-number-customer-id": "1",
+
+    "lease-expiry-range": {
+        "_comment": "Inclusive calendar months after the entitlement start date.",
+        "min-months": 6,
+        "max-months": 13
+    },
+
+    "product-options": {
+        "_comment": "The form enforces at least one of these.",
+        "standalone": {
+            "label": "Standalone Irricad",
+            "product-id": "25"
+        },
+        "link": {
+            "label": "Link Irricad",
+            "product-id": "24"
+        }
+    },
+
+    "optional-products": {
+        "_comment": "Any or none of these can be selected.",
+        "pivot": {
+            "label": "Pivot Irricad",
+            "product-id": "22"
+        }
+    },
+
+    "version": {
+        "_comment": "Only one can be selected. The option with an empty product-id is the default and adds no product.",
+        "v22": {
+            "label": "Version 22",
+            "product-id": ""
+        },
+        "v23": {
+            "label": "Version 23",
+            "product-id": "21"
+        }
+    },
+
+    "lease": {
+        "_comment": "Selecting this shows the lease expiry date and writes the base product Expiry Date segment.",
+        "lease": {
+            "label": "Lease",
+            "product-id": "34"
+        }
+    }
+}

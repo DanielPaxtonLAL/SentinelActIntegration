@@ -62,7 +62,9 @@ Use the PowerShell script to list product names and internal IDs for
 The script uses `EMS_USER` and `EMS_PASS` from the process environment or the
 local `.env` file. If either is missing, it prompts for EMS credentials.
 `EMS_API_VERSION` and `EMS_VENDOR_ID` are also read from `.env` when set; they
-default to `v90` and `2`.
+default to `v90` and `2`. For an HTTPS server with an invalid certificate, the
+script also honors `EMS_INSECURE=1`; this disables certificate verification for
+that connection and should be used only temporarily on a trusted network.
 
 ## Product key serial number
 
