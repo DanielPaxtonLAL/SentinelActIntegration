@@ -46,7 +46,7 @@ test('a successful replacement login invalidates the old session', async () => {
   assert.equal(sessions.get({ headers: { cookie: 'integration_session=invalid' } }), null);
 });
 
-test('EMS users are isolated and Act uses configured credentials', async () => {
+test('EMS users and their Act credentials are isolated', async () => {
   const routes = new Map();
   let authenticateApi;
   let authenticatePage;
@@ -63,21 +63,33 @@ test('EMS users are isolated and Act uses configured credentials', async () => {
   const express = () => app;
   express.static = express.json = () => {};
   const actCredentials = [];
+  let sessionStore;
   let expireAct = false;
+  let expireEms = false;
+  let emsCalls = 0;
   class ActClient {
-    async authenticate(username, password) { actCredentials.push([username, password]); }
+    constructor({ baseUrl }) { assert.equal(baseUrl, 'https://act.example'); }
+    async authenticate(username, password) {
+      actCredentials.push([username, password]);
+      if (password === 'bad') { const error = new Error('Rejected'); error.status = 401; throw error; }
+      this.name = username;
+    }
     async listCompanies() {
       if (expireAct) { expireAct = false; const error = new Error('Expired'); error.status = 401; throw error; }
-      return ['company'];
+      return [this.name];
     }
   }
   class EmsClient {
-    constructor({ username, password }) { this.username = username; this.password = password; }
+    constructor({ username, password }) { this.username = username; this.password = password; this.cookies = new Map(); }
     async authenticate() {
       if (this.password === 'bad') { const error = new Error('Rejected'); error.status = 302; throw error; }
       this.authenticated = true;
     }
-    async listCustomers() { return [this.username]; }
+    async listCustomers() {
+      emsCalls++;
+      if (expireEms) { const error = new Error('EMS session expired'); error.status = 401; throw error; }
+      return [this.username];
+    }
   }
   const root = path.join(__dirname, '..');
   const customRequire = (name) => {
@@ -85,13 +97,16 @@ test('EMS users are isolated and Act uses configured credentials', async () => {
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './act-client') return { ActClient };
     if (name === './ems-client') return { EmsClient };
+    if (name === './act-sessions') return {
+      createActSessions(factory) { sessionStore = createActSessions(factory); return sessionStore; },
+    };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
     if (name.startsWith('./')) return require(path.join(root, name));
     return require(name);
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire, __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_USER: 'service', ACT_PASS: 'service-password' } }, console,
+    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example', ACT_USER: 'unused', ACT_PASS: 'unused' } }, console,
   });
   const res = () => ({
     statusCode: 200,
@@ -114,8 +129,11 @@ test('EMS users are isolated and Act uses configured credentials', async () => {
   authenticatePage({ method: 'GET', path: '/entitlements.html', headers: {} }, page, () => assert.fail('page should require login'));
   assert.equal(page.location, '/login.html');
   const alice = res(), bob = res();
-  await routes.get('POST /api/login')({ headers: {}, body: { username: 'alice', password: 'x' } }, alice);
-  await routes.get('POST /api/login')({ headers: {}, body: { username: 'bob', password: 'x' } }, bob);
+  const credentials = (username, password, actUsername, actPassword) => ({ username, password, actUsername, actPassword });
+  await routes.get('POST /api/login')({ headers: {}, body: credentials('alice', 'x', 'act-alice', 'act-pass-a') }, alice);
+  await routes.get('POST /api/login')({ headers: {}, body: credentials('bob', 'x', 'act-bob', 'act-pass-b') }, bob);
+  assert.equal(sessionStore.get(request(alice)).ems.password, undefined);
+  assert.equal(sessionStore.get(request(alice)).act.password, undefined);
   const listAlice = res(), listBob = res();
   await Promise.all([
     invokeProtected('GET /api/customers', request(alice), listAlice),
@@ -124,17 +142,22 @@ test('EMS users are isolated and Act uses configured credentials', async () => {
   assert.deepEqual(listAlice.body, ['alice']);
   assert.deepEqual(listBob.body, ['bob']);
   const bad = res();
-  await routes.get('POST /api/login')({ ...request(alice), body: { username: 'alice', password: 'bad' } }, bad);
+  await routes.get('POST /api/login')({ ...request(alice), body: credentials('alice', 'bad', 'act-alice', 'act-pass-a') }, bad);
   assert.equal(bad.statusCode, 401);
+  const badAct = res();
+  await routes.get('POST /api/login')({ ...request(alice), body: credentials('alice', 'x', 'act-alice', 'bad') }, badAct);
+  assert.equal(badAct.statusCode, 401);
   const companies = res();
   await invokeProtected('GET /api/act/companies', request(alice), companies);
-  assert.deepEqual(companies.body, ['company']);
-  assert.deepEqual(actCredentials, [['service', 'service-password']]);
+  assert.deepEqual(companies.body, ['act-alice']);
+  assert.deepEqual(actCredentials, [['act-alice', 'act-pass-a'], ['act-bob', 'act-pass-b'], ['act-alice', 'bad']]);
   expireAct = true;
-  const retried = res();
-  await invokeProtected('GET /api/act/companies', request(alice), retried);
-  assert.deepEqual(retried.body, ['company']);
-  assert.deepEqual(actCredentials, [['service', 'service-password'], ['service', 'service-password']]);
+  const expired = res();
+  await invokeProtected('GET /api/act/companies', request(alice), expired);
+  assert.equal(expired.statusCode, 401);
+  const afterExpired = res();
+  await invokeProtected('GET /api/customers', request(alice), afterExpired);
+  assert.equal(afterExpired.statusCode, 401);
   await routes.get('POST /api/logout')(request(alice), res());
   const after = res();
   await invokeProtected('GET /api/customers', request(alice), after);
@@ -142,6 +165,35 @@ test('EMS users are isolated and Act uses configured credentials', async () => {
   const stillBob = res();
   await invokeProtected('GET /api/customers', request(bob), stillBob);
   assert.deepEqual(stillBob.body, ['bob']);
+  expireEms = true;
+  const callsBeforeExpiry = emsCalls;
+  const expiredEms = res();
+  await invokeProtected('GET /api/customers', request(bob), expiredEms);
+  assert.match(expiredEms.body.error, /session expired/);
+  assert.equal(emsCalls, callsBeforeExpiry + 1);
+  const session = res();
+  routes.get('GET /api/session')(request(bob), session);
+  assert.equal(session.body.authenticated, false);
+});
+
+test('server requires both configured API addresses', () => {
+  const root = path.join(__dirname, '..');
+  const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const customRequire = (name) => {
+    if (name === 'fs') return { existsSync: () => false };
+    if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
+    if (name.startsWith('./')) return require(path.join(root, name));
+    return require(name);
+  };
+  for (const env of [{ EMS_URL: 'https://ems.example' }, { ACT_URL: 'https://act.example' }]) {
+    const errors = [];
+    assert.throws(() => vm.runInNewContext(source, {
+      require: customRequire, __dirname: root,
+      process: { env, exit(code) { throw new Error(`Exit ${code}`); } },
+      console: { error(message) { errors.push(message); } },
+    }), /Exit 1/);
+    assert.deepEqual(errors, ['Set EMS_URL and ACT_URL in .env']);
+  }
 });
 
 test('real HTTP login protects pages and API requests', async () => {
@@ -156,21 +208,26 @@ test('real HTTP login protects pages and API requests', async () => {
   createApp.static = express.static;
   createApp.json = express.json;
   class EmsClient {
-    constructor({ username }) { this.username = username; }
+    constructor({ username, password }) { this.username = username; this.password = password; }
     async authenticate() { this.authenticated = true; }
     async listCustomers() { return [this.username]; }
+  }
+  class ActClient {
+    async authenticate(username, password) { this.name = username; assert.equal(password, 'act-password'); }
+    async listCompanies() { return [this.name]; }
   }
   const root = path.join(__dirname, '..');
   const customRequire = (name) => {
     if (name === 'express') return createApp;
     if (name === 'fs') return { ...fs, existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
+    if (name === './act-client') return { ActClient };
     if (name.startsWith('./')) return require(path.join(root, name));
     return require(name);
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire, __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example' } }, console,
+    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } }, console,
   });
   await new Promise((resolve) => server.once('listening', resolve));
   try {
@@ -179,17 +236,19 @@ test('real HTTP login protects pages and API requests', async () => {
     assert.equal(page.status, 302);
     assert.equal(page.headers.get('location'), '/login.html');
     assert.equal((await fetch(`${base}/api/customers`)).status, 401);
+    assert.equal((await fetch(`${base}/vendor/forge.min.js`)).status, 200);
+    assert.equal((await fetch(`${base}/login-crypto-worker.js`)).status, 200);
     const login = await fetch(`${base}/api/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'alice', password: 'password' }),
+      body: JSON.stringify({ username: 'alice', password: 'password', actUsername: 'act-alice', actPassword: 'act-password' }),
     });
     assert.equal(login.status, 200);
     const cookie = login.headers.get('set-cookie').split(';')[0];
     const customers = await fetch(`${base}/api/customers`, { headers: { Cookie: cookie } });
     assert.deepEqual(await customers.json(), ['alice']);
     const act = await fetch(`${base}/api/act/companies`, { headers: { Cookie: cookie } });
-    assert.equal(act.status, 502);
-    assert.match((await act.json()).error, /ACT_USER and ACT_PASS/);
+    assert.equal(act.status, 200);
+    assert.deepEqual(await act.json(), ['act-alice']);
     assert.equal((await fetch(`${base}/entitlements.html`, { headers: { Cookie: cookie } })).status, 200);
     await fetch(`${base}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal((await fetch(`${base}/api/customers`, { headers: { Cookie: cookie } })).status, 401);

@@ -3,9 +3,11 @@
 ## Run locally
 
 Install Node.js 20 or later. If you do not already have `.env`, copy
-`.env.example` to `.env` and set the EMS URL and Act! credentials for your
+`.env.example` to `.env` and set the EMS and Act! URLs for your
 environment. Use the server origin for `EMS_URL` (for example,
-`http://your-ems-host:8080`), without the `/ems` path.
+`http://your-ems-host:8080`), without the `/ems` path. Set `ACT_URL` to
+the Act! Web API base URL (for example, `http://your-act-host/Act.Web.API`).
+Both addresses are required.
 
 ```powershell
 npm install
@@ -15,10 +17,26 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000). Set `PORT` in `.env` to
 choose a different local port. Set `EMS_INSECURE=1` only when connecting to an
 EMS server with a self-signed HTTPS certificate. Log in with your own EMS
-username and password. Each browser has its own EMS session; Act! operations use
-`ACT_USER` and `ACT_PASS` from `.env`. Credentials and sessions are kept in
-server memory, and sessions end on logout, after 12 hours, or on server restart.
-Use HTTPS when accessing the app over a network.
+username and password. The first time, select **Configure Act! login** and enter
+your Act! credentials. After both logins succeed, the browser saves them
+encrypted with a key derived from your EMS password (PBKDF2-SHA-256 and
+AES-256-GCM). Later logins unlock them with your EMS password. They are stored
+per EMS username and browser profile, not shared between devices. The login
+flow does not save either submitted password in plaintext; sessions retain
+tokens, not passwords. Existing legacy credential entries in `.env` are not
+used by the app's login and remain plaintext until removed.
+
+If your EMS password changes, your Act! credentials change, or browser data is
+cleared, select **Configure Act! login** and enter them again. Logging out does
+not delete the encrypted browser copy. Server sessions end on logout, after 12
+hours, on restart, or if an upstream session expires; log in again when needed.
+
+Browser storage encryption works over HTTP as well as HTTPS. Use HTTPS between
+the browser and the app and for `EMS_URL` and `ACT_URL` to protect credentials
+in transit. Browser storage encryption does not protect against a compromised
+browser or malicious code running on this site, and weak EMS passwords can be
+guessed offline. Over HTTP, someone on the network could intercept passwords or
+modify the app's code.
 
 New entitlements start on the current UTC date by default. Lease expiry dates
 are still checked against the local date as well as the entitlement start date.
@@ -64,7 +82,7 @@ error.
 
 ## Run with Docker
 
-Copy `.env.example` to `.env` and set the EMS URL and Act! credentials and URL for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.
+Copy `.env.example` to `.env` and set the EMS and Act! URLs for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.
 
 ```powershell
 Copy-Item .env.example .env

@@ -21,7 +21,7 @@ if (fs.existsSync(envFile)) {
   }
 }
 
-const { EMS_URL, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE, ACT_URL, ACT_DATABASE, ACT_USER, ACT_PASS } = process.env;
+const { EMS_URL, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE, ACT_URL, ACT_DATABASE } = process.env;
 const PORT = process.env.PORT || 3000;
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
@@ -78,22 +78,24 @@ async function getEntitlementProducts(ems) {
   };
 }
 
-if (!EMS_URL) {
-  console.error('Set EMS_URL in .env');
+if (!EMS_URL || !ACT_URL) {
+  console.error('Set EMS_URL and ACT_URL in .env');
   process.exit(1);
 }
 
-// Runs an EMS call, logging in first and once more if the session has expired.
+// Passwords are not retained, so an expired EMS session requires a fresh login.
 async function withSession(ems, fn) {
-  if (!ems.authenticated) await ems.authenticate();
+  if (!ems.authenticated) {
+    const error = new Error('EMS session expired. Log in again.');
+    error.status = 401;
+    throw error;
+  }
   try {
     return await fn();
   } catch (err) {
-    if (err.status === 401 && !err.outcomeUnknown) {
+    if (err.status === 401) {
       ems.authenticated = false;
       ems.cookies.clear();
-      await ems.authenticate();
-      return fn();
     }
     throw err;
   }
@@ -176,7 +178,7 @@ fs.watch(publicDir, (eventType, filename) => {
 });
 
 const sessions = createActSessions(() => ({
-  async authenticate(username, password) {
+  async authenticate(username, password, actUsername, actPassword) {
     this.ems = new EmsClient({
       baseUrl: EMS_URL,
       username,
@@ -186,7 +188,28 @@ const sessions = createActSessions(() => ({
       userType: EMS_USER_TYPE || 'ISV',
       serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
     });
-    await this.ems.authenticate();
+    try {
+      await this.ems.authenticate();
+    } catch (err) {
+      const error = new Error('EMS authentication failed');
+      error.service = 'EMS';
+      error.status = err.status;
+      throw error;
+    } finally {
+      this.ems.password = undefined;
+    }
+    this.act = new ActClient({
+      baseUrl: ACT_URL,
+      database: ACT_DATABASE || 'Irricad',
+    });
+    try {
+      await this.act.authenticate(actUsername, actPassword);
+    } catch (err) {
+      const error = new Error('Act! authentication failed');
+      error.service = 'Act!';
+      error.status = err.status;
+      throw error;
+    }
   },
 }));
 
@@ -195,27 +218,33 @@ app.use((req, res, next) => {
   if ((req.method === 'GET' || req.method === 'HEAD') &&
       !page.startsWith('/api/') &&
       (page === '/' || page.endsWith('.html')) &&
-      page !== '/login.html' && page !== '/404.html' && !sessions.get(req)) {
+      page !== '/login.html' && page !== '/404.html' &&
+      !sessions.get(req)?.ems.authenticated) {
     return res.redirect('/login.html');
   }
   next();
 });
 app.use(pageIncludes(publicDir, path.join(__dirname, 'partials')));
 app.use(express.static(publicDir));
+app.get('/vendor/forge.min.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'node_modules', 'node-forge', 'dist', 'forge.min.js'));
+});
 
 app.post('/api/login', express.json(), async (req, res) => {
-  const { username, password } = req.body || {};
-  if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
-    return res.status(400).json({ error: 'EMS username and password are required' });
+  const { username, password, actUsername, actPassword } = req.body || {};
+  if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password ||
+      typeof actUsername !== 'string' || !actUsername.trim() || typeof actPassword !== 'string' || !actPassword) {
+    return res.status(400).json({ error: 'EMS and Act! usernames and passwords are required' });
   }
   try {
-    await sessions.login(req, res, username, password);
+    await sessions.login(req, res, username, password, actUsername, actPassword);
     res.json({ ok: true });
   } catch (err) {
     const invalidCredentials = [200, 302, 401, 403].includes(err.status);
-    console.error('EMS login failed:', invalidCredentials ? 'credentials rejected' : 'EMS unavailable');
+    const service = err.service || 'Authentication';
+    console.error(`${service} login failed:`, invalidCredentials ? 'credentials rejected' : 'service unavailable');
     res.status(invalidCredentials ? 401 : 502).json({
-      error: invalidCredentials ? 'EMS login failed. Check your credentials and try again.' : 'Could not connect to EMS.',
+      error: invalidCredentials ? `${service} login failed. Check your credentials and try again.` : `Could not connect to ${service}.`,
     });
   }
 });
@@ -227,12 +256,15 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/session', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ authenticated: Boolean(sessions.get(req)) });
+  res.json({ authenticated: Boolean(sessions.get(req)?.ems.authenticated) });
 });
 
 app.use('/api', (req, res, next) => {
   const session = sessions.get(req);
-  if (!session) return res.status(401).json({ error: 'Log in to EMS first' });
+  if (!session || !session.ems.authenticated) {
+    sessions.remove(req);
+    return res.status(401).json({ error: 'Session expired. Log in again.' });
+  }
   req.ems = session.ems;
   req.integrationSession = session;
   next();
@@ -803,61 +835,31 @@ app.delete('/api/entitlements/:id', async (req, res) => {
   }
 });
 
-// Authenticate the configured Act! account only when it is needed.
-async function getAct(session) {
-  if (!ACT_USER || !ACT_PASS) throw new Error('Set ACT_USER and ACT_PASS in .env to use Act!.');
-  if (!session.actPromise) {
-    session.actPromise = (async () => {
-      const act = new ActClient({
-        baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
-        database: ACT_DATABASE || 'Irricad',
-      });
-      try {
-        await act.authenticate(ACT_USER, ACT_PASS);
-      } catch (err) {
-        const error = new Error('Act! authentication failed. Check the configured credentials and connection.');
-        error.status = err.status;
-        throw error;
-      }
-      return act;
-    })();
-  }
+async function callAct(req, operation) {
   try {
-    return await session.actPromise;
+    return await operation(req.integrationSession.act);
   } catch (err) {
-    session.actPromise = null;
+    if (err.status === 401) sessions.remove(req);
     throw err;
-  }
-}
-
-async function callAct(session, operation) {
-  const act = await getAct(session);
-  const promise = session.actPromise;
-  try {
-    return await operation(act);
-  } catch (err) {
-    if (err.status !== 401) throw err;
-    if (session.actPromise === promise) session.actPromise = null;
-    return operation(await getAct(session));
   }
 }
 
 app.get('/api/act/companies', async (req, res) => {
   try {
-    res.json(await callAct(req.integrationSession, (act) => act.listCompanies()));
+    res.json(await callAct(req, (act) => act.listCompanies()));
   } catch (err) {
     console.error(err.message);
-    res.status(502).json({ error: err.status === 401 ? 'Act! authentication failed. Check the configured credentials.' : err.message });
+    res.status(err.status === 401 ? 401 : 502).json({ error: err.status === 401 ? 'Act! session expired. Log in again.' : err.message });
   }
 });
 
 app.get('/api/act/companies/:id/divisions', async (req, res) => {
   try {
-    res.json(await callAct(req.integrationSession, (act) => act.getCompanyDivisions(req.params.id)));
+    res.json(await callAct(req, (act) => act.getCompanyDivisions(req.params.id)));
   } catch (err) {
     console.error(err.message);
-    res.status(502).json({
-      error: err.status === 401 ? 'Act! authentication failed. Check the configured credentials.' : err.message,
+    res.status(err.status === 401 ? 401 : 502).json({
+      error: err.status === 401 ? 'Act! session expired. Log in again.' : err.message,
     });
   }
 });
@@ -865,11 +867,11 @@ app.get('/api/act/companies/:id/divisions', async (req, res) => {
 app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) => {
   const ems = req.ems;
   try {
-    const company = await callAct(req.integrationSession, (act) => act.getCompany(req.params.id));
+    const company = await callAct(req, (act) => act.getCompany(req.params.id));
     if (!company || typeof company.name !== 'string' || !company.name.trim()) {
       return res.status(502).json({ error: 'Act! returned a company without a name' });
     }
-    const divisions = company.hasDivisions === true ? [] : await callAct(req.integrationSession, (act) => act.getCompanyDivisions(req.params.id));
+    const divisions = company.hasDivisions === true ? [] : await callAct(req, (act) => act.getCompanyDivisions(req.params.id));
     if (!Array.isArray(divisions)) {
       throw new Error('Act! returned an invalid company divisions response');
     }
@@ -883,14 +885,14 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
       if (parentId === String(company.id || req.params.id)) {
         return res.status(400).json({ error: 'A company cannot be its own parent' });
       }
-      const parentDivisions = await callAct(req.integrationSession, (act) => act.getCompanyDivisions(parentId));
+      const parentDivisions = await callAct(req, (act) => act.getCompanyDivisions(parentId));
       if (!Array.isArray(parentDivisions) ||
           !parentDivisions.some((division) =>
             division && String(division.id) === String(company.id || req.params.id)
           )) {
         return res.status(400).json({ error: 'The specified parent does not contain this ACT company' });
       }
-      const parent = await callAct(req.integrationSession, (act) => act.getCompany(parentId));
+      const parent = await callAct(req, (act) => act.getCompany(parentId));
       if (!parent || typeof parent.name !== 'string' || !parent.name.trim()) {
         return res.status(502).json({ error: 'Act! returned a parent company without a name' });
       }
@@ -912,9 +914,9 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
     res.status(201).json({ location });
   } catch (err) {
     console.error(err.message);
-    res.status(502).json({
+    res.status(err.status === 401 ? 401 : 502).json({
       error: err.status === 401
-        ? 'An upstream session expired. Check the configured Act! credentials or log in to EMS again.'
+        ? 'Session expired. Log in again.'
         : `${err.message}${err.body ? `: ${typeof err.body === 'string' ? err.body : JSON.stringify(err.body)}` : ''}`,
     });
   }

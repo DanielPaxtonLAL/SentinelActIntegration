@@ -30,7 +30,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   const entitlementDetails = { ...(serialOptions.entitlementDetails || {}) };
   let largest = serialOptions.largest ?? 42;
   class EmsClient {
-    constructor() { this.authenticated = true; }
+    constructor() { this.authenticated = true; this.cookies = new Map(); }
     async listCustomers() { return [{ customerId: '5' }]; }
     async listEntitlements() { return entitlements; }
     async getLargestProductKeySerial() { events.push('get'); if (serialOptions.getError) throw new Error('serial read failed'); return largest; }
@@ -130,7 +130,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire,
     __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', EMS_USER: 'test', EMS_PASS: 'test' } },
+    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }
     },

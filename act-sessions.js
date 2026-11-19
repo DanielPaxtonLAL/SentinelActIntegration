@@ -32,9 +32,9 @@ function createActSessions(createClient) {
   return {
     get,
     remove,
-    async login(req, res, username, password) {
+    async login(req, res, ...credentials) {
       const client = createClient();
-      await client.authenticate(username, password);
+      await client.authenticate(...credentials);
       prune();
       remove(req);
       const id = randomBytes(32).toString('hex');

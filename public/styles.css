@@ -525,6 +525,28 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 
 .login-page button { margin-top: 1.25rem; }
 
+.login-page .login-saved-hint {
+  margin: 1rem 0 0;
+  color: var(--color-text-muted);
+  font-size: .9rem;
+}
+
+.login-page button.login-configure-saved {
+  display: block;
+  margin-top: .5rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  font-size: .9rem;
+  text-decoration: underline;
+}
+
+.login-page button.login-configure-saved:hover:not(:disabled) {
+  background: transparent;
+  color: var(--color-text);
+}
+
 .login-page #status {
   min-height: 1.5rem;
   margin-top: 1rem;

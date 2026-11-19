@@ -51,7 +51,7 @@ function customerRoute() {
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire,
     __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_USER: 'test', ACT_PASS: 'test' } },
+    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     console,
   });
   return async (id, parentId) => {
@@ -60,7 +60,7 @@ function customerRoute() {
       status(code) { this.statusCode = code; return this; },
       json(data) { this.body = data; return this; },
     };
-    await handler({ params: { id }, body: { parentId }, ems: new EmsClient(), integrationSession: {} }, res);
+    await handler({ params: { id }, body: { parentId }, ems: new EmsClient(), integrationSession: { act: new ActClient() } }, res);
     return { res, saved };
   };
 }
