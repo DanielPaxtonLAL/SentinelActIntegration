@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <!-- include: head -->
-  <title>Log in to Act!</title>
+  <title>Log in to EMS</title>
 </head>
 <body class="login-page">
   <!-- include: disclaimer -->
   <main>
-    <h1>Log in to Act!</h1>
+    <h1>Log in to EMS</h1>
     <form id="loginForm">
       <label>
         Username
@@ -28,12 +28,12 @@
 
     async function checkSession() {
       try {
-        const response = await fetch('/api/act/session');
+        const response = await fetch('/api/session');
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || response.statusText);
         if (data.authenticated) window.location.replace('/');
       } catch (err) {
-        status.textContent = 'Could not check the Act! session: ' + err.message;
+        status.textContent = 'Could not check the EMS session: ' + err.message;
         status.classList.add('error');
       }
     }
@@ -45,7 +45,7 @@
       status.classList.remove('error');
       const fields = new FormData(form);
       try {
-        const response = await fetch('/api/act/login', {
+        const response = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

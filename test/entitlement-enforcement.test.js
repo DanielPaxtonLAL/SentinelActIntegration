@@ -137,6 +137,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     Buffer,
     console,
   });
+  const ems = new EmsClient();
   return {
     events,
     async activate(id, body) {
@@ -146,7 +147,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await activateHandler({ params: { id }, body }, res);
+      await activateHandler({ params: { id }, body, ems }, res);
       return res;
     },
     async getProductKeys(id) {
@@ -156,7 +157,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await productKeysHandler({ params: { id } }, res);
+      await productKeysHandler({ params: { id }, ems }, res);
       return res;
     },
     async produce(id) {
@@ -165,7 +166,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await produceHandler({ params: { id } }, res);
+      await produceHandler({ params: { id }, ems }, res);
       return res;
     },
     async reopen(id) {
@@ -174,7 +175,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await reopenHandler({ params: { id } }, res);
+      await reopenHandler({ params: { id }, ems }, res);
       return res;
     },
     async delete(id) {
@@ -183,7 +184,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await deleteHandler({ params: { id } }, res);
+      await deleteHandler({ params: { id }, ems }, res);
       return res;
     },
     async getSerial() {
@@ -193,7 +194,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await serialHandler({}, res);
+      await serialHandler({ ems }, res);
       return res;
     },
     async getUsedSerials() {
@@ -203,11 +204,11 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
         status(code) { this.statusCode = code; return this; },
         json(data) { this.body = data; return this; },
       };
-      await usedSerialsHandler({}, res);
+      await usedSerialsHandler({ ems }, res);
       return res;
     },
     async submit(overrides = {}, update = false) {
-      const req = { params: update ? { id: '123' } : undefined, body: {
+      const req = { ems, params: update ? { id: '123' } : undefined, body: {
         customerId: '5', productIds: ['6048'],
         description: '', ...(!update ? { refId1: 'ORDER' } : {}), ...overrides,
       } };

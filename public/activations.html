@@ -100,7 +100,7 @@
           this.loading = true;
           this.error = '';
           try {
-            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const response = await fetch('/api/logout', { method: 'POST' });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             window.location.replace('/login.html');

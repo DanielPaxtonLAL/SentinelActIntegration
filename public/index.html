@@ -236,7 +236,7 @@
           this.actLoading = true;
           this.actError = '';
           try {
-            const response = await fetch('/api/act/session');
+            const response = await fetch('/api/session');
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             this.actAuthenticated = data.authenticated;
@@ -246,7 +246,7 @@
             }
             await Promise.all([this.loadCustomers(), this.loadCompanies()]);
           } catch (err) {
-            this.actError = 'Failed to restore Act! session: ' + err.message;
+            this.actError = 'Failed to restore EMS session: ' + err.message;
           } finally {
             this.actLoading = false;
           }
@@ -279,7 +279,7 @@
           this.actLoading = true;
           this.actError = '';
           try {
-            const response = await fetch('/api/act/logout', { method: 'POST' });
+            const response = await fetch('/api/logout', { method: 'POST' });
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || response.statusText);
             window.location.replace('/login.html');

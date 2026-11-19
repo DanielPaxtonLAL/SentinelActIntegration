@@ -1,6 +1,6 @@
 const { randomBytes } = require('crypto');
 
-const COOKIE_NAME = 'act_session';
+const COOKIE_NAME = 'integration_session';
 const SESSION_MS = 12 * 60 * 60 * 1000;
 
 function createActSessions(createClient) {

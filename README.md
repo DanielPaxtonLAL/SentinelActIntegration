@@ -3,7 +3,7 @@
 ## Run locally
 
 Install Node.js 20 or later. If you do not already have `.env`, copy
-`.env.example` to `.env` and set the EMS credentials and URL for your
+`.env.example` to `.env` and set the EMS URL and Act! credentials for your
 environment. Use the server origin for `EMS_URL` (for example,
 `http://your-ems-host:8080`), without the `/ems` path.
 
@@ -14,7 +14,11 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000). Set `PORT` in `.env` to
 choose a different local port. Set `EMS_INSECURE=1` only when connecting to an
-EMS server with a self-signed HTTPS certificate.
+EMS server with a self-signed HTTPS certificate. Log in with your own EMS
+username and password. Each browser has its own EMS session; Act! operations use
+`ACT_USER` and `ACT_PASS` from `.env`. Credentials and sessions are kept in
+server memory, and sessions end on logout, after 12 hours, or on server restart.
+Use HTTPS when accessing the app over a network.
 
 New entitlements start on the current UTC date by default. Lease expiry dates
 are still checked against the local date as well as the entitlement start date.
@@ -60,7 +64,7 @@ error.
 
 ## Run with Docker
 
-Copy `.env.example` to `.env` and set the EMS credentials and URLs for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.
+Copy `.env.example` to `.env` and set the EMS URL and Act! credentials and URL for your environment. The `.env` file is passed to the container at runtime and is not included in the Docker image.
 
 ```powershell
 Copy-Item .env.example .env

@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const express = require('express');
@@ -21,7 +21,7 @@ if (fs.existsSync(envFile)) {
   }
 }
 
-const { EMS_URL, EMS_USER, EMS_PASS, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE } = process.env;
+const { EMS_URL, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE, ACT_URL, ACT_DATABASE, ACT_USER, ACT_PASS } = process.env;
 const PORT = process.env.PORT || 3000;
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
@@ -42,15 +42,15 @@ function formatLocalDateTime(date) {
 
 // Pull the base entitlement and all supported modification/product options from EMS, validating
 // that the configured base product and required access products are complete and available.
-async function getEntitlementProducts() {
+async function getEntitlementProducts(ems) {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
   const baseId = formData.baseProductId;
-  const base = await withSession(() => ems.getProductSummary(baseId));
+  const base = await withSession(ems, () => ems.getProductSummary(baseId));
   if (String(base.lifeCycleStage).toLowerCase() !== 'commit' ||
       String(base.enforcementProductType).toUpperCase() !== 'BASE') {
     throw new Error(`Base product ${baseId} is not a complete base product in EMS (check entitlement-form-data.json)`);
   }
-  const modifications = await withSession(() => ems.listModificationProducts(baseId, vendorId));
+  const modifications = await withSession(ems, () => ems.listModificationProducts(baseId, vendorId));
   const complete = modifications.filter((product) => String(product.lifeCycleStage).toLowerCase() === 'commit');
   const isAvailable = (id) => complete.some((product) => String(product.productId) === id);
   for (const required of formData.accessProducts) {
@@ -78,24 +78,13 @@ async function getEntitlementProducts() {
   };
 }
 
-if (!EMS_URL || !EMS_USER || !EMS_PASS) {
-  console.error('Set EMS_URL, EMS_USER and EMS_PASS in .env');
+if (!EMS_URL) {
+  console.error('Set EMS_URL in .env');
   process.exit(1);
 }
 
-// EMS client is shared across the app so every API route can reuse the same authenticated session.
-const ems = new EmsClient({
-  baseUrl: EMS_URL,
-  username: EMS_USER,
-  password: EMS_PASS,
-  insecure: EMS_INSECURE === '1',
-  apiVersion: EMS_API_VERSION || 'v90',
-  userType: EMS_USER_TYPE || 'ISV',
-  serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
-});
-
 // Runs an EMS call, logging in first and once more if the session has expired.
-async function withSession(fn) {
+async function withSession(ems, fn) {
   if (!ems.authenticated) await ems.authenticate();
   try {
     return await fn();
@@ -148,7 +137,7 @@ function duplicateProductKeySerialError(serialNumber) {
   return error;
 }
 
-async function incrementProductKeySerial() {
+async function incrementProductKeySerial(ems) {
   let release;
   const previousUpdate = serialNumberUpdateQueue;
   serialNumberUpdateQueue = new Promise((resolve) => {
@@ -157,12 +146,12 @@ async function incrementProductKeySerial() {
   await previousUpdate;
 
   try {
-    const largest = await withSession(() => ems.getLargestProductKeySerial());
+    const largest = await withSession(ems, () => ems.getLargestProductKeySerial());
     if (!Number.isInteger(largest) || largest < 0 || largest >= 65535) {
       throw new Error('The serial number customer must contain a whole number below 65,535 before it can be incremented.');
     }
     const next = largest + 1;
-    await withSession(() => ems.setLargestProductKeySerial(next));
+    await withSession(ems, () => ems.setLargestProductKeySerial(next));
     return next;
   } finally {
     release();
@@ -186,13 +175,74 @@ fs.watch(publicDir, (eventType, filename) => {
   for (const client of reloadClients) client.write('event: reload\ndata: update\n\n');
 });
 
+const sessions = createActSessions(() => ({
+  async authenticate(username, password) {
+    this.ems = new EmsClient({
+      baseUrl: EMS_URL,
+      username,
+      password,
+      insecure: EMS_INSECURE === '1',
+      apiVersion: EMS_API_VERSION || 'v90',
+      userType: EMS_USER_TYPE || 'ISV',
+      serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
+    });
+    await this.ems.authenticate();
+  },
+}));
+
+app.use((req, res, next) => {
+  const page = req.path.toLowerCase();
+  if ((req.method === 'GET' || req.method === 'HEAD') &&
+      !page.startsWith('/api/') &&
+      (page === '/' || page.endsWith('.html')) &&
+      page !== '/login.html' && page !== '/404.html' && !sessions.get(req)) {
+    return res.redirect('/login.html');
+  }
+  next();
+});
 app.use(pageIncludes(publicDir, path.join(__dirname, 'partials')));
 app.use(express.static(publicDir));
 
+app.post('/api/login', express.json(), async (req, res) => {
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
+    return res.status(400).json({ error: 'EMS username and password are required' });
+  }
+  try {
+    await sessions.login(req, res, username, password);
+    res.json({ ok: true });
+  } catch (err) {
+    const invalidCredentials = [200, 302, 401, 403].includes(err.status);
+    console.error('EMS login failed:', invalidCredentials ? 'credentials rejected' : 'EMS unavailable');
+    res.status(invalidCredentials ? 401 : 502).json({
+      error: invalidCredentials ? 'EMS login failed. Check your credentials and try again.' : 'Could not connect to EMS.',
+    });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  sessions.logout(req, res);
+  res.json({ ok: true });
+});
+
+app.get('/api/session', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ authenticated: Boolean(sessions.get(req)) });
+});
+
+app.use('/api', (req, res, next) => {
+  const session = sessions.get(req);
+  if (!session) return res.status(401).json({ error: 'Log in to EMS first' });
+  req.ems = session.ems;
+  req.integrationSession = session;
+  next();
+});
+
 // EMS lookup endpoints used by the UI to populate customers, entitlements and product metadata.
 app.get('/api/customers', async (req, res) => {
+  const ems = req.ems;
   try {
-    res.json(await withSession(() => ems.listCustomers()));
+    res.json(await withSession(ems, () => ems.listCustomers()));
   } catch (err) {
     console.error(err.message);
     res.status(502).json({ error: err.message });
@@ -200,9 +250,10 @@ app.get('/api/customers', async (req, res) => {
 });
 
 app.get('/api/product-key-serial-number', async (req, res) => {
+  const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   try {
-    const largest = await withSession(() => ems.getLargestProductKeySerial());
+    const largest = await withSession(ems, () => ems.getLargestProductKeySerial());
     res.json({ largest });
   } catch (err) {
     console.error(err.message);
@@ -211,9 +262,10 @@ app.get('/api/product-key-serial-number', async (req, res) => {
 });
 
 app.get('/api/product-key-serial-numbers', async (req, res) => {
+  const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   try {
-    const serialNumbers = await getUsedProductKeySerialNumbers();
+    const serialNumbers = await getUsedProductKeySerialNumbers(ems);
     res.json([...serialNumbers].sort((left, right) => left - right));
   } catch (err) {
     if (err.status === 401) {
@@ -225,8 +277,8 @@ app.get('/api/product-key-serial-numbers', async (req, res) => {
   }
 });
 
-async function getUsedProductKeySerialNumbers(excludedEntitlementId) {
-  const entitlements = await withSession(() => ems.listEntitlements());
+async function getUsedProductKeySerialNumbers(ems, excludedEntitlementId) {
+  const entitlements = await withSession(ems, () => ems.listEntitlements());
   const entitlementIds = entitlements.map((entitlement) =>
     String(entitlement.id ?? entitlement.entitlementId ?? '')
   );
@@ -240,7 +292,7 @@ async function getUsedProductKeySerialNumbers(excludedEntitlementId) {
     : entitlementIds.filter((id) => id !== String(excludedEntitlementId));
   for (let index = 0; index < idsToCheck.length; index += 10) {
     const batch = await Promise.all(idsToCheck.slice(index, index + 10).map((id) =>
-      withSession(() => ems.getEntitlementDetails(id, { includeCustomer: false }))
+      withSession(ems, () => ems.getEntitlementDetails(id, { includeCustomer: false }))
     ));
     for (const details of batch) {
       for (const product of details.products || []) {
@@ -263,8 +315,9 @@ async function getUsedProductKeySerialNumbers(excludedEntitlementId) {
 }
 
 app.get('/api/entitlements', async (req, res) => {
+  const ems = req.ems;
   try {
-    res.json(await withSession(() => ems.listEntitlements()));
+    res.json(await withSession(ems, () => ems.listEntitlements()));
   } catch (err) {
     console.error(err.message);
     res.status(502).json({ error: err.message });
@@ -272,9 +325,10 @@ app.get('/api/entitlements', async (req, res) => {
 });
 
 app.get('/api/activations', async (req, res) => {
+  const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   try {
-    const entitlements = await withSession(() => ems.listEntitlements());
+    const entitlements = await withSession(ems, () => ems.listEntitlements());
     const generated = entitlements.filter((entitlement) =>
       String(entitlement.entState ?? entitlement.state ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED'
     );
@@ -282,7 +336,7 @@ app.get('/api/activations', async (req, res) => {
     for (let index = 0; index < generated.length; index += 10) {
       const batch = await Promise.all(generated.slice(index, index + 10).map(async (entitlement) => ({
         entitlement,
-        productKeys: await withSession(() => ems.getEntitlementProductKeys(
+        productKeys: await withSession(ems, () => ems.getEntitlementProductKeys(
           entitlement.id ?? entitlement.entitlementId
         )),
       })));
@@ -304,7 +358,7 @@ app.get('/api/activations', async (req, res) => {
     const activations = [];
     for (let index = 0; index < candidates.length; index += 10) {
       const batch = await Promise.all(candidates.slice(index, index + 10).map(async ({ aid, key, entitlement }) => ({
-        ...await withSession(() => ems.getActivationLicense(aid)),
+        ...await withSession(ems, () => ems.getActivationLicense(aid)),
         productKeyId: key.productKeyId,
         entitlementId: key.entitlementId,
         customerName: key.customerName ?? entitlement.customerName ?? entitlement.customer,
@@ -323,8 +377,9 @@ app.get('/api/activations', async (req, res) => {
 });
 
 app.get('/api/enforcements', async (req, res) => {
+  const ems = req.ems;
   try {
-    res.json(await withSession(() =>
+    res.json(await withSession(ems, () =>
       ems.listEnforcements(process.env.EMS_VENDOR_ID || '2')
     ));
   } catch (err) {
@@ -338,11 +393,12 @@ app.get('/api/enforcements', async (req, res) => {
 });
 
 app.get('/api/entitlements/:id', async (req, res) => {
+  const ems = req.ems;
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
   }
   try {
-    const details = await withSession(() => ems.getEntitlementDetails(req.params.id));
+    const details = await withSession(ems, () => ems.getEntitlementDetails(req.params.id));
     res.json({
       ...details,
       baseProductId: formData.baseProductId,
@@ -361,12 +417,13 @@ app.get('/api/entitlements/:id', async (req, res) => {
 });
 
 app.get('/api/entitlements/:id/product-keys', async (req, res) => {
+  const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
   }
   try {
-    res.json(await withSession(() => ems.getEntitlementProductKeys(req.params.id)));
+    res.json(await withSession(ems, () => ems.getEntitlementProductKeys(req.params.id)));
   } catch (err) {
     console.error(err.message);
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message });
@@ -398,6 +455,7 @@ function vibeCheckActivationInput(productKeyId, c2v) {
 }
 
 app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), async (req, res) => {
+  const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number.', outcomeUnknown: false });
@@ -411,7 +469,7 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
 
   try {
     const entitlementKeyId = productKeyId.trim();
-    const entitlement = await withSession(() =>
+    const entitlement = await withSession(ems, () =>
       ems.getEntitlementDetails(req.params.id, { includeCustomer: false })
     );
     if (String(entitlement.entState ?? entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED') {
@@ -434,7 +492,7 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
         outcomeUnknown: false,
       });
     }
-    res.json(await withSession(() => ems.activateProductKey(productKeyId.trim(), c2v.trim())));
+    res.json(await withSession(ems, () => ems.activateProductKey(productKeyId.trim(), c2v.trim())));
   } catch (err) {
     console.error(err.message);
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
@@ -442,11 +500,12 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
 });
 
 app.get('/api/catalog/products/:id/read-only-memory', async (req, res) => {
+  const ems = req.ems;
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Product ID must be a positive number' });
   }
   try {
-    res.json(await withSession(() => ems.getProductReadOnlyMemory(req.params.id)));
+    res.json(await withSession(ems, () => ems.getProductReadOnlyMemory(req.params.id)));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -458,8 +517,9 @@ app.get('/api/catalog/products/:id/read-only-memory', async (req, res) => {
 });
 
 app.get('/api/entitlement-products', async (req, res) => {
+  const ems = req.ems;
   try {
-    res.json(await getEntitlementProducts());
+    res.json(await getEntitlementProducts(ems));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -473,6 +533,7 @@ app.get('/api/entitlement-products', async (req, res) => {
 // Builds and validates the entitlement payload before either creating a new draft or updating
 // an existing one in EMS. This is the central business logic for entitlement management.
 const saveEntitlement = async (req, res) => {
+  const ems = req.ems;
   const existingId = req.params?.id;
   if (existingId !== undefined && !/^[1-9]\d*$/.test(existingId)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
@@ -514,12 +575,12 @@ const saveEntitlement = async (req, res) => {
   try {
     let existing = null;
     if (existingId) {
-      existing = await withSession(() => ems.getEntitlementDetails(existingId));
+      existing = await withSession(ems, () => ems.getEntitlementDetails(existingId));
       if (String(existing.entState).toUpperCase() !== 'DRAFT') {
         return res.status(400).json({ error: 'Only draft entitlements can be edited.' });
       }
     }
-    const customers = await withSession(() => ems.listCustomers());
+    const customers = await withSession(ems, () => ems.listCustomers());
     const selectedCustomerId = String(customerId).trim();
     const selectedCustomer = customers.find((customer) =>
       [customer.customerId, customer.id].some((id) => String(id ?? '').trim() === selectedCustomerId)
@@ -529,7 +590,7 @@ const saveEntitlement = async (req, res) => {
     }
 
     const vendorId = process.env.EMS_VENDOR_ID || '2';
-    const { baseProductId, modifications, optionalProducts, versionProducts } = await getEntitlementProducts();
+    const { baseProductId, modifications, optionalProducts, versionProducts } = await getEntitlementProducts(ems);
     const availableProductIds = new Set(modifications.map((product) => String(product.productId)));
     if (productIds.some((id) => !availableProductIds.has(String(id)) ||
         [...optionalProducts, ...versionProducts].some((product) => product.id === String(id) && !product.available))) {
@@ -542,13 +603,13 @@ const saveEntitlement = async (req, res) => {
       return res.status(400).json({ error: `Select at least one of: ${formData.accessProducts.map((product) => product.label).join(', ')}.` });
     }
     const allProductIds = [baseProductId, ...productIds.map(String)];
-    const enforcements = await withSession(() => ems.listEnforcements(vendorId));
+    const enforcements = await withSession(ems, () => ems.listEnforcements(vendorId));
     if (!enforcements.some((enforcement) => String(enforcement.id) === SENTINEL_LDK_ENFORCEMENT_ID)) {
       return res.status(400).json({ error: 'Sentinel LDK enforcement (1) is not available in EMS.' });
     }
     const productFiles = Object.fromEntries(await Promise.all(allProductIds.map(async (productId) => [
       String(productId),
-      await withSession(() => ems.getProductReadOnlyMemory(productId)),
+      await withSession(ems, () => ems.getProductReadOnlyMemory(productId)),
     ])));
     if (!Array.isArray(memoryValues)) {
       return res.status(400).json({ error: 'Memory segment values must be a list.' });
@@ -652,7 +713,7 @@ const saveEntitlement = async (req, res) => {
       entitlementData.changedMemorySegmentIds = [...changedMemoryIds];
       const result = await withProductKeySerialLock(async () => {
         if (serialNumberChanged) {
-          const usedSerialNumbers = await getUsedProductKeySerialNumbers(existingId);
+          const usedSerialNumbers = await getUsedProductKeySerialNumbers(ems, existingId);
           if (usedSerialNumbers.has(serialNumberValue)) {
             throw duplicateProductKeySerialError(serialNumberValue);
           }
@@ -662,14 +723,14 @@ const saveEntitlement = async (req, res) => {
       return res.status(200).json(result);
     }
     const result = await withProductKeySerialLock(async () => {
-      const usedSerialNumbers = await getUsedProductKeySerialNumbers();
+      const usedSerialNumbers = await getUsedProductKeySerialNumbers(ems);
       if (usedSerialNumbers.has(serialNumberValue)) {
         throw duplicateProductKeySerialError(serialNumberValue);
       }
       return ems.createEntitlement(entitlementData);
     });
     try {
-      const serialNumber = await incrementProductKeySerial();
+      const serialNumber = await incrementProductKeySerial(ems);
       return res.status(201).json({ ...result, serialNumber, serialNumberUpdated: true });
     } catch (err) {
       console.error(`Draft saved, but the serial number customer could not be updated: ${err.message}`);
@@ -691,22 +752,24 @@ const saveEntitlement = async (req, res) => {
 app.post('/api/entitlements', express.json(), saveEntitlement);
 app.put('/api/entitlements/:id', express.json(), saveEntitlement);
 app.post('/api/entitlements/:id/produce', async (req, res) => {
+  const ems = req.ems;
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number.' });
   }
   try {
-    res.json(await withSession(() => ems.produceEntitlement(req.params.id)));
+    res.json(await withSession(ems, () => ems.produceEntitlement(req.params.id)));
   } catch (err) {
     console.error(err.message);
     res.status(err.status === 400 ? 400 : 502).json({ error: err.message, outcomeUnknown: Boolean(err.outcomeUnknown) });
   }
 });
 app.post('/api/entitlements/:id/reopen', async (req, res) => {
+  const ems = req.ems;
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number.' });
   }
   try {
-    res.json(await withSession(() => ems.reopenEntitlement(req.params.id)));
+    res.json(await withSession(ems, () => ems.reopenEntitlement(req.params.id)));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -720,15 +783,16 @@ app.post('/api/entitlements/:id/reopen', async (req, res) => {
   }
 });
 app.delete('/api/entitlements/:id', async (req, res) => {
+  const ems = req.ems;
   if (!/^[1-9]\d*$/.test(req.params.id)) {
     return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
   }
   try {
-    const entitlement = await withSession(() => ems.getEntitlementDetails(req.params.id));
+    const entitlement = await withSession(ems, () => ems.getEntitlementDetails(req.params.id));
     if (String(entitlement.entState ?? '').toUpperCase() !== 'DRAFT') {
       return res.status(400).json({ error: 'Only draft entitlements can be deleted.' });
     }
-    res.json(await withSession(() => ems.deleteEntitlement(req.params.id)));
+    res.json(await withSession(ems, () => ems.deleteEntitlement(req.params.id)));
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -739,81 +803,73 @@ app.delete('/api/entitlements/:id', async (req, res) => {
   }
 });
 
-// Act! integration keeps per-user session state so a user can authenticate once and reuse
-// that session for subsequent company and division API calls.
-const { ACT_URL, ACT_DATABASE } = process.env;
-const actSessions = createActSessions(() => new ActClient({
-  baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
-  database: ACT_DATABASE || 'Irricad',
-}));
-
-async function callAct(req, operation) {
+// Authenticate the configured Act! account only when it is needed.
+async function getAct(session) {
+  if (!ACT_USER || !ACT_PASS) throw new Error('Set ACT_USER and ACT_PASS in .env to use Act!.');
+  if (!session.actPromise) {
+    session.actPromise = (async () => {
+      const act = new ActClient({
+        baseUrl: ACT_URL || 'http://VLALACT2/Act.Web.API',
+        database: ACT_DATABASE || 'Irricad',
+      });
+      try {
+        await act.authenticate(ACT_USER, ACT_PASS);
+      } catch (err) {
+        const error = new Error('Act! authentication failed. Check the configured credentials and connection.');
+        error.status = err.status;
+        throw error;
+      }
+      return act;
+    })();
+  }
   try {
-    return await operation();
+    return await session.actPromise;
   } catch (err) {
-    if (err.status === 401) actSessions.remove(req);
+    session.actPromise = null;
     throw err;
   }
 }
 
-// Act! authentication and company operations.
-app.post('/api/act/login', express.json(), async (req, res) => {
-  const { username, password } = req.body || {};
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' });
-  }
+async function callAct(session, operation) {
+  const act = await getAct(session);
+  const promise = session.actPromise;
   try {
-    await actSessions.login(req, res, username, password);
-    res.json({ ok: true });
+    return await operation(act);
   } catch (err) {
-    console.error(err.message);
-    res.status(err.status === 401 ? 401 : 502).json({ error: err.message });
+    if (err.status !== 401) throw err;
+    if (session.actPromise === promise) session.actPromise = null;
+    return operation(await getAct(session));
   }
-});
-
-app.post('/api/act/logout', (req, res) => {
-  actSessions.logout(req, res);
-  res.json({ ok: true });
-});
-
-app.get('/api/act/session', (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json({ authenticated: Boolean(actSessions.get(req)) });
-});
+}
 
 app.get('/api/act/companies', async (req, res) => {
-  const act = actSessions.get(req);
-  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
-    res.json(await callAct(req, () => act.listCompanies()));
+    res.json(await callAct(req.integrationSession, (act) => act.listCompanies()));
   } catch (err) {
     console.error(err.message);
-    res.status(err.status === 401 ? 401 : 502).json({ error: err.status === 401 ? 'Act! session expired, log in again' : err.message });
+    res.status(502).json({ error: err.status === 401 ? 'Act! authentication failed. Check the configured credentials.' : err.message });
   }
 });
 
 app.get('/api/act/companies/:id/divisions', async (req, res) => {
-  const act = actSessions.get(req);
-  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
   try {
-    res.json(await callAct(req, () => act.getCompanyDivisions(req.params.id)));
+    res.json(await callAct(req.integrationSession, (act) => act.getCompanyDivisions(req.params.id)));
   } catch (err) {
     console.error(err.message);
-    res.status(err.status === 401 ? 401 : 502).json({
-      error: err.status === 401 ? 'Act! session expired, log in again' : err.message,
+    res.status(502).json({
+      error: err.status === 401 ? 'Act! authentication failed. Check the configured credentials.' : err.message,
     });
   }
 });
 
 app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) => {
-  const act = actSessions.get(req);
-  if (!act) return res.status(401).json({ error: 'Log in to Act! first' });
+  const ems = req.ems;
   try {
-    const company = await callAct(req, () => act.getCompany(req.params.id));
+    const company = await callAct(req.integrationSession, (act) => act.getCompany(req.params.id));
     if (!company || typeof company.name !== 'string' || !company.name.trim()) {
       return res.status(502).json({ error: 'Act! returned a company without a name' });
     }
-    const divisions = company.hasDivisions === true ? [] : await callAct(req, () => act.getCompanyDivisions(req.params.id));
+    const divisions = company.hasDivisions === true ? [] : await callAct(req.integrationSession, (act) => act.getCompanyDivisions(req.params.id));
     if (!Array.isArray(divisions)) {
       throw new Error('Act! returned an invalid company divisions response');
     }
@@ -827,14 +883,14 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
       if (parentId === String(company.id || req.params.id)) {
         return res.status(400).json({ error: 'A company cannot be its own parent' });
       }
-      const parentDivisions = await callAct(req, () => act.getCompanyDivisions(parentId));
+      const parentDivisions = await callAct(req.integrationSession, (act) => act.getCompanyDivisions(parentId));
       if (!Array.isArray(parentDivisions) ||
           !parentDivisions.some((division) =>
             division && String(division.id) === String(company.id || req.params.id)
           )) {
         return res.status(400).json({ error: 'The specified parent does not contain this ACT company' });
       }
-      const parent = await callAct(req, () => act.getCompany(parentId));
+      const parent = await callAct(req.integrationSession, (act) => act.getCompany(parentId));
       if (!parent || typeof parent.name !== 'string' || !parent.name.trim()) {
         return res.status(502).json({ error: 'Act! returned a parent company without a name' });
       }
@@ -842,12 +898,12 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
     }
 
     const reference = String(company.id || req.params.id);
-    const existing = await withSession(() => ems.listCustomers());
+    const existing = await withSession(ems, () => ems.listCustomers());
     if (existing.some((c) => String(c.refId1 ?? '').trim().toLowerCase() === reference.toLowerCase())) {
       return res.status(409).json({ error: 'This ACT company already exists in EMS' });
     }
 
-    const location = await withSession(() => ems.createCustomer({
+    const location = await withSession(ems, () => ems.createCustomer({
       name: emsName,
       reference,
       vendorId: process.env.EMS_VENDOR_ID || 2,
@@ -856,9 +912,9 @@ app.post('/api/act/companies/:id/add-to-ems', express.json(), async (req, res) =
     res.status(201).json({ location });
   } catch (err) {
     console.error(err.message);
-    res.status(err.status === 401 ? 401 : 502).json({
+    res.status(502).json({
       error: err.status === 401
-        ? 'Act! session expired, log in again'
+        ? 'An upstream session expired. Check the configured Act! credentials or log in to EMS again.'
         : `${err.message}${err.body ? `: ${typeof err.body === 'string' ? err.body : JSON.stringify(err.body)}` : ''}`,
     });
   }

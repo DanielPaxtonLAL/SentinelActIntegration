@@ -65,7 +65,7 @@ function activationsRoute() {
       status(code) { this.statusCode = code; return this; },
       json(data) { this.body = data; return this; },
     };
-    await handler({}, res);
+    await handler({ ems: new EmsClient() }, res);
     return { res, calls };
   };
 }
