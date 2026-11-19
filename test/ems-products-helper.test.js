@@ -29,17 +29,23 @@ test('product helper opts into invalid EMS certificates and restores PowerShell 
   certificate.sign(forge.pki.privateKeyFromPem(keys.privateKey), forge.md.sha256.create());
 
   const connections = [];
+  let userType;
   const server = https.createServer({ key: keys.privateKey, cert: forge.pki.certificateToPem(certificate) }, (req, res) => {
     connections.push(req.headers.connection);
     if (req.url === '/ems/login.html') {
       res.setHeader('Set-Cookie', 'JSESSIONID=mock; Path=/ems');
       res.end('login');
     } else if (req.url === '/ems/verifyLogin.html') {
-      res.writeHead(302, { Location: '/ems/homePage' });
-      res.end();
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        userType = new URLSearchParams(body).get('user_type');
+        res.writeHead(302, { Location: '/ems/homePage' });
+        res.end();
+      });
     } else if (req.url === '/ems/homePage') {
       res.end('home');
-    } else if (req.url.startsWith('/ems/v90/ws/vendor/2/product.ws?')) {
+    } else if (req.url.startsWith('/ems/v91/ws/vendor/2/product.ws?')) {
       res.setHeader('Content-Type', 'application/xml');
       res.end('<listResponse><instance id="42" name="Mock product"/></listResponse>');
     } else {
@@ -53,19 +59,22 @@ test('product helper opts into invalid EMS certificates and restores PowerShell 
     const url = `https://127.0.0.1:${server.address().port}`;
     const env = {
       ...process.env, EMS_USER: 'test-user', EMS_PASS: 'test-password', EMS_USER_TYPE: 'ISV',
-      EMS_API_VERSION: 'v90', EMS_VENDOR_ID: '2',
+      EMS_API_VERSION: 'v90', EMS_INSECURE: '1', EMS_VENDOR_ID: '2', IS_TEST_MODE: 'true',
+      PRODUCTION_EMS_URL: url, PRODUCTION_EMS_API_VERSION: 'v91', PRODUCTION_EMS_USER_TYPE: 'CUSTOMER',
+      TEST_EMS_URL: 'https://other.example', TEST_EMS_INSECURE: '0',
     };
     const command = `$before = [Net.ServicePointManager]::ServerCertificateValidationCallback; ` +
       `& '${helper}' '${url}'; ` +
       `if ([Net.ServicePointManager]::ServerCertificateValidationCallback -ne $before) { throw 'TLS callback not restored' }`;
     await assert.rejects(() => execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-      env: { ...env, EMS_INSECURE: '0' }, timeout: 30000,
+      env: { ...env, PRODUCTION_EMS_INSECURE: '0' }, timeout: 30000,
     }));
     const result = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-      env: { ...env, EMS_INSECURE: '1' }, timeout: 30000,
+      env: { ...env, PRODUCTION_EMS_INSECURE: '1' }, timeout: 30000,
     });
-    assert.match(result.stdout, /EMS_INSECURE=1 disables certificate verification for EMS requests/);
+    assert.match(result.stdout, /EMS insecure mode disables certificate verification for EMS requests/);
     assert.match(result.stdout, /Mock product/);
+    assert.equal(userType, 'CUSTOMER');
     assert.ok(connections.length > 0);
     assert.ok(connections.every((connection) => connection?.toLowerCase() === 'close'));
   } finally {

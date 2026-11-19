@@ -8,6 +8,7 @@ const { createActSessions } = require('./act-sessions');
 const { validateMemoryValues } = require('./entitlement-memory');
 const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
+const { getEmsConfig } = require('./ems-config');
 const LeaseDates = require('./public/lease-dates');
 
 // Load environment variables from a local .env file when one is present so the app can run
@@ -21,11 +22,20 @@ if (fs.existsSync(envFile)) {
   }
 }
 
-const { EMS_URL, EMS_INSECURE, EMS_API_VERSION, EMS_USER_TYPE, ACT_URL, ACT_DATABASE } = process.env;
-const PORT = process.env.PORT || 3000;
+const { ACT_URL, ACT_DATABASE } = process.env;
+const PORT = process.env.INTEGRATION_PORT || process.env.PORT || 3000;
 const SENTINEL_LDK_ENFORCEMENT_ID = '1';
+let emsConfig;
+try {
+  emsConfig = getEmsConfig(process.env, process.argv.slice(2));
+  if (!ACT_URL) throw new Error('Set ACT_URL in .env.');
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+const is_test_mode = emsConfig.isTestMode;
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
-const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'));
+const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'), is_test_mode);
 
 // Shared helper that formats a Date as an EMS-friendly timestamp with a timezone offset.
 
@@ -76,11 +86,6 @@ async function getEntitlementProducts(ems) {
     defaultVersionLabel: formData.defaultVersionLabel,
     leaseExpiryRange: formData.leaseExpiryRange,
   };
-}
-
-if (!EMS_URL || !ACT_URL) {
-  console.error('Set EMS_URL and ACT_URL in .env');
-  process.exit(1);
 }
 
 // Passwords are not retained, so an expired EMS session requires a fresh login.
@@ -180,12 +185,12 @@ fs.watch(publicDir, (eventType, filename) => {
 const sessions = createActSessions(() => ({
   async authenticate(username, password, actUsername, actPassword) {
     this.ems = new EmsClient({
-      baseUrl: EMS_URL,
+      baseUrl: emsConfig.baseUrl,
       username,
       password,
-      insecure: EMS_INSECURE === '1',
-      apiVersion: EMS_API_VERSION || 'v90',
-      userType: EMS_USER_TYPE || 'ISV',
+      insecure: emsConfig.insecure,
+      apiVersion: emsConfig.apiVersion,
+      userType: emsConfig.userType,
       serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
     });
     try {
@@ -224,14 +229,17 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(pageIncludes(publicDir, path.join(__dirname, 'partials')));
+app.use(pageIncludes(publicDir, path.join(__dirname, 'partials'), is_test_mode));
 app.use(express.static(publicDir));
 app.get('/vendor/forge.min.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'node_modules', 'node-forge', 'dist', 'forge.min.js'));
 });
 
 app.post('/api/login', express.json(), async (req, res) => {
-  const { username, password, actUsername, actPassword } = req.body || {};
+  const { username, password, actUsername, actPassword, emsMode } = req.body || {};
+  if (emsMode !== undefined && emsMode !== (is_test_mode ? 'test' : 'production')) {
+    return res.status(409).json({ error: 'EMS server mode changed. Reload the login page and try again.' });
+  }
   if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password ||
       typeof actUsername !== 'string' || !actUsername.trim() || typeof actPassword !== 'string' || !actPassword) {
     return res.status(400).json({ error: 'EMS and Act! usernames and passwords are required' });
@@ -256,7 +264,7 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/session', (req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ authenticated: Boolean(sessions.get(req)?.ems.authenticated) });
+  res.json({ authenticated: Boolean(sessions.get(req)?.ems.authenticated), emsMode: is_test_mode ? 'test' : 'production' });
 });
 
 app.use('/api', (req, res, next) => {
@@ -929,13 +937,14 @@ app.use((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(404).type('text').send('Not found');
   fs.readFile(path.join(publicDir, '404.html'), 'utf8', (err, html) => {
     if (err) return res.status(404).type('text').send('Page not found');
-    res.status(404).type('html').send(renderPage(html, path.join(__dirname, 'partials'), '/404.html'));
+    res.status(404).set('Cache-Control', 'no-store').type('html').send(renderPage(html, path.join(__dirname, 'partials'), '/404.html', is_test_mode));
   });
 });
 
 // Start the HTTP server and print both localhost and LAN URLs for convenience when running
 // the app on a development machine.
 app.listen(PORT, '0.0.0.0', () => {
+  console.log(`EMS product IDs: ${is_test_mode ? 'test' : 'production'}`);
   console.log(`Local: http://localhost:${PORT}`);
   const addresses = Object.values(os.networkInterfaces())
     .flat()

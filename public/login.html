@@ -44,13 +44,18 @@
     const actFields = document.querySelector('#actCredentials');
     const continueLink = document.querySelector('#continueLink');
     const savedActHint = document.querySelector('#savedActHint');
-    const storageKeyFor = (username) => `act-credentials:v1:${username}`;
+    let emsMode = null;
+    const storageKeyFor = (username) => `act-credentials:v2:${emsMode}:${username}`;
+    function savedCredentialsFor(username) {
+      return localStorage.getItem(storageKeyFor(username)) ||
+        (emsMode === 'production' ? localStorage.getItem(`act-credentials:v1:${username}`) : null);
+    }
 
     function updateConfigureButton() {
       let saved = false;
       try {
         const username = form.elements.username.value;
-        saved = Boolean(username && localStorage.getItem(storageKeyFor(username)));
+        saved = Boolean(emsMode && username && savedCredentialsFor(username));
       } catch (err) {
         status.textContent = 'Could not check saved Act! credentials: ' + err.message;
         status.classList.add('error');
@@ -85,6 +90,9 @@
         const response = await fetch('/api/session');
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || response.statusText);
+        if (!['test', 'production'].includes(data.emsMode)) throw new Error('Invalid EMS server mode.');
+        emsMode = data.emsMode;
+        updateConfigureButton();
         if (data.authenticated) window.location.replace('/');
       } catch (err) {
         status.textContent = 'Could not check the EMS session: ' + err.message;
@@ -99,6 +107,9 @@
       status.classList.remove('error');
       const fields = new FormData(form);
       try {
+        await sessionReady;
+        if (!emsMode) await checkSession();
+        if (!emsMode) throw new Error('Could not determine the EMS server mode. Reload the page and try again.');
         const username = fields.get('username');
         const password = fields.get('password');
         const storageKey = storageKeyFor(username);
@@ -109,7 +120,7 @@
           if (!act.username.trim() || !act.password) throw new Error('Enter the Act! username and password.');
           encrypted = await loginCredentials.encrypt(username, password, act);
         } else {
-          const saved = localStorage.getItem(storageKey);
+          const saved = savedCredentialsFor(username);
           if (!saved) {
             setConfigure(true);
             throw new Error('No Act! login is saved for this EMS username. Enter the Act! credentials below.');
@@ -120,6 +131,7 @@
             if (!globalThis.crypto?.subtle && !globalThis.Worker) throw err;
             throw new Error('Could not unlock the saved Act! login. Check your EMS password or configure Act! login again.');
           }
+          if (!localStorage.getItem(storageKey)) encrypted = saved;
         }
         const response = await fetch('/api/login', {
           method: 'POST',
@@ -129,6 +141,7 @@
             password,
             actUsername: act.username,
             actPassword: act.password,
+            emsMode,
           }),
         });
         const data = await response.json();
@@ -155,7 +168,7 @@
       }
     });
 
-    checkSession();
+    const sessionReady = checkSession();
   </script>
 </body>
 </html>

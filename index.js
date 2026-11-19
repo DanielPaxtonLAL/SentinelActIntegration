@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { EmsClient } = require('./ems-client');
+const { getEmsConfig, getEmsConfigForUrl } = require('./ems-config');
 
 // Load KEY=VALUE lines from .env without overriding existing environment variables.
 const envFile = path.join(__dirname, '.env');
@@ -24,8 +25,9 @@ async function main() {
   const args = process.argv.slice(2);
   const argUrl = /^https?:\/\//i.test(args[0] || '') ? args.shift() : '';
   const [apiPath, apiArg] = args;
-  const url = argUrl || process.env.EMS_URL;
   const { EMS_USER, EMS_PASS, EMS_INSECURE } = process.env;
+  const configured = argUrl ? getEmsConfigForUrl(process.env, argUrl) : getEmsConfig(process.env);
+  const url = argUrl || configured.baseUrl;
   if (!url || !EMS_USER || !EMS_PASS) {
     console.error('Usage: node index.js <emsUrl> [apiPath]  (set EMS_USER and EMS_PASS)');
     process.exit(1);
@@ -35,9 +37,9 @@ async function main() {
     baseUrl: url,
     username: EMS_USER,
     password: EMS_PASS,
-    insecure: EMS_INSECURE === '1',
-    apiVersion: process.env.EMS_API_VERSION || 'v90',
-    userType: process.env.EMS_USER_TYPE || 'ISV',
+    insecure: configured ? configured.insecure : EMS_INSECURE === '1',
+    apiVersion: configured ? configured.apiVersion : process.env.EMS_API_VERSION || 'v90',
+    userType: configured ? configured.userType : process.env.EMS_USER_TYPE || 'ISV',
   });
 
   console.log('Authenticating with', url);

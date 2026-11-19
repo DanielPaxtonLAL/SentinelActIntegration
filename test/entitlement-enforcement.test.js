@@ -4,14 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const ids = (id) => ({ 'test-ems-server-product-id': id, 'production-ems-server-product-id': id });
 const formJson = {
-  'base-product-id': '60',
+  'base-product-id': ids('60'),
   'highest-product-key-serial-number-customer-id': '1010',
   'lease-expiry-range': { 'min-months': 6, 'max-months': 24 },
-  'product-options': { standalone: { label: 'Standalone', 'product-id': '6048' }, link: { label: 'Link', 'product-id': '6049' } },
-  'optional-products': { pivot: { label: 'Pivot', 'product-id': '6051' } },
-  version: { v22: { label: 'Version 22', 'product-id': '' }, v23: { label: 'Version 23', 'product-id': '6052' } },
-  lease: { lease: { label: 'Lease', 'product-id': '6050' } },
+  'product-options': { standalone: { label: 'Standalone', ...ids('6048') }, link: { label: 'Link', ...ids('6049') } },
+  'optional-products': { pivot: { label: 'Pivot', ...ids('6051') } },
+  version: { v22: { label: 'Version 22', ...ids('') }, v23: { label: 'Version 23', ...ids('6052') } },
+  lease: { lease: { label: 'Lease', ...ids('6050') } },
 };
 
 function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true, existingStartDate = '2026-11-10', serialOptions = {}) {
@@ -121,8 +122,9 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
     if (name === './act-sessions') return require('../act-sessions');
+    if (name === './ems-config') return require('../ems-config');
     if (name === './entitlement-memory') return require('../entitlement-memory');
-    if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson) };
+    if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson, false) };
     if (name === './public/lease-dates') return require('../public/lease-dates');
     if (name === './page-includes') return require('../page-includes');
     return require(name);
@@ -130,7 +132,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire,
     __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
+    process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }
     },

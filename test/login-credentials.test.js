@@ -73,7 +73,7 @@ test('HTTP worker encryption is compatible with Web Crypto and rejects wrong pas
   await assert.rejects(() => http.decrypt('ems-\u00e9', 'wrong', fromSecure));
 });
 
-function loginPage(storage, loginResult = { ok: true }, overrides = {}) {
+function loginPage(storage, loginResult = { ok: true }, overrides = {}, emsMode = 'production') {
   const elements = {};
   const create = () => ({
     value: '', hidden: false, disabled: false, textContent: '',
@@ -105,7 +105,7 @@ function loginPage(storage, loginResult = { ok: true }, overrides = {}) {
       get(name) { return this.form.elements[name].value; }
     },
     async fetch(url, options) {
-      if (url === '/api/session') return { ok: true, async json() { return { authenticated: false }; } };
+      if (url === '/api/session') return { ok: true, async json() { return { authenticated: false, emsMode }; } };
       requests.push(JSON.parse(options.body));
       return { ok: loginResult.ok, async json() { return loginResult.ok ? { ok: true } : { error: 'Rejected' }; } };
     },
@@ -113,11 +113,12 @@ function loginPage(storage, loginResult = { ok: true }, overrides = {}) {
   });
 
   vm.runInContext(loginScript, sandbox);
-  return { elements, requests, redirects };
+  return { elements, requests, redirects, ready: vm.runInContext('sessionReady', sandbox) };
 }
 
-test('configuration is understated only when saved credentials exist for the entered EMS username', () => {
-  const page = loginPage({ getItem(key) { return key === 'act-credentials:v1:alice' ? 'encrypted' : null; } });
+test('configuration is understated only when saved credentials exist for the entered EMS username', async () => {
+  const page = loginPage({ getItem(key) { return key === 'act-credentials:v2:production:alice' ? 'encrypted' : null; } });
+  await page.ready;
   const username = page.elements.loginForm.elements.username;
   const configure = page.elements.configureButton;
   const hint = page.elements.savedActHint;
@@ -159,7 +160,7 @@ test('login page configures and unlocks saved credentials without Web Crypto', a
   form.elements.actPassword.value = 'act-secret';
   await form.submit({ preventDefault() {} });
   assert.deepEqual(first.redirects, ['/']);
-  assert.doesNotMatch(records.get('act-credentials:v1:ems-user'), /act-user|act-secret|ems-secret/);
+  assert.doesNotMatch(records.get('act-credentials:v2:production:ems-user'), /act-user|act-secret|ems-secret/);
   const later = loginPage(storage, { ok: true }, overrides);
   later.elements.loginForm.elements.username.value = 'ems-user';
   later.elements.loginForm.elements.password.value = 'ems-secret';
@@ -182,10 +183,10 @@ test('first login saves only ciphertext and later login unlocks it without re-en
   form.elements.actPassword.value = 'act-secret';
   await form.submit({ preventDefault() {} });
   assert.deepEqual(first.requests[0], {
-    username: 'ems-user', password: 'ems-secret', actUsername: 'act-user', actPassword: 'act-secret',
+    username: 'ems-user', password: 'ems-secret', actUsername: 'act-user', actPassword: 'act-secret', emsMode: 'production',
   });
   assert.deepEqual(first.redirects, ['/']);
-  const saved = records.get('act-credentials:v1:ems-user');
+  const saved = records.get('act-credentials:v2:production:ems-user');
   assert.doesNotMatch(saved, /ems-secret|act-user|act-secret/);
   assert.equal(form.elements.password.value, '');
   assert.equal(form.elements.actPassword.value, '');
@@ -203,7 +204,39 @@ test('first login saves only ciphertext and later login unlocks it without re-en
   await wrong.elements.loginForm.submit({ preventDefault() {} });
   assert.equal(wrong.requests.length, 0);
   assert.match(wrong.elements.status.textContent, /Could not unlock/);
-  assert.equal(records.get('act-credentials:v1:ems-user'), saved);
+  assert.equal(records.get('act-credentials:v2:production:ems-user'), saved);
+});
+
+test('production credentials migrate and remain separate from test credentials', async () => {
+  const old = await context().loginCredentials.encrypt('same-user', 'ems-secret', {
+    username: 'production-act', password: 'production-secret',
+  });
+  const records = new Map([['act-credentials:v1:same-user', old]]);
+  const storage = {
+    getItem(key) { return records.get(key) ?? null; },
+    setItem(key, value) { records.set(key, value); },
+  };
+  const production = loginPage(storage);
+  production.elements.loginForm.elements.username.value = 'same-user';
+  production.elements.loginForm.elements.password.value = 'ems-secret';
+  await production.elements.loginForm.submit({ preventDefault() {} });
+  assert.equal(production.requests[0].actUsername, 'production-act');
+  assert.equal(records.get('act-credentials:v2:production:same-user'), old);
+
+  const testing = loginPage(storage, { ok: true }, {}, 'test');
+  testing.elements.loginForm.elements.username.value = 'same-user';
+  testing.elements.loginForm.elements.password.value = 'ems-secret';
+  await testing.elements.loginForm.submit({ preventDefault() {} });
+  assert.equal(testing.requests.length, 0);
+  assert.equal(testing.elements.actCredentials.hidden, false);
+  testing.elements.loginForm.elements.password.value = 'ems-secret';
+  testing.elements.loginForm.elements.actUsername.value = 'test-act';
+  testing.elements.loginForm.elements.actPassword.value = 'test-secret';
+  await testing.elements.loginForm.submit({ preventDefault() {} });
+  assert.equal(testing.requests[0].actUsername, 'test-act');
+  assert.equal(testing.requests[0].emsMode, 'test');
+  assert.notEqual(records.get('act-credentials:v2:test:same-user'), old);
+  assert.equal(records.get('act-credentials:v2:production:same-user'), old);
 });
 
 test('failed login does not overwrite previously saved credentials', async () => {

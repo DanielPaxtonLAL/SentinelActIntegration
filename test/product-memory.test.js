@@ -847,16 +847,20 @@ test('entitlements list links to the separate create form page', () => {
 test('shared head, disclaimer and nav are included into pages with the right current link', () => {
   const { renderPage } = require('../page-includes');
   const dir = path.join(__dirname, '..');
-  const render = (file, route) => renderPage(fs.readFileSync(path.join(dir, 'public', file), 'utf8'), path.join(dir, 'partials'), route);
+  const render = (file, route, isTestMode = false) => renderPage(fs.readFileSync(path.join(dir, 'public', file), 'utf8'), path.join(dir, 'partials'), route, isTestMode);
   const entitlements = render('entitlements.html', '/entitlements.html');
   assert.doesNotMatch(entitlements, /<!-- include:/);
   assert.match(entitlements, /<link rel="stylesheet" href="\/styles.css">\s*<script src="\/theme.js"><\/script>/);
-  assert.match(entitlements, /class="dev-disclaimer">Development in progress/);
+  assert.match(entitlements, /class="dev-disclaimer">! WARNING: This is the Production EMS !<\/div>/);
   assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/activations.html">Activations<\/a>\s*<a href="\/">Customers<\/a>/);
   const activations = render('activations.html', '/activations.html');
   assert.match(activations, /<a href="\/activations.html" aria-current="page">Activations<\/a>/);
   assert.match(activations, /All activations/);
   assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Activations<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
+  for (const [file, route] of [['login.html', '/login.html'], ['entitlements.html', '/entitlements.html'], ['404.html', '/404.html']]) {
+    assert.match(render(file, route, true), /! WARNING: This is the Test EMS !/);
+    assert.match(render(file, route, false), /! WARNING: This is the Production EMS !/);
+  }
 });
 
 test('deletes an entitlement with DELETE on the numeric entitlement ws path', async () => {

@@ -1,7 +1,10 @@
 {
-    "_comment": "EMS internal product IDs and form labels. Keys starting with _ are comments. Point EMS_FORM_DATA in .env at a different copy of this file for another EMS server.",
+    "_comment": "EMS product IDs and form labels. Keys starting with _ are comments. IS_TEST_MODE in .env selects the test or production IDs.",
 
-    "base-product-id": "6047",
+    "base-product-id": {
+        "test-ems-server-product-id": "6047",
+        "production-ems-server-product-id": "1"
+    },
 
     "_highest-product-key-serial-number-customer-id-comment": "This customer's Ref ID 1 is a serial counter incremented after a new draft is saved. The form selects serials from the actual entitlement memory values. The customer will be excluded from being able to have entitlements.",
     "highest-product-key-serial-number-customer-id": "1",
@@ -16,11 +19,13 @@
         "_comment": "The form enforces at least one of these.",
         "standalone": {
             "label": "Standalone Irricad",
-            "product-id": "6048"
+            "test-ems-server-product-id": "6048",
+            "production-ems-server-product-id": "25"
         },
         "link": {
             "label": "Link Irricad",
-            "product-id": "6049"
+            "test-ems-server-product-id": "6049",
+            "production-ems-server-product-id": "24"
         }
     },
 
@@ -28,19 +33,22 @@
         "_comment": "Any or none of these can be selected.",
         "pivot": {
             "label": "Pivot Irricad",
-            "product-id": "6051"
+            "test-ems-server-product-id": "6051",
+            "production-ems-server-product-id": "22"
         }
     },
 
     "version": {
-        "_comment": "Only one can be selected. The option with an empty product-id is the default and adds no product.",
+        "_comment": "Only one can be selected. An option with an empty product ID is the default and adds no product.",
         "v22": {
             "label": "Version 22",
-            "product-id": ""
+            "test-ems-server-product-id": "",
+            "production-ems-server-product-id": ""
         },
         "v23": {
             "label": "Version 23",
-            "product-id": "6052"
+            "test-ems-server-product-id": "6052",
+            "production-ems-server-product-id": "21"
         }
     },
 
@@ -48,7 +56,8 @@
         "_comment": "Selecting this shows the lease expiry date and writes the base product Expiry Date segment.",
         "lease": {
             "label": "Lease",
-            "product-id": "6050"
+            "test-ems-server-product-id": "6050",
+            "production-ems-server-product-id": "34"
         }
     }
 }

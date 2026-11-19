@@ -106,7 +106,7 @@ test('EMS users and their Act credentials are isolated', async () => {
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire, __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example', ACT_USER: 'unused', ACT_PASS: 'unused' } }, console,
+    process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example', ACT_USER: 'unused', ACT_PASS: 'unused' } }, console,
   });
   const res = () => ({
     statusCode: 200,
@@ -176,7 +176,7 @@ test('EMS users and their Act credentials are isolated', async () => {
   assert.equal(session.body.authenticated, false);
 });
 
-test('server requires both configured API addresses', () => {
+test('server requires the selected EMS address and Act address', () => {
   const root = path.join(__dirname, '..');
   const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
   const customRequire = (name) => {
@@ -185,14 +185,18 @@ test('server requires both configured API addresses', () => {
     if (name.startsWith('./')) return require(path.join(root, name));
     return require(name);
   };
-  for (const env of [{ EMS_URL: 'https://ems.example' }, { ACT_URL: 'https://act.example' }]) {
+  for (const [env, expected] of [
+    [{ IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example' }, 'Set ACT_URL in .env.'],
+    [{ IS_TEST_MODE: 'true', ACT_URL: 'https://act.example' }, 'Set TEST_EMS_URL in .env.'],
+    [{ PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' }, 'Set IS_TEST_MODE to true or false in .env.'],
+  ]) {
     const errors = [];
     assert.throws(() => vm.runInNewContext(source, {
       require: customRequire, __dirname: root,
-      process: { env, exit(code) { throw new Error(`Exit ${code}`); } },
+      process: { argv: ['node', 'server.js'], env, exit(code) { throw new Error(`Exit ${code}`); } },
       console: { error(message) { errors.push(message); } },
     }), /Exit 1/);
-    assert.deepEqual(errors, ['Set EMS_URL and ACT_URL in .env']);
+    assert.deepEqual(errors, [expected]);
   }
 });
 
@@ -227,7 +231,7 @@ test('real HTTP login protects pages and API requests', async () => {
   };
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire, __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } }, console,
+    process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } }, console,
   });
   await new Promise((resolve) => server.once('listening', resolve));
   try {
@@ -235,6 +239,13 @@ test('real HTTP login protects pages and API requests', async () => {
     const page = await fetch(`${base}/entitlements.html`, { redirect: 'manual' });
     assert.equal(page.status, 302);
     assert.equal(page.headers.get('location'), '/login.html');
+    const loginPage = await fetch(`${base}/login.html`);
+    assert.equal(loginPage.headers.get('cache-control'), 'no-store');
+    assert.match(await loginPage.text(), /! WARNING: This is the Production EMS !/);
+    const missingPage = await fetch(`${base}/missing-page`);
+    assert.equal(missingPage.status, 404);
+    assert.equal(missingPage.headers.get('cache-control'), 'no-store');
+    assert.match(await missingPage.text(), /! WARNING: This is the Production EMS !/);
     assert.equal((await fetch(`${base}/api/customers`)).status, 401);
     assert.equal((await fetch(`${base}/vendor/forge.min.js`)).status, 200);
     assert.equal((await fetch(`${base}/login-crypto-worker.js`)).status, 200);
@@ -249,7 +260,9 @@ test('real HTTP login protects pages and API requests', async () => {
     const act = await fetch(`${base}/api/act/companies`, { headers: { Cookie: cookie } });
     assert.equal(act.status, 200);
     assert.deepEqual(await act.json(), ['act-alice']);
-    assert.equal((await fetch(`${base}/entitlements.html`, { headers: { Cookie: cookie } })).status, 200);
+    const protectedPage = await fetch(`${base}/entitlements.html`, { headers: { Cookie: cookie } });
+    assert.equal(protectedPage.status, 200);
+    assert.match(await protectedPage.text(), /! WARNING: This is the Production EMS !/);
     await fetch(`${base}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal((await fetch(`${base}/api/customers`, { headers: { Cookie: cookie } })).status, 401);
   } finally {

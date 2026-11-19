@@ -51,7 +51,7 @@ function customerRoute() {
   vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
     require: customRequire,
     __dirname: root,
-    process: { env: { EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
+    process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     console,
   });
   return async (id, parentId) => {

@@ -24,15 +24,33 @@ function Get-ConfigValue([string]$Name) {
   return $null
 }
 
+function Get-EmsConnectionValue([string]$Name) {
+  if ($emsPrefix) { return Get-ConfigValue "${emsPrefix}_EMS_$Name" }
+  return Get-ConfigValue "EMS_$Name"
+}
+
 try {
   $uri = [Uri]$BaseUrl
   if ($uri.Scheme -notin @('http', 'https')) {
     throw 'Base URL must use http or https.'
   }
   $base = $BaseUrl.TrimEnd('/')
+  $matchingPrefixes = @(
+    foreach ($prefix in @('PRODUCTION', 'TEST')) {
+      $configuredUrl = Get-ConfigValue "${prefix}_EMS_URL"
+      if ($configuredUrl) {
+        $configuredUri = [Uri]$configuredUrl
+        if ([string]::Equals($uri.AbsoluteUri.TrimEnd('/'), $configuredUri.AbsoluteUri.TrimEnd('/'), [StringComparison]::Ordinal)) {
+          $prefix
+        }
+      }
+    }
+  )
+  if ($matchingPrefixes.Count -gt 1) { throw 'The test and production EMS URLs must be different to select helper settings.' }
+  $emsPrefix = if ($matchingPrefixes.Count -eq 1) { $matchingPrefixes[0] } else { $null }
   $requestOptions = @{}
-  if ($uri.Scheme -eq 'https' -and (Get-ConfigValue 'EMS_INSECURE') -eq '1') {
-    Write-Warning 'EMS_INSECURE=1 disables certificate verification for EMS requests, including redirects. Use only temporarily on a trusted network.'
+  if ($uri.Scheme -eq 'https' -and (Get-EmsConnectionValue 'INSECURE') -eq '1') {
+    Write-Warning 'EMS insecure mode disables certificate verification for EMS requests, including redirects. Use only temporarily on a trusted network.'
     $requestOptions.DisableKeepAlive = $true
     if ($PSVersionTable.PSVersion.Major -ge 6) {
       $requestOptions.SkipCertificateCheck = $true
@@ -74,9 +92,9 @@ public sealed class SentinelEmsCertificateValidator {
       $restoreCertificateCallback = $true
     }
   }
-  $apiVersion = Get-ConfigValue 'EMS_API_VERSION'
+  $apiVersion = Get-EmsConnectionValue 'API_VERSION'
   if (-not $apiVersion) { $apiVersion = 'v90' }
-  if ($apiVersion -notmatch '^v\d+$') { throw 'EMS_API_VERSION must look like v90.' }
+  if ($apiVersion -notmatch '^v\d+$') { throw 'EMS API version must look like v90.' }
 
   $vendorId = Get-ConfigValue 'EMS_VENDOR_ID'
   if (-not $vendorId) { $vendorId = '2' }
@@ -84,7 +102,7 @@ public sealed class SentinelEmsCertificateValidator {
 
   $username = Get-ConfigValue 'EMS_USER'
   $password = Get-ConfigValue 'EMS_PASS'
-  $userType = Get-ConfigValue 'EMS_USER_TYPE'
+  $userType = Get-EmsConnectionValue 'USER_TYPE'
   if (-not $userType) { $userType = 'ISV' }
   if (-not $username -or -not $password) {
     $credential = Get-Credential -Message 'Enter your EMS credentials'
