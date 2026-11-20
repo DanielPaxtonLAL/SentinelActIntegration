@@ -426,8 +426,10 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-list { max-height: calc(100vh - 14rem); overflow: auto; }
 .entitlements-page .entitlement-list > table { width: 100%; margin: 0; }
 .entitlements-page .entitlement-list th { position: sticky; top: 0; z-index: 1; }
-.entitlements-page .entitlement-row { height: 3.5rem; cursor: pointer; }
-.entitlements-page .entitlement-row > td { white-space: nowrap; vertical-align: middle; }
+.entitlements-page .entitlement-row { cursor: pointer; }
+.entitlements-page .entitlement-row > td { padding: 0.5em .6rem; white-space: nowrap; vertical-align: middle; }
+.entitlements-page .entitlement-row .entitlement-actions button { padding: .15rem .5rem; }
+.entitlements-page .entitlement-row .entitlement-actions button:disabled { display: none; }
 .entitlements-page .entitlement-row:hover,
 .entitlements-page .entitlement-row:focus { background: var(--color-selected-bg); outline: 2px solid var(--color-selected-outline); outline-offset: -2px; }
 .entitlements-page .entitlement-row.selected { background: var(--color-selected-strong-bg); font-weight: 600; }

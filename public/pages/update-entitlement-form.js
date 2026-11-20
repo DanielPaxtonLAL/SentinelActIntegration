@@ -258,6 +258,9 @@ createApp({
         const response = await fetch(`/api/entitlements/${encodeURIComponent(this.editId)}`);
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || response.statusText);
+        if (String(data.entState ?? '').toUpperCase() !== 'DRAFT') {
+          throw new Error('Only draft entitlements can be edited.');
+        }
         const known = new Set([...this.accessProducts, ...this.optionalProducts, ...this.versionProducts].map((product) => product.id));
         this.savedMemory = Object.fromEntries((data.products || []).map((product) => [
           String(product.productId),

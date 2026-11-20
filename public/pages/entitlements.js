@@ -428,7 +428,11 @@ createApp({
         this.customersLoading = false;
       }
     },
+    isDraftEntitlement(entitlement) {
+      return String(entitlement?.state ?? '').toUpperCase() === 'DRAFT';
+    },
     openEditEntitlement(entitlement) {
+      if (!this.isDraftEntitlement(entitlement)) return;
       window.location.assign('/update-entitlement-form.html?id=' + encodeURIComponent(entitlement.id));
     },
     openCreateEntitlement() {

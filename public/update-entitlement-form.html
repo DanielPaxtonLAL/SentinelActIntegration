@@ -20,7 +20,7 @@
         <h2>Update entitlement</h2>
         <label>
           Customer
-          <select v-model="form.customerId" required :disabled="customersLoading || loading">
+          <select v-model="form.customerId" required :disabled="!entitlementLoaded || customersLoading || loading">
             <option value="" disabled>Select an EMS customer</option>
             <option v-for="customer in customers" :key="customer.customerId" :value="String(customer.customerId)">
               {{ customer.name || customer.customerName || ('Customer ' + customer.customerId) }}
@@ -28,18 +28,18 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading" :invalid="serialTooLarge">
+        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="!entitlementLoaded || loading" :invalid="serialTooLarge">
           <span v-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
         </serial-number-input>
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>
         <p v-else class="form-error" role="alert">Unable to find a unique editable Serial Number segment on the base product. Reload its memory before saving.</p>
         <label>
           <span>Irricad Order Code (refID 1) <span id="ref-id-remaining" class="form-hint character-count">- {{ 250 - form.refId1.length }} chars left</span></span>
-          <input v-model="form.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="loading">
+          <input v-model="form.refId1" type="text" maxlength="250" aria-describedby="ref-id-remaining" :disabled="!entitlementLoaded || loading">
         </label>
         <label>
           <span>Description <span id="description-remaining" class="form-hint character-count">- {{ 510 - form.description.length }} chars left</span></span>
-          <textarea v-model="form.description" maxlength="510" rows="3" aria-describedby="description-remaining" :disabled="loading"></textarea>
+          <textarea v-model="form.description" maxlength="510" rows="3" aria-describedby="description-remaining" :disabled="!entitlementLoaded || loading"></textarea>
         </label>
         <div class="product-grid">
           <fieldset class="access-products">
@@ -48,7 +48,7 @@
             <label v-for="product in accessProducts" :key="product.id" class="access-product-option">
               <input type="checkbox" :checked="form.productIds.includes(product.id)"
                 @change="setCheckboxProduct(product.id, $event.target.checked)"
-                :disabled="loading || productsLoading || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+                :disabled="!entitlementLoaded || loading || productsLoading || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
               {{ product.label }}
             </label>
           </fieldset>
@@ -57,7 +57,7 @@
             <label v-for="product in otherOptionalProducts" :key="product.id" class="access-product-option">
               <input type="checkbox" :checked="form.productIds.includes(product.id)"
                 @change="setCheckboxProduct(product.id, $event.target.checked)"
-                :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
+                :disabled="!entitlementLoaded || loading || productsLoading || !product.available || (form.productIds.length >= 99 && !form.productIds.includes(product.id))">
               {{ product.label }}
               <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
             </label>
@@ -67,13 +67,13 @@
             <p class="form-hint">Up to and including</p>
             <label class="access-product-option">
               <input type="radio" name="version" :checked="!selectedVersionId"
-                @change="setVersionProduct('')" :disabled="loading || productsLoading">
+                @change="setVersionProduct('')" :disabled="!entitlementLoaded || loading || productsLoading">
               {{ defaultVersionLabel }} (default)
             </label>
             <label v-for="product in versionProducts" :key="product.id" class="access-product-option">
               <input type="radio" name="version" :checked="selectedVersionId === product.id"
                 @change="setVersionProduct(product.id)"
-                :disabled="loading || productsLoading || !product.available || (form.productIds.length >= 99 && !selectedVersionId)">
+                :disabled="!entitlementLoaded || loading || productsLoading || !product.available || (form.productIds.length >= 99 && !selectedVersionId)">
               {{ product.label }}
               <span v-if="!product.available" class="form-hint">(unavailable in EMS)</span>
             </label>
@@ -90,7 +90,7 @@
             <div v-if="leaseSelected" class="lease-options">
               <label v-if="baseExpirySegment && Number(baseExpirySegment.size) === 4">
                 Lease expiry date
-                <input v-model="leaseExpiryDate" type="date" :min="leaseBounds.min" :max="leaseBounds.max" required :disabled="loading || leaseBounds.min > leaseBounds.max">
+                <input v-model="leaseExpiryDate" type="date" :min="leaseBounds.min" :max="leaseBounds.max" required :disabled="!entitlementLoaded || loading || leaseBounds.min > leaseBounds.max">
                 <span v-if="leaseBounds.min <= leaseBounds.max" class="form-hint">Allowed from {{ leaseBounds.min }} to {{ leaseBounds.max }} (inclusive).</span>
                 <span v-else class="form-error" role="alert">No valid lease expiry dates are available for this start date.</span>
               </label>

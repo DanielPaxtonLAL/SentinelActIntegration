@@ -334,8 +334,30 @@ function versionFor(products, baseProductId = '6047') {
   return definition.computed.decodedVersion.call(app);
 }
 
+test('only draft entitlements can open the edit form', () => {
+  const app = { isDraftEntitlement: definition.methods.isDraftEntitlement };
+  const previousAssign = pageLocation.assign;
+  let destination;
+  pageLocation.assign = (url) => { destination = url; };
+  try {
+    for (const state of ['PRODUCT_KEY_GENERATED', 'QUEUED', 'PRODUCED', '', undefined]) {
+      const entitlement = { id: '123', state };
+      assert.equal(app.isDraftEntitlement(entitlement), false);
+      definition.methods.openEditEntitlement.call(app, entitlement);
+      assert.equal(destination, undefined);
+    }
+    assert.equal(app.isDraftEntitlement({ state: 'draft' }), true);
+    definition.methods.openEditEntitlement.call(app, { id: '123', state: 'DRAFT' });
+    assert.equal(destination, '/update-entitlement-form.html?id=123');
+  } finally {
+    pageLocation.assign = previousAssign;
+  }
+  assert.match(html, /:disabled="!isDraftEntitlement\(entitlement\) \|\| producing \|\| activating" @click="openEditEntitlement\(entitlement\)">Edit<\/button>/);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.entitlements-page \.entitlement-row \.entitlement-actions button:disabled \{[^}]*display:\s*none/);
+});
+
 test('lists generated Product Key entitlements alongside other states', async () => {
-  assert.match(html, /<button v-if="String\(entitlement\.state \?\? ''\)\.toUpperCase\(\) !== 'PRODUCT_KEY_GENERATED'"[^>]*@click="openEditEntitlement\(entitlement\)">Edit<\/button>/);
   assert.doesNotMatch(html, />More options<\/button>/);
   const entries = [
     { id: '1', state: 'PRODUCT_KEY_GENERATED', type: 2 },
@@ -352,10 +374,12 @@ test('lists generated Product Key entitlements alongside other states', async ()
   assert.equal(app.error, '');
 });
 
-test('entitlement list rows have a uniform height without wrapping cell contents', () => {
+test('entitlement list rows use compact spacing without wrapping cell contents', () => {
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.match(styles, /\.entitlements-page \.entitlement-row \{[^}]*height:\s*3\.5rem/);
+  assert.doesNotMatch(styles, /\.entitlements-page \.entitlement-row \{[^}]*height:/);
   assert.match(styles, /\.entitlements-page \.entitlement-row > td \{[^}]*white-space:\s*nowrap/);
+  assert.match(styles, /\.entitlements-page \.entitlement-row > td \{[^}]*padding:\s*0\.5em \.6rem/);
+  assert.match(styles, /\.entitlements-page \.entitlement-row \.entitlement-actions button \{[^}]*padding:\s*\.15rem \.5rem/);
 });
 
 test('labels entitlement types and allows filtering by key update', () => {

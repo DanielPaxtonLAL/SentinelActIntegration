@@ -163,7 +163,7 @@ test('update form prevents editing a lease when the entitlement start date is un
   let submissions = 0;
   const app = entitlementApp(async (_url, options) => {
     if (options?.method === 'PUT') submissions++;
-    return { ok: true, json: async () => ({ customerId: '5', products: [], startDate: 'invalid' }) };
+    return { ok: true, json: async () => ({ entState: 'DRAFT', customerId: '5', products: [], startDate: 'invalid' }) };
   }, 'update-entitlement-form.html');
   app.editId = '123';
   await app.prefillFromEntitlement();
@@ -177,12 +177,34 @@ test('update form prevents editing a lease when the entitlement start date is un
   assert.match(html, /:disabled="loading \|\| customersLoading \|\| productsLoading \|\| productError \|\| !entitlementLoaded/);
 });
 
+test('update form rejects non-draft or missing entitlement states', async () => {
+  for (const entState of ['PRODUCT_KEY_GENERATED', 'QUEUED', 'PRODUCED', '', undefined]) {
+    let submissions = 0;
+    const app = entitlementApp(async (_url, options) => {
+      if (options?.method === 'PUT') submissions++;
+      return { ok: true, json: async () => ({ entState, customerId: '5', products: [] }) };
+    }, 'update-entitlement-form.html');
+    app.editId = '123';
+    await app.prefillFromEntitlement();
+    assert.equal(app.entitlementLoaded, false);
+    assert.match(app.error, /Only draft entitlements can be edited/);
+    await app.createEntitlement();
+    assert.equal(submissions, 0);
+  }
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'update-entitlement-form.html'), 'utf8');
+  for (const field of ['form.customerId', 'serialNumber', 'form.refId1', 'form.description', 'leaseExpiryDate']) {
+    assert.match(html, new RegExp(`v-model="${field.replace('.', '\\.')}"[^>]*:disabled="!entitlementLoaded`));
+  }
+  assert.match(html, /@change="setCheckboxProduct\(product.id, \$event.target.checked\)"\s*:disabled="!entitlementLoaded/);
+  assert.match(html, /@change="setVersionProduct\(''\)" :disabled="!entitlementLoaded/);
+});
+
 test('update form pads the loaded serial without changing its encoded value', async () => {
   const encoded = '31373733';
   const app = entitlementApp(async (url) => ({
     ok: true,
     json: async () => url.startsWith('/api/entitlements/')
-      ? { customerId: '5', refId1: 'ORDER-123', startDate: '2026-11-12', products: [{
+      ? { entState: 'DRAFT', customerId: '5', refId1: 'ORDER-123', startDate: '2026-11-12', products: [{
         productId: '60', memorySegments: [{ name: 'Serial Number', saot: true, text: encoded }],
       }] }
       : [],
@@ -231,7 +253,7 @@ test('update form preserves saved values instead of using product memory default
   const app = entitlementApp(async (url) => {
     if (url.startsWith('/api/entitlements/')) return {
       ok: true, json: async () => ({
-        customerId: '5', startDate: '2026-11-10',
+        entState: 'DRAFT', customerId: '5', startDate: '2026-11-10',
         products: [
           { productId: '60', memorySegments: [{ id: '90', saot: true, text: 'CAFE' }, { id: '91', saot: true, name: 'Serial Number', text: '30303031' }] },
           { productId: '6048', memorySegments: [{ id: '92', saot: true, text: 'BEEF' }] },

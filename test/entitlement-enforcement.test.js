@@ -239,6 +239,18 @@ test('product key details route validates entitlement ID and prevents caching', 
   assert.equal(response.headers['Cache-Control'], 'no-store');
 });
 
+test('update route rejects every non-draft or missing entitlement state', async () => {
+  for (const entState of ['PRODUCT_KEY_GENERATED', 'QUEUED', 'PRODUCED', '', undefined]) {
+    const route = createRoute([], undefined, [], true, true, true, undefined, {
+      entitlementDetails: { 123: { id: '123', entState } },
+    });
+    const { res, saved } = await route.submit({}, true);
+    assert.equal(res.statusCode, 400);
+    assert.match(res.body.error, /Only draft entitlements can be edited/);
+    assert.equal(saved, undefined);
+  }
+});
+
 test('activation validates the entitlement and key and does not retry uncertain outcomes', async () => {
   const activationEntitlement = {
     entitlementDetails: {

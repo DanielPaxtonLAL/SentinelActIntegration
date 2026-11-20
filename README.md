@@ -55,6 +55,8 @@ modify the app's code.
 
 New entitlements start on the current UTC date by default. Lease expiry dates
 are still checked against the local date as well as the entitlement start date.
+Only draft entitlements can be edited; the Edit button is disabled for all
+other states.
 
 For a generated Product Key entitlement, select **Activate**, choose the
 customer's C2V file, and download the resulting V2C file. Activations consume

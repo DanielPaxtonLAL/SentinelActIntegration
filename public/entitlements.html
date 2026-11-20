@@ -51,7 +51,7 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
                 <td class="entitlement-actions" @click.stop @keydown.stop>
-                  <button v-if="String(entitlement.state ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED'" type="button" class="button--constructive" :disabled="producing || activating" @click="openEditEntitlement(entitlement)">Edit</button>
+                  <button type="button" class="button--constructive" :disabled="!isDraftEntitlement(entitlement) || producing || activating" @click="openEditEntitlement(entitlement)">Edit</button>
                 </td>
               </tr>
             </tbody>
