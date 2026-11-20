@@ -121,17 +121,19 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
-    if (name === './act-sessions') return require('../act-sessions');
-    if (name === './ems-config') return require('../ems-config');
-    if (name === './entitlement-memory') return require('../entitlement-memory');
-    if (name === './entitlement-form-data') return { loadFormData: () => require('../entitlement-form-data').parseFormData(formJson, false) };
-    if (name === './public/lease-dates') return require('../public/lease-dates');
-    if (name === './page-includes') return require('../page-includes');
+    if (name === './act-sessions') return require('../src/act-sessions');
+    if (name === './ems-config') return require('../src/ems-config');
+    if (name === './product-key-serials') return require('../src/product-key-serials');
+    if (name === './environment') return require('../src/environment');
+    if (name === './entitlement-memory') return require('../src/entitlement-memory');
+    if (name === './entitlement-form-data') return { loadFormData: () => require('../src/entitlement-form-data').parseFormData(formJson, false) };
+    if (name === '../public/lease-dates') return require('../public/lease-dates');
+    if (name === './page-includes') return require('../src/page-includes');
     return require(name);
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
     require: customRequire,
-    __dirname: root,
+    __dirname: path.join(root, 'src'),
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [clock.getTime()])); }

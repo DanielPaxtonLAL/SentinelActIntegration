@@ -45,12 +45,12 @@ function customerRoute() {
     if (name === './act-client') return { ActClient };
     if (name === './act-sessions') return { createActSessions: (factory) => ({ get: () => factory(), remove() {} }) };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
-    if (name.startsWith('./')) return require(path.join(root, name));
+    if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
     require: customRequire,
-    __dirname: root,
+    __dirname: path.join(root, 'src'),
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     console,
   });

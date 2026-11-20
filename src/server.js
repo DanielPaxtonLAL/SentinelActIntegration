@@ -9,18 +9,13 @@ const { validateMemoryValues } = require('./entitlement-memory');
 const { pageIncludes, renderPage } = require('./page-includes');
 const { loadFormData } = require('./entitlement-form-data');
 const { getEmsConfig } = require('./ems-config');
-const LeaseDates = require('./public/lease-dates');
+const { createProductKeySerials, decodeProductKeySerial, duplicateProductKeySerialError } = require('./product-key-serials');
+const { loadEnvironmentFile } = require('./environment');
+const LeaseDates = require('../public/lease-dates');
 
-// Load environment variables from a local .env file when one is present so the app can run
-// without hard-coded credentials in the source tree.
-const envFile = path.join(__dirname, '.env');
-if (fs.existsSync(envFile)) {
-  for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
-    const m = line.match(/^\s*([\w.]+)\s*=\s*(.*?)\s*$/);
-    if (!m || line.trim().startsWith('#')) continue;
-    process.env[m[1]] ??= m[2].replace(/^(['"])(.*)\1$/, '$2');
-  }
-}
+const projectRoot = path.resolve(__dirname, '..');
+const envFile = path.join(projectRoot, '.env');
+loadEnvironmentFile(envFile, process.env, fs);
 
 const { ACT_URL, ACT_DATABASE } = process.env;
 const PORT = process.env.INTEGRATION_PORT || process.env.PORT || 3000;
@@ -35,10 +30,9 @@ try {
 }
 const is_test_mode = emsConfig.isTestMode;
 // Product IDs and form labels live in entitlement-form-data.json (or the file named by EMS_FORM_DATA).
-const formData = loadFormData(path.resolve(__dirname, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'), is_test_mode);
+const formData = loadFormData(path.resolve(projectRoot, process.env.EMS_FORM_DATA || 'entitlement-form-data.json'), is_test_mode);
 
-// Shared helper that formats a Date as an EMS-friendly timestamp with a timezone offset.
-
+/** Format the creation timestamp with the server's local UTC offset for EMS. */
 function formatLocalDateTime(date) {
   const pad = (value, length = 2) => String(value).padStart(length, '0');
   const offset = -date.getTimezoneOffset();
@@ -50,8 +44,7 @@ function formatLocalDateTime(date) {
     `${sign}${pad(offsetHours)}:${pad(offsetMinutes)}`;
 }
 
-// Pull the base entitlement and all supported modification/product options from EMS, validating
-// that the configured base product and required access products are complete and available.
+/** Validate the selected base and access products and annotate optional product availability. */
 async function getEntitlementProducts(ems) {
   const vendorId = process.env.EMS_VENDOR_ID || '2';
   const baseId = formData.baseProductId;
@@ -88,7 +81,7 @@ async function getEntitlementProducts(ems) {
   };
 }
 
-// Passwords are not retained, so an expired EMS session requires a fresh login.
+/** Invalidate a browser's EMS session if the upstream service reports it expired. */
 async function withSession(ems, fn) {
   if (!ems.authenticated) {
     const error = new Error('EMS session expired. Log in again.');
@@ -108,62 +101,10 @@ async function withSession(ems, fn) {
 
 // Start the Express app and wire up a lightweight live-reload mechanism for the front-end.
 const app = express();
-const publicDir = path.join(__dirname, 'public');
+const publicDir = path.join(projectRoot, 'public');
 const reloadClients = new Set();
-let serialNumberUpdateQueue = Promise.resolve();
-let productKeySerialSaveQueue = Promise.resolve();
-
-async function withProductKeySerialLock(fn) {
-  const previous = productKeySerialSaveQueue;
-  let release;
-  productKeySerialSaveQueue = new Promise((resolve) => {
-    release = resolve;
-  });
-  await previous;
-
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
-
-function decodeProductKeySerial(text) {
-  const value = String(text ?? '').trim();
-  if (!/^(?:[0-9a-f]{2})+$/i.test(value)) return null;
-  const decoded = Buffer.from(value, 'hex').toString('latin1');
-  const serial = /^[0-9a-f]+$/i.test(decoded)
-    ? BigInt(`0x${decoded}`)
-    : BigInt(`0x${value}`);
-  return serial <= 65535n ? Number(serial) : null;
-}
-
-function duplicateProductKeySerialError(serialNumber) {
-  const error = new Error(`Serial number ${String(serialNumber).padStart(5, '0')} is already claimed by another entitlement.`);
-  error.status = 409;
-  return error;
-}
-
-async function incrementProductKeySerial(ems) {
-  let release;
-  const previousUpdate = serialNumberUpdateQueue;
-  serialNumberUpdateQueue = new Promise((resolve) => {
-    release = resolve;
-  });
-  await previousUpdate;
-
-  try {
-    const largest = await withSession(ems, () => ems.getLargestProductKeySerial());
-    if (!Number.isInteger(largest) || largest < 0 || largest >= 65535) {
-      throw new Error('The serial number customer must contain a whole number below 65,535 before it can be incremented.');
-    }
-    const next = largest + 1;
-    await withSession(ems, () => ems.setLargestProductKeySerial(next));
-    return next;
-  } finally {
-    release();
-  }
-}
+const { withProductKeySerialLock, incrementProductKeySerial, getUsedProductKeySerialNumbers } =
+  createProductKeySerials({ baseProductId: formData.baseProductId, withSession });
 
 // SSE endpoint used by the browser to refresh static pages when HTML files change during development.
 app.get('/__dev/reload', (req, res) => {
@@ -177,10 +118,12 @@ app.get('/__dev/reload', (req, res) => {
   req.on('close', () => reloadClients.delete(res));
 });
 
-fs.watch(publicDir, (eventType, filename) => {
-  if (!filename || path.extname(filename.toString()).toLowerCase() !== '.html') return;
-  for (const client of reloadClients) client.write('event: reload\ndata: update\n\n');
-});
+for (const [directory, extensions] of [[publicDir, ['.html', '.js']], [path.join(publicDir, 'pages'), ['.js']]]) {
+  fs.watch(directory, (eventType, filename) => {
+    if (!filename || !extensions.includes(path.extname(filename.toString()).toLowerCase())) return;
+    for (const client of reloadClients) client.write('event: reload\ndata: update\n\n');
+  });
+}
 
 const sessions = createActSessions(() => ({
   async authenticate(username, password, actUsername, actPassword) {
@@ -229,10 +172,10 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use(pageIncludes(publicDir, path.join(__dirname, 'partials'), is_test_mode));
+app.use(pageIncludes(publicDir, path.join(projectRoot, 'partials'), is_test_mode));
 app.use(express.static(publicDir));
 app.get('/vendor/forge.min.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'node_modules', 'node-forge', 'dist', 'forge.min.js'));
+  res.sendFile(path.join(projectRoot, 'node_modules', 'node-forge', 'dist', 'forge.min.js'));
 });
 
 app.post('/api/login', express.json(), async (req, res) => {
@@ -316,43 +259,6 @@ app.get('/api/product-key-serial-numbers', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
-
-async function getUsedProductKeySerialNumbers(ems, excludedEntitlementId) {
-  const entitlements = await withSession(ems, () => ems.listEntitlements());
-  const entitlementIds = entitlements.map((entitlement) =>
-    String(entitlement.id ?? entitlement.entitlementId ?? '')
-  );
-  if (entitlementIds.some((id) => !/^[1-9]\d*$/.test(id))) {
-    throw new Error('EMS returned an entitlement without a valid ID.');
-  }
-
-  const serialNumbers = new Set();
-  const idsToCheck = excludedEntitlementId === undefined
-    ? entitlementIds
-    : entitlementIds.filter((id) => id !== String(excludedEntitlementId));
-  for (let index = 0; index < idsToCheck.length; index += 10) {
-    const batch = await Promise.all(idsToCheck.slice(index, index + 10).map((id) =>
-      withSession(ems, () => ems.getEntitlementDetails(id, { includeCustomer: false }))
-    ));
-    for (const details of batch) {
-      for (const product of details.products || []) {
-        if (String(product.productId) !== String(formData.baseProductId)) continue;
-        for (const segment of product.memorySegments || []) {
-          if (!segment.saot || typeof segment.name !== 'string' ||
-              segment.name.trim().toLowerCase() !== 'serial number') continue;
-          const text = String(segment.text ?? '').trim();
-          if (!text) continue;
-          if (!/^(?:[0-9a-f]{2})+$/i.test(text)) {
-            throw new Error(`EMS returned an invalid Serial Number value in entitlement ${details.id}.`);
-          }
-          const serialValue = decodeProductKeySerial(text);
-          if (serialValue !== null) serialNumbers.add(serialValue);
-        }
-      }
-    }
-  }
-  return serialNumbers;
-}
 
 app.get('/api/entitlements', async (req, res) => {
   const ems = req.ems;
@@ -470,7 +376,8 @@ app.get('/api/entitlements/:id/product-keys', async (req, res) => {
   }
 });
 
-function vibeCheckActivationInput(productKeyId, c2v) {
+/** Reject malformed activation inputs before contacting EMS. */
+function validateActivationInput(productKeyId, c2v) {
   const trimmedKey = typeof productKeyId === 'string' ? productKeyId.trim() : '';
   const trimmedC2V = typeof c2v === 'string' ? c2v.trim() : '';
 
@@ -502,7 +409,7 @@ app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), asyn
   }
 
   const { productKeyId, c2v } = req.body || {};
-  const inputError = vibeCheckActivationInput(productKeyId, c2v);
+  const inputError = validateActivationInput(productKeyId, c2v);
   if (inputError) {
     return res.status(400).json({ error: inputError, outcomeUnknown: false });
   }
@@ -843,6 +750,7 @@ app.delete('/api/entitlements/:id', async (req, res) => {
   }
 });
 
+/** Run an Act! operation and discard the browser session if Act! authentication expires. */
 async function callAct(req, operation) {
   try {
     return await operation(req.integrationSession.act);
@@ -937,7 +845,7 @@ app.use((req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return res.status(404).type('text').send('Not found');
   fs.readFile(path.join(publicDir, '404.html'), 'utf8', (err, html) => {
     if (err) return res.status(404).type('text').send('Page not found');
-    res.status(404).set('Cache-Control', 'no-store').type('html').send(renderPage(html, path.join(__dirname, 'partials'), '/404.html', is_test_mode));
+    res.status(404).set('Cache-Control', 'no-store').type('html').send(renderPage(html, path.join(projectRoot, 'partials'), '/404.html', is_test_mode));
   });
 });
 

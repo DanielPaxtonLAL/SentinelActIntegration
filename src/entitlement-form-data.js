@@ -91,6 +91,7 @@ function parseFormDataForMode(json, isTestMode) {
   };
 }
 
+/** Validate both environments, then return the selected product IDs and labels. */
 function parseFormData(json, isTestMode) {
   if (typeof isTestMode !== 'boolean') throw new Error('entitlement form data: test mode must be a boolean');
   const selected = parseFormDataForMode(json, isTestMode);
@@ -98,6 +99,7 @@ function parseFormData(json, isTestMode) {
   return selected;
 }
 
+/** Read and validate the JSON form configuration from disk. */
 function loadFormData(file, isTestMode) {
   let json;
   try {

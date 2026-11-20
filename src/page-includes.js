@@ -11,6 +11,7 @@ const CURRENT_AREA = {
   '/update-entitlement-form.html': 'entitlements',
 };
 
+/** Expand shared HTML partials, the current navigation item and EMS mode. */
 function renderPage(html, partialsDir, requestPath, isTestMode) {
   if (typeof isTestMode !== 'boolean') throw new Error('EMS test mode must be a boolean.');
   const area = CURRENT_AREA[requestPath];
@@ -24,6 +25,7 @@ function renderPage(html, partialsDir, requestPath, isTestMode) {
   });
 }
 
+/** Serve HTML through the partial renderer; other requests continue to static middleware. */
 function pageIncludes(publicDir, partialsDir, isTestMode) {
   return (req, res, next) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') return next();

@@ -1,3 +1,8 @@
+/**
+ * Validate submitted SAOT values against the current EMS product metadata.
+ * Every expected segment must occur once and contain exactly its configured
+ * number of bytes; unsupported dynamic SAOT memory is rejected.
+ */
 function validateMemoryValues(productIds, productFiles, values) {
   const invalid = (message) => {
     const error = new Error(message);

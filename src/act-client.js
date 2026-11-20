@@ -1,11 +1,15 @@
-// Read-only Act! Web API client (mirrors auth_test.py).
+/** Read-only Act! Web API client. Each authenticated browser session owns its client. */
 class ActClient {
+  /**
+   * @param {{baseUrl: string, database: string}} options Act! Web API connection settings.
+   */
   constructor({ baseUrl, database }) {
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.database = database;
     this.token = null;
   }
 
+  /** Restrict requests to the configured API origin and path before sending credentials. */
   async _get(url, { headers }) {
     const requestUrl = new URL(url);
     const baseUrl = new URL(this.baseUrl);
@@ -22,7 +26,7 @@ class ActClient {
     });
   }
 
-  // The password is only used for this request; just the token is kept.
+  /** Exchange credentials for a bearer token; the password is not retained. */
   async authenticate(username, password) {
     const basic = Buffer.from(`${username}:${password}`).toString('base64');
     const res = await this._get(`${this.baseUrl}/authorize`, {
@@ -42,6 +46,7 @@ class ActClient {
     if (!this.token) throw new Error('Act! returned an empty token');
   }
 
+  /** Fetch all company pages until the API returns a partial page. */
   async listCompanies() {
     const pageSize = 200;
     const all = [];
@@ -65,6 +70,7 @@ class ActClient {
     }
   }
 
+  /** Fetch a single company by its Act! identifier. */
   async getCompany(companyId) {
     const res = await this._get(`${this.baseUrl}/api/companies/${encodeURIComponent(companyId)}`, {
       headers: {
@@ -81,6 +87,7 @@ class ActClient {
     return res.json();
   }
 
+  /** Fetch the divisions belonging to a company. */
   async getCompanyDivisions(companyId) {
     const res = await this._get(`${this.baseUrl}/api/companies/${encodeURIComponent(companyId)}/divisions`, {
       headers: {

@@ -49,12 +49,12 @@ function activationsRoute() {
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
-    if (name.startsWith('./')) return require(path.join(root, name));
+    if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
     require: customRequire,
-    __dirname: root,
+    __dirname: path.join(root, 'src'),
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     console,
   });
@@ -87,7 +87,7 @@ test('lists distinct activations for generated product keys only', async () => {
 
 test('activations page provides a V2C download for an existing license', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
-  const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
   let definition;
   vm.runInNewContext(script, {
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },

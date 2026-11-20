@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { EmsClient } = require('../ems-client');
+const { EmsClient } = require('../src/ems-client');
 
 function clientWithResponses(responses) {
   const client = new EmsClient({ baseUrl: 'https://ems.example' });

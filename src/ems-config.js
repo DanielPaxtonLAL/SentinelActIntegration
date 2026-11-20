@@ -1,3 +1,9 @@
+/**
+ * Select one EMS environment, applying an optional command-line override.
+ * The chosen URL, TLS setting and product mode must always travel together.
+ * @param {Record<string, string | undefined>} env Environment variables.
+ * @param {string[]} [args] Server command-line arguments.
+ */
 function getEmsConfig(env, args = []) {
   if (args.length > 1 || (args.length === 1 && !['--test', '--production'].includes(args[0]))) {
     throw new Error('Use --test or --production to select the EMS environment.');
@@ -23,6 +29,12 @@ function getEmsConfig(env, args = []) {
   };
 }
 
+/**
+ * Find the settings for an explicit helper URL, independent of the app mode.
+ * Returns null for a URL that is not configured as test or production.
+ * @param {Record<string, string | undefined>} env Environment variables.
+ * @param {string} url Explicit EMS URL.
+ */
 function getEmsConfigForUrl(env, url) {
   const target = new URL(url).href.replace(/\/+$/, '');
   const matches = ['PRODUCTION', 'TEST'].filter((prefix) => {

@@ -117,3 +117,28 @@ docker compose up --build
 Open [http://localhost:3000](http://localhost:3000). Set `INTEGRATION_PORT` in `.env` to change the host port; the app continues to listen on port 3000 inside the container.
 
 Stop the app with `docker compose down`.
+
+## Project layout and tests
+
+- `src/server.js` configures the app, browser sessions and HTTP routes.
+- `src/ems-client.js` and `src/act-client.js` communicate with the external services;
+  `src/act-sessions.js` keeps their authenticated clients separate per browser.
+- `src/environment.js` loads local settings without overriding process environment
+  variables. Values can have whitespace-separated inline comments; quote a
+  value to retain a ` #` sequence. `src/ems-config.js`, `src/entitlement-form-data.js` and
+  `src/entitlement-memory.js` select the environment and validate product and memory data.
+- `src/product-key-serials.js` scans used serial numbers and coordinates draft saves
+  and counter updates within the running app.
+- `src/entitlement-xml.js` builds the EMS XML payload for new entitlements.
+- `src/index.js` is the command-line EMS client; run it with
+  `node src/index.js <emsUrl> [apiPath]`.
+- `public/*.html` contains page markup. The corresponding browser logic is in
+  `public/pages/`; shared browser utilities remain in `public/`.
+- `partials/` contains the shared page header, navigation and environment
+  notice, rendered by `src/page-includes.js`.
+- `test/` contains Node's built-in tests; the PowerShell helper is in
+  `config-helper-scripts/`.
+
+Run the test suite with `npm test`. Tests use simulated EMS and Act! services;
+the Windows PowerShell helper test also starts a local HTTPS mock. The browser
+encryption compatibility tests can take longer than the rest of the suite.

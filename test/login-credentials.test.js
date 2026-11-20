@@ -10,8 +10,7 @@ const { Worker } = require('node:worker_threads');
 const root = path.join(__dirname, '..');
 const cryptoScript = fs.readFileSync(path.join(root, 'public', 'login-credentials.js'), 'utf8');
 const workerFile = path.join(root, 'public', 'login-crypto-worker.js');
-const html = fs.readFileSync(path.join(root, 'public', 'login.html'), 'utf8');
-const loginScript = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+const loginScript = fs.readFileSync(path.join(root, 'public', 'pages', 'login.js'), 'utf8');
 
 function context(extra = {}) {
   const sandbox = { crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, ...extra };

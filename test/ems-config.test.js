@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { getEmsConfig, getEmsConfigForUrl } = require('../ems-config');
+const { getEmsConfig, getEmsConfigForUrl } = require('../src/ems-config');
 
 const env = {
   IS_TEST_MODE: 'false',
@@ -43,9 +43,9 @@ test('mode arguments override the environment and reject invalid or conflicting 
 test('the server uses matching connection settings and product IDs for each mode', async () => {
   const production = { emsMode: 'production', url: 'https://production.example', insecure: true, apiVersion: 'v90', userType: 'ISV' };
   const testMode = { emsMode: 'test', url: 'https://test.example', insecure: false, apiVersion: 'v91', userType: 'CUSTOMER' };
-  for (const [mode, args, expected] of [
+  for (const [mode, args, expected, customFormFile] of [
     ['false', [], production],
-    ['true', [], testMode],
+    ['true', [], testMode, 'config/custom-form.json'],
     ['false', ['--test'], testMode],
     ['true', ['--production'], production],
   ]) {
@@ -59,6 +59,8 @@ test('the server uses matching connection settings and product IDs for each mode
     express.static = express.json = () => {};
     let productMode;
     let clientOptions;
+    let envFile;
+    let formFile;
     class EmsClient {
       constructor(options) { clientOptions = options; }
       async authenticate() { this.authenticated = true; }
@@ -67,16 +69,18 @@ test('the server uses matching connection settings and product IDs for each mode
     const root = path.join(__dirname, '..');
     const customRequire = (name) => {
       if (name === 'express') return express;
-      if (name === 'fs') return { existsSync: () => false, watch() {} };
+      if (name === 'fs') return { existsSync(file) { envFile = file; return false; }, watch() {} };
       if (name === './ems-client') return { EmsClient };
       if (name === './act-client') return { ActClient };
-      if (name === './entitlement-form-data') return { loadFormData(_file, isTestMode) { productMode = isTestMode; return {}; } };
-      if (name.startsWith('./')) return require(path.join(root, name));
+      if (name === './entitlement-form-data') return { loadFormData(file, isTestMode) { formFile = file; productMode = isTestMode; return {}; } };
+      if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
       return require(name);
     };
-    vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
-      require: customRequire, __dirname: root, process: { argv: ['node', 'server.js', ...args], env: { ...env, IS_TEST_MODE: mode } }, console,
+    vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
+      require: customRequire, __dirname: path.join(root, 'src'), process: { argv: ['node', 'server.js', ...args], env: { ...env, IS_TEST_MODE: mode, EMS_FORM_DATA: customFormFile } }, console,
     });
+    assert.equal(envFile, path.join(root, '.env'));
+    assert.equal(formFile, path.resolve(root, customFormFile || 'entitlement-form-data.json'));
     const res = () => ({
       statusCode: 200,
       set() { return this; },

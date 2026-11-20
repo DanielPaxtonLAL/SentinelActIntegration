@@ -34,6 +34,7 @@
     return Uint8Array.from(atob(value), (char) => char.charCodeAt(0));
   }
 
+  /** Derive the AES key from the EMS password without persisting the key. */
   async function keyFor(password, salt) {
     const subtle = cryptoApi().subtle;
     const material = await subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveKey']);
@@ -43,6 +44,7 @@
     );
   }
 
+  /** Encrypt Act! credentials, binding the ciphertext to the EMS username. */
   async function encrypt(emsUsername, emsPassword, credentials) {
     const crypto = cryptoApi();
     const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -57,6 +59,7 @@
     return JSON.stringify({ version: 1, salt: encode(salt), iv: encode(iv), ciphertext: encode(ciphertext) });
   }
 
+  /** Authenticate and decode a stored credential record. */
   async function decrypt(emsUsername, emsPassword, saved) {
     const record = JSON.parse(saved);
     if (!record || record.version !== 1) throw new Error('Invalid saved credentials.');

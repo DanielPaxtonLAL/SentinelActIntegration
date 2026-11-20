@@ -1,16 +1,7 @@
-// Sentinel EMS client (Node 18+, no dependencies).
-// Authenticates through the EMS web login (form POST to verifyLogin.html),
-// keeps the JSESSIONID cookie, and reuses it for later API calls.
-
 const { XMLParser, XMLBuilder, XMLValidator } = require('fast-xml-parser');
+const { buildEntitlementXml } = require('./entitlement-xml');
 
-const escapeXml = (value) => String(value)
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;')
-  .replace(/'/g, '&apos;');
-
+/** Collect activation IDs from EMS responses whose nesting varies by endpoint. */
 function findActivationIds(value, ids = new Set()) {
   if (!value || typeof value !== 'object') return [...ids];
   for (const [name, child] of Object.entries(value)) {
@@ -25,6 +16,7 @@ function findActivationIds(value, ids = new Set()) {
   return [...ids];
 }
 
+/** Extract readable diagnostics without including credentials, keys or C2V data. */
 function activationErrorDetail(text, c2v, secrets) {
   const trimmed = text.trim();
   if (!trimmed) return '';
@@ -57,7 +49,21 @@ function activationErrorDetail(text, c2v, secrets) {
   }).filter(Boolean).join(' - ');
 }
 
+/**
+ * Sentinel EMS web-session client. Cookies are kept per instance. Callers are
+ * responsible for clearing credentials after authentication.
+ */
 class EmsClient {
+  /**
+   * @param {object} options EMS connection and authentication settings.
+   * @param {string} options.baseUrl EMS server origin, without /ems.
+   * @param {string} [options.username] EMS username, required for authentication.
+   * @param {string} [options.password] EMS password, required for authentication.
+   * @param {string} [options.apiVersion='v90'] EMS web-service version.
+   * @param {string} [options.userType='ISV'] EMS login user type.
+   * @param {boolean} [options.insecure=false] Disable TLS verification process-wide.
+   * @param {string} [options.serialNumberCustomerId] Customer whose Ref ID holds the serial counter.
+   */
   constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, serialNumberCustomerId }) {
     if (!baseUrl) throw new Error('baseUrl is required');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
@@ -97,7 +103,7 @@ class EmsClient {
     return res;
   }
 
-  // Logs in via the EMS login form and establishes the session.
+  /** Log in through the EMS web form and retain its JSESSIONID cookie. */
   async authenticate() {
     await this._fetch(`${this.baseUrl}/ems/login.html`);
 
@@ -124,7 +130,7 @@ class EmsClient {
     return { baseUrl: this.baseUrl, sessionId: this.cookies.get('JSESSIONID'), redirectedTo: location };
   }
 
-  // Lists customers as an array of plain objects.
+  /** List EMS customers as parsed XML objects. */
   async listCustomers() {
     const xml = await this.call('/customer.xml');
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
@@ -132,6 +138,7 @@ class EmsClient {
     return Array.isArray(inst) ? inst : [inst];
   }
 
+  /** Load the counter customer as an ordered XML document for safe updates. */
   async _serialNumberCustomer() {
     const id = this.serialNumberCustomerId;
     if (typeof id !== 'string' || !/^[1-9]\d*$/.test(id)) {
@@ -166,6 +173,7 @@ class EmsClient {
     return { document, reference: references[0], options };
   }
 
+  /** Read the counter from the configured customer's Ref ID. */
   async getLargestProductKeySerial() {
     const { reference } = await this._serialNumberCustomer();
     const value = reference.refId.map((node) => node['#text']).join('').trim();
@@ -175,6 +183,7 @@ class EmsClient {
     return Number(value);
   }
 
+  /** Update only the counter Ref ID, preserving the rest of the customer XML. */
   async setLargestProductKeySerial(newSerialNumber) {
     const value = String(newSerialNumber);
     if (!/^\d+$/.test(value) || BigInt(value) > 65535n) {
@@ -201,7 +210,7 @@ class EmsClient {
     }
   }
 
-  // Creates a customer via PUT /customer.ws with an XML body; returns the Location header.
+  /** Create an EMS customer and return its Location response header. */
   async createCustomer({ name, vendorId, reference = '', description = '', phone = '' }) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!name) throw new Error('Customer name is required.');
@@ -229,7 +238,7 @@ class EmsClient {
     return res.headers.get('location');
   }
 
-  // Lists entitlements (XML). The server returns XML even for .json requests.
+  /** List entitlements, preserving leading zeroes in their order codes. */
   async listEntitlements() {
     const xml = await this.call('/entitlement.xml');
     const parsed = new XMLParser({
@@ -240,6 +249,7 @@ class EmsClient {
     return Array.isArray(inst) ? inst : [inst];
   }
 
+  /** List enforcement products available to the vendor. */
   async listEnforcements(vendorId = '2') {
     const xml = await this.call(`/enforcement.xml?vendorId=${encodeURIComponent(vendorId)}`);
     const parsed = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '' }).parse(xml);
@@ -247,6 +257,7 @@ class EmsClient {
     return Array.isArray(inst) ? inst : (inst ? [inst] : []);
   }
 
+  /** Search all catalog pages for products with the given identifier. */
   async listProductsByIdentifier(identifier, vendorId = '2') {
     if (!/^\d+$/.test(String(identifier))) throw new Error('Product identifier must be numeric');
     if (!/^[1-9]\d*$/.test(String(vendorId))) throw new Error('Vendor ID must be a positive number');
@@ -282,6 +293,7 @@ class EmsClient {
     return products;
   }
 
+  /** Resolve an identifier to exactly one base product, or reject ambiguity. */
   async findBaseProductByIdentifier(identifier, vendorId = '2') {
     const products = await this.listProductsByIdentifier(identifier, vendorId);
     const bases = products.filter((entry) => entry.type.toUpperCase() === 'BASE');
@@ -289,7 +301,7 @@ class EmsClient {
     return bases[0];
   }
 
-  // Reads one product by its internal EMS id.
+  /** Read a product by its internal EMS ID. */
   async getProductSummary(id) {
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Product ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
@@ -311,6 +323,7 @@ class EmsClient {
     };
   }
 
+  /** Return only modifications whose base product matches the supplied ID. */
   async listModificationProducts(productId, vendorId = '2') {
     if (!/^[1-9]\d*$/.test(String(productId))) throw new Error('Product ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
@@ -350,6 +363,7 @@ class EmsClient {
     return matches;
   }
 
+  /** Load the product's read-only static and dynamic memory segments. */
   async getProductReadOnlyMemory(id) {
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Product ID must be a positive number');
     const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false });
@@ -419,6 +433,7 @@ class EmsClient {
     return [...staticFiles, ...files.filter(Boolean)];
   }
 
+  /** Parse an entitlement and merge its saved segment values with product metadata. */
   async getEntitlementDetails(id, { includeCustomer = true } = {}) {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({
@@ -478,6 +493,7 @@ class EmsClient {
     };
   }
 
+  /** Load and verify the product keys of a generated entitlement. */
   async getEntitlementProductKeys(id) {
     const entitlement = await this.getEntitlementDetails(id);
     if (String(entitlement.entState ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED') {
@@ -522,6 +538,10 @@ class EmsClient {
     }));
   }
 
+  /**
+   * Submit a C2V and return the Activation ID and V2C.
+   * Errors after submission carry outcomeUnknown when activation may have succeeded.
+   */
   async activateProductKey(key, c2v) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (typeof key !== 'string' || !key.trim()) throw new Error('Product key is required.');
@@ -586,6 +606,7 @@ class EmsClient {
     }
   }
 
+  /** Read an existing activation and verify its returned Activation ID. */
   async getActivationLicense(aid) {
     if (typeof aid !== 'string' || !aid.trim()) throw new Error('Activation ID is required');
     const response = await this._fetch(`${this.apiRoot}/activation/${encodeURIComponent(aid)}.ws`, {
@@ -622,70 +643,12 @@ class EmsClient {
     };
   }
 
+  /** Build the EMS entitlement XML for the requested products and memory values. */
   buildEntitlementXml(entitlement) {
-    const lineItemType = entitlement.lineItemType;
-    if (!['Hardware_Key', 'Product_Key', 'ProtectionKey_Update'].includes(lineItemType)) {
-      throw new Error('Unsupported entitlement line item type.');
-    }
-
-    const productKeyCount = lineItemType === 'Product_Key' ? entitlement.numberOfKeys : 1;
-    const activationCount = lineItemType === 'ProtectionKey_Update'
-      ? entitlement.numberOfUpdates
-      : entitlement.activationsPerKey;
-
-    if (!Array.isArray(entitlement.productIds) ||
-        entitlement.productIds.length === 0 ||
-        new Set(entitlement.productIds.map(String)).size !== entitlement.productIds.length) {
-      throw new Error('At least one unique product is required.');
-    }
-
-    const item = (name, value) => `<${name}>${escapeXml(value)}</${name}>`;
-    const entitlementXml =
-      '<entitlement>' +
-      (entitlement.eid ? item('eid', entitlement.eid) : '') +
-      '<enabled>true</enabled><action>Save</action><isTest>false</isTest>' +
-      item('customerId', entitlement.customerId) +
-      '<customerEmail></customerEmail><partnerId></partnerId><partnerEmail></partnerEmail>' +
-      item('refId1', entitlement.refId1) +
-      item('refId2', entitlement.refId2) +
-      item('description', entitlement.description) +
-      '<proContId></proContId>' +
-      (entitlement.createDate ? item('createDate', entitlement.createDate) : '') +
-      item('startDate', entitlement.startDate) +
-      item('endDate', entitlement.endDate) +
-      '<identity></identity><policy><revocationAllowed>true</revocationAllowed></policy>' +
-      '<entitlementItem>' +
-      '<priority>D</priority><type>CLOUD_KEY</type><deploymentType></deploymentType>' +
-      '<featureCachingMode></featureCachingMode><containerType>0</containerType>' +
-      item('startDate', entitlement.startDate) +
-      item('endDate', entitlement.endDate) +
-      '<itemLicenseType>0</itemLicenseType>' +
-      item('lineItemType', lineItemType) +
-      item('numActivationPerProductKey', activationCount) +
-      item('numProductKeys', productKeyCount) +
-      (lineItemType === 'ProtectionKey_Update'
-        ? (entitlement.haspIds || []).map((id) => item('haspId', id)).join('')
-        : '') +
-      item('vendorId', entitlement.vendorId) +
-      item('enforcementId', entitlement.enforcementId) +
-      entitlement.productIds.map((productId) =>
-        '<itemProduct><isRevoked>false</isRevoked>' +
-        item('productId', productId) +
-        '</itemProduct>'
-      ).join('') +
-      (entitlement.memorySegments?.length
-        ? '<memorySegments>' + entitlement.memorySegments.map((segment) =>
-          '<segment><lineItemMemorySegmentID></lineItemMemorySegmentID>' +
-          item('prdMemorySegmentId', segment.id) +
-          '<prdSuiteLineItemId></prdSuiteLineItemId>' +
-          item('data', segment.content) + '</segment>'
-        ).join('') + '</memorySegments>'
-        : '') +
-      '</entitlementItem>' +
-      '</entitlement>';
-    return { entitlementXml, lineItemType };
+    return buildEntitlementXml(entitlement);
   }
 
+  /** Produce a draft and confirm the resulting EMS state; uncertain outcomes must not be retried blindly. */
   async produceEntitlement(id) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
@@ -745,6 +708,7 @@ class EmsClient {
     return { produced: true, entId: String(id), state: confirmedState };
   }
 
+  /** Reopen an eligible entitlement and confirm it returned to draft state. */
   async reopenEntitlement(id) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
@@ -809,7 +773,7 @@ class EmsClient {
     return { reopened: true, entId: String(id), state: confirmedState };
   }
 
-  // Saves changes to an existing entitlement; returns the same shape as createEntitlement.
+  /** Update editable fields in an existing draft while preserving unrelated XML. */
   async updateEntitlement(id, entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!/^[1-9]\d*$/.test(String(id)) || !entitlement.eid) throw new Error('Entitlement id and eid are required.');
@@ -943,7 +907,7 @@ class EmsClient {
     return { saved: true, entId: String(id), Eid: entitlement.eid };
   }
 
-  // Deletes an entitlement by its numeric id (not the EID GUID).
+  /** Delete an entitlement by its numeric EMS ID, not its EID GUID. */
   async deleteEntitlement(id) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Entitlement id must be a positive number.');
@@ -966,6 +930,7 @@ class EmsClient {
     return { deleted: true, entId: String(id) };
   }
 
+  /** Save a draft through the EMS web endpoint using the authenticated session. */
   async createEntitlement(entitlement) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     const { entitlementXml, lineItemType } = this.buildEntitlementXml(entitlement);
@@ -1018,13 +983,13 @@ class EmsClient {
     return data;
   }
 
-  // Gets one entitlement by its numeric id (e.g. 5057), not the EID GUID.
+  /** Fetch the raw entitlement XML using its numeric EMS ID, not its EID GUID. */
   getEntitlement(id) {
     if (!/^\d+$/.test(String(id))) throw new Error('Entitlement id must be the numeric id, e.g. 5057');
     return this.call(`/entitlement/${id}.xml`);
   }
 
-  // A path starting with /ems/ is used as-is; otherwise it is relative to /ems/<version>/ws.
+  /** Call an EMS path, resolving non-/ems paths relative to the versioned service root. */
   async call(path, { method = 'GET', body, headers = {} } = {}) {
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     const url = path.startsWith('/ems/') ? `${this.baseUrl}${path}` : `${this.apiRoot}${path}`;

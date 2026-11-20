@@ -1,3 +1,4 @@
+/** Vue input that edits a decimal serial number one digit at a time. */
 const SerialNumberInput = {
   props: {
     modelValue: { type: String, required: true },

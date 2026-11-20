@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
-const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'entitlements.js'), 'utf8');
 let definition;
 let fetchMemory;
 let confirmProduce = () => true;
@@ -381,8 +381,8 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
   assert.equal(formatLocalDate.call({ displayValue }, null), '—');
   assert.match(html, /<th>Created Date<\/th>/);
   assert.match(html, /:title="entitlement\.createDate \? 'UTC, DD-MM-YYYY' : null"[^>]*>[\s\S]*?highlightParts\(formatUtcDate\(entitlement\.createDate\)\)/);
-  assert.ok(html.includes('Created Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.createDate ? \'UTC, DD-MM-YYYY\' : null">{{ formatUtcDate(selectedEntitlement.createDate) }}'));
-  assert.ok(html.includes('Start Date</div><div class="detail-value" role="cell" :title="selectedEntitlement.startDate ? \'Local time, DD-MM-YYYY\' : null">{{ formatLocalDate(selectedEntitlement.startDate) }}'));
+  assert.match(html, /Created Date<\/div>\s*<div class="detail-value" role="cell" :title="selectedEntitlement\.createDate \? 'UTC, DD-MM-YYYY' : null">\{\{ formatUtcDate\(selectedEntitlement\.createDate\) \}\}/);
+  assert.match(html, /Start Date<\/div>\s*<div class="detail-value" role="cell" :title="selectedEntitlement\.startDate \? 'Local time, DD-MM-YYYY' : null">\{\{ formatLocalDate\(selectedEntitlement\.startDate\) \}\}/);
   assert.ok(html.includes('{{ formatEndDate(selectedEntitlement.endDate) }}'));
   assert.ok(html.includes(':title="/^\\d{4}-\\d{2}-\\d{2}$/.test(selectedExpiryDate) ? \'Local time, DD-MM-YYYY\' : null">{{ formatLocalDate(selectedExpiryDate) }}'));
   const app = { displayValue, formatLocalDate };
@@ -403,7 +403,7 @@ test('shows customer, serial number, and expiry date in order in entitlement det
   assert.doesNotMatch(details, /<input type="checkbox"/);
   assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">[\s\S]*?<\/p>\s*<div v-if="canProduce" class="detail-actions">\s*<button type="button"[^>]*>I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
   assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Irricad Order Code (Ref ID 1)', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
-  assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div><div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
+  assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div>\s*<div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
   const app = { selectedEntitlement: {
     baseProductId: '6047',
     leaseProductId: '6050',
@@ -483,7 +483,7 @@ test('shows each configured product alias as present or absent', () => {
 });
 
 test('shows the decoded base product version in entitlement details', () => {
-  assert.match(html, /<div class="detail-label"[^>]*>Irricad Version\*<\/div><div class="detail-value"[^>]*>\{\{ decodedVersion \}\}<\/div>/);
+  assert.match(html, /<div class="detail-label"[^>]*>Irricad Version\*<\/div>\s*<div class="detail-value"[^>]*>\{\{ decodedVersion \}\}<\/div>/);
   const products = [
     { productId: '6048', memorySegments: [{ name: 'Version', text: '30303030' }] },
     { productId: '6047', memorySegments: [{ name: ' Version ', text: '45423544' }] },

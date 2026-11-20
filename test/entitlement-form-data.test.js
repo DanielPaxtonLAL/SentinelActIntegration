@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { loadFormData, parseFormData } = require('../entitlement-form-data');
+const { loadFormData, parseFormData } = require('../src/entitlement-form-data');
 
 const ids = (testId, productionId) => ({
   'test-ems-server-product-id': testId,

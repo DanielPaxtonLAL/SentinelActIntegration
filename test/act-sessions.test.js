@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createActSessions } = require('../act-sessions');
+const { createActSessions } = require('../src/act-sessions');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -101,11 +101,11 @@ test('EMS users and their Act credentials are isolated', async () => {
       createActSessions(factory) { sessionStore = createActSessions(factory); return sessionStore; },
     };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
-    if (name.startsWith('./')) return require(path.join(root, name));
+    if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
-    require: customRequire, __dirname: root,
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
+    require: customRequire, __dirname: path.join(root, 'src'),
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example', ACT_USER: 'unused', ACT_PASS: 'unused' } }, console,
   });
   const res = () => ({
@@ -178,11 +178,11 @@ test('EMS users and their Act credentials are isolated', async () => {
 
 test('server requires the selected EMS address and Act address', () => {
   const root = path.join(__dirname, '..');
-  const source = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
+  const source = fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8');
   const customRequire = (name) => {
     if (name === 'fs') return { existsSync: () => false };
     if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
-    if (name.startsWith('./')) return require(path.join(root, name));
+    if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
   for (const [env, expected] of [
@@ -192,7 +192,7 @@ test('server requires the selected EMS address and Act address', () => {
   ]) {
     const errors = [];
     assert.throws(() => vm.runInNewContext(source, {
-      require: customRequire, __dirname: root,
+      require: customRequire, __dirname: path.join(root, 'src'),
       process: { argv: ['node', 'server.js'], env, exit(code) { throw new Error(`Exit ${code}`); } },
       console: { error(message) { errors.push(message); } },
     }), /Exit 1/);
@@ -200,9 +200,36 @@ test('server requires the selected EMS address and Act address', () => {
   }
 });
 
+test('extracted customer and custom entity scripts mount their pages', () => {
+  const scripts = path.join(__dirname, '..', 'public', 'pages');
+  for (const page of ['index', 'custom-entities']) {
+    let definition;
+    let target;
+    let reload;
+    let reloaded = false;
+    class EventSource {
+      constructor(url) { assert.equal(url, '/__dev/reload'); }
+      addEventListener(event, callback) { assert.equal(event, 'reload'); reload = callback; }
+    }
+    vm.runInNewContext(fs.readFileSync(path.join(scripts, `${page}.js`), 'utf8'), {
+      Vue: { createApp: (options) => { definition = options; return { mount: (value) => { target = value; } }; } },
+      EventSource,
+      window: { location: { reload() { reloaded = true; } } },
+    });
+    assert.equal(target, '#app');
+    assert.ok(definition.methods);
+    if (page === 'index') {
+      assert.ok(definition.components.CompanyTreeNode);
+      reload();
+      assert.equal(reloaded, true);
+    }
+  }
+});
+
 test('real HTTP login protects pages and API requests', async () => {
   const express = require('express');
   let server;
+  const watchers = new Map();
   const createApp = () => {
     const app = express();
     const listen = app.listen.bind(app);
@@ -223,25 +250,39 @@ test('real HTTP login protects pages and API requests', async () => {
   const root = path.join(__dirname, '..');
   const customRequire = (name) => {
     if (name === 'express') return createApp;
-    if (name === 'fs') return { ...fs, existsSync: () => false, watch() {} };
+    if (name === 'fs') return { ...fs, existsSync: () => false, watch(dir, listener) { watchers.set(dir, listener); } };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient };
-    if (name.startsWith('./')) return require(path.join(root, name));
+    if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
-  vm.runInNewContext(fs.readFileSync(path.join(root, 'server.js'), 'utf8'), {
-    require: customRequire, __dirname: root,
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'src', 'server.js'), 'utf8'), {
+    require: customRequire, __dirname: path.join(root, 'src'),
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } }, console,
   });
   await new Promise((resolve) => server.once('listening', resolve));
   try {
     const base = `http://127.0.0.1:${server.address().port}`;
+    const reload = await fetch(`${base}/__dev/reload`);
+    const reloadReader = reload.body.getReader();
+    try {
+      watchers.get(path.join(root, 'public', 'pages'))('change', 'entitlements.js');
+      assert.match(new TextDecoder().decode((await reloadReader.read()).value), /event: reload/);
+      watchers.get(path.join(root, 'public'))('change', 'entitlements.html');
+      assert.match(new TextDecoder().decode((await reloadReader.read()).value), /event: reload/);
+      watchers.get(path.join(root, 'public'))('change', 'entitlement-values.js');
+      assert.match(new TextDecoder().decode((await reloadReader.read()).value), /event: reload/);
+    } finally {
+      await reloadReader.cancel();
+    }
     const page = await fetch(`${base}/entitlements.html`, { redirect: 'manual' });
     assert.equal(page.status, 302);
     assert.equal(page.headers.get('location'), '/login.html');
     const loginPage = await fetch(`${base}/login.html`);
     assert.equal(loginPage.headers.get('cache-control'), 'no-store');
-    assert.match(await loginPage.text(), /! WARNING: This is the Production EMS !/);
+    const loginHtml = await loginPage.text();
+    assert.match(loginHtml, /! WARNING: This is the Production EMS !/);
+    assert.match(loginHtml, /<script src="\/login-credentials\.js"><\/script>\s*<script src="\/pages\/login\.js"><\/script>/);
     const missingPage = await fetch(`${base}/missing-page`);
     assert.equal(missingPage.status, 404);
     assert.equal(missingPage.headers.get('cache-control'), 'no-store');
@@ -249,6 +290,11 @@ test('real HTTP login protects pages and API requests', async () => {
     assert.equal((await fetch(`${base}/api/customers`)).status, 401);
     assert.equal((await fetch(`${base}/vendor/forge.min.js`)).status, 200);
     assert.equal((await fetch(`${base}/login-crypto-worker.js`)).status, 200);
+    for (const page of ['index', 'entitlements', 'activations', 'create-entitlement-form', 'update-entitlement-form', 'custom-entities', 'login']) {
+      const script = await fetch(`${base}/pages/${page}.js`);
+      assert.equal(script.status, 200, `${page} script is served`);
+      assert.match(script.headers.get('content-type'), /javascript/);
+    }
     const login = await fetch(`${base}/api/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: 'alice', password: 'password', actUsername: 'act-alice', actPassword: 'act-password' }),
@@ -263,6 +309,16 @@ test('real HTTP login protects pages and API requests', async () => {
     const protectedPage = await fetch(`${base}/entitlements.html`, { headers: { Cookie: cookie } });
     assert.equal(protectedPage.status, 200);
     assert.match(await protectedPage.text(), /! WARNING: This is the Production EMS !/);
+    for (const page of ['index', 'entitlements', 'activations', 'create-entitlement-form', 'update-entitlement-form', 'custom-entities']) {
+      const html = await (await fetch(`${base}/${page}.html`, { headers: { Cookie: cookie } })).text();
+      assert.ok(html.includes(`<script src="/pages/${page}.js"></script>`), `${page} loads its script`);
+      const vueIndex = html.indexOf('vue.global.prod.js');
+      assert.ok(vueIndex >= 0 && vueIndex < html.indexOf(`/pages/${page}.js`), `${page} loads Vue first`);
+      if (page === 'create-entitlement-form' || page === 'update-entitlement-form') {
+        assert.ok(html.indexOf('/entitlement-values.js') > vueIndex);
+        assert.ok(html.indexOf('/entitlement-values.js') < html.indexOf(`/pages/${page}.js`));
+      }
+    }
     await fetch(`${base}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal((await fetch(`${base}/api/customers`, { headers: { Cookie: cookie } })).status, 401);
   } finally {

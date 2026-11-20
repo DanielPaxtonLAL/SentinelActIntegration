@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { XMLParser } = require('fast-xml-parser');
-const { EmsClient } = require('../ems-client');
+const { EmsClient } = require('../src/ems-client');
 
 const xml = `<?xml version="1.0"?><entitlement><eid>abc</eid><enabled>true</enabled>
 <entState>DRAFT</entState><customerId>10</customerId><refId1>00123</refId1>

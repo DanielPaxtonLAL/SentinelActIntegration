@@ -1,3 +1,4 @@
+/** Calendar-month lease bounds and EMS's packed four-character hex date format. */
 var LeaseDates = (() => {
   function parseDate(value) {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);

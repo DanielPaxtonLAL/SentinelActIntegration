@@ -3,6 +3,11 @@ const { randomBytes } = require('crypto');
 const COOKIE_NAME = 'integration_session';
 const SESSION_MS = 12 * 60 * 60 * 1000;
 
+/**
+ * Keep each browser's authenticated EMS/Act! clients in an expiring server-side
+ * session. A failed replacement login leaves the existing session untouched.
+ * @param {Function} createClient Creates an object with an async authenticate method.
+ */
 function createActSessions(createClient) {
   const sessions = new Map();
   function idFrom(req) {
