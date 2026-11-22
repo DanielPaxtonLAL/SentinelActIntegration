@@ -85,6 +85,8 @@ test('EMS users and their Act credentials are isolated', async () => {
       if (this.password === 'bad') { const error = new Error('Rejected'); error.status = 302; throw error; }
       this.authenticated = true;
     }
+    async listEntitlements() { return []; }
+    async setNextProductKeySerial() {}
     async listCustomers() {
       emsCalls++;
       if (expireEms) { const error = new Error('EMS session expired'); error.status = 401; throw error; }
@@ -100,7 +102,9 @@ test('EMS users and their Act credentials are isolated', async () => {
     if (name === './act-sessions') return {
       createActSessions(factory) { sessionStore = createActSessions(factory); return sessionStore; },
     };
-    if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
+    if (name === './entitlement-form-data') return {
+      loadFormData: () => ({ baseProductId: '60', nextProductKeySerialNumberCustomerId: '1' }),
+    };
     if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
@@ -241,6 +245,8 @@ test('real HTTP login protects pages and API requests', async () => {
   class EmsClient {
     constructor({ username, password }) { this.username = username; this.password = password; }
     async authenticate() { this.authenticated = true; }
+    async listEntitlements() { return []; }
+    async setNextProductKeySerial() {}
     async listCustomers() { return [this.username]; }
   }
   class ActClient {

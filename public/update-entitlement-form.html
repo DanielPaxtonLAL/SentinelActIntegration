@@ -28,7 +28,7 @@
           </select>
         </label>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="!entitlementLoaded || loading" :invalid="serialTooLarge">
+        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="!entitlementLoaded || loading" :read-only="true" :invalid="serialTooLarge">
           <span v-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
         </serial-number-input>
         <p v-else-if="productMemory[baseProductId]?.loading" class="form-hint" role="status">Loading serial number segment...</p>

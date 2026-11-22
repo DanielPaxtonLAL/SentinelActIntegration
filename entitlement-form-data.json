@@ -6,8 +6,11 @@
         "production-ems-server-product-id": "1"
     },
 
-    "_highest-product-key-serial-number-customer-id-comment": "This customer's Ref ID 1 is a serial counter incremented after a new draft is saved. The form selects serials from the actual entitlement memory values. The customer will be excluded from being able to have entitlements.",
-    "highest-product-key-serial-number-customer-id": "1",
+    "next-serial-number-customer-id": {
+        "_comment": "The customer ID used for the next serial number. Stored in their ref ID as JSON object. e.g., {\"NextSerial\": \"06003\"}",
+        "test-ems-server-next-serial-number-customer-id": "1",
+        "production-ems-server-next-serial-number-customer-id": "1"
+    },
 
     "lease-expiry-range": {
         "_comment": "Inclusive calendar months after the entitlement start date.",

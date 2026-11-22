@@ -43,16 +43,32 @@ function createProductKeySerials({ baseProductId, withSession }) {
   const withProductKeySerialLock = createLock();
   const withCounterLock = createLock();
 
-  /** Increment the shared EMS customer counter, serialized with other increments. */
-  async function incrementProductKeySerial(ems) {
+  /** Seed the persistent counter from the highest serial currently in EMS. */
+  async function initializeNextProductKeySerial(ems) {
     return withCounterLock(async () => {
-      const largest = await withSession(ems, () => ems.getLargestProductKeySerial());
-      if (!Number.isInteger(largest) || largest < 0 || largest >= 65535) {
-        throw new Error('The serial number customer must contain a whole number below 65,535 before it can be incremented.');
+      const serialNumbers = await getUsedProductKeySerialNumbers(ems);
+      let largest = 6000;
+      for (const serialNumber of serialNumbers) {
+        largest = Math.max(largest, serialNumber);
       }
       const next = largest + 1;
-      await withSession(ems, () => ems.setLargestProductKeySerial(next));
+      if (next > 65536) throw new Error('No serial numbers remain above 06000.');
+      await withSession(ems, () => ems.setNextProductKeySerial(next));
       return next;
+    });
+  }
+
+  /** Advance the shared counter after creating the entitlement assigned that serial. */
+  async function advanceProductKeySerial(ems, serialNumber) {
+    return withCounterLock(async () => {
+      const next = await withSession(ems, () => ems.getNextProductKeySerial());
+      if (next !== serialNumber) {
+        const error = new Error(`The next serial number changed to ${String(next).padStart(5, '0')}. Reload the form and try again.`);
+        error.status = 409;
+        throw error;
+      }
+      await withSession(ems, () => ems.setNextProductKeySerial(next + 1));
+      return next + 1;
     });
   }
 
@@ -86,7 +102,10 @@ function createProductKeySerials({ baseProductId, withSession }) {
               throw new Error(`EMS returned an invalid Serial Number value in entitlement ${details.id}.`);
             }
             const serialValue = decodeProductKeySerial(text);
-            if (serialValue !== null) serialNumbers.add(serialValue);
+            if (serialValue === null) {
+              continue;
+            }
+            serialNumbers.add(serialValue);
           }
         }
       }
@@ -94,7 +113,12 @@ function createProductKeySerials({ baseProductId, withSession }) {
     return serialNumbers;
   }
 
-  return { withProductKeySerialLock, incrementProductKeySerial, getUsedProductKeySerialNumbers };
+  return {
+    withProductKeySerialLock,
+    initializeNextProductKeySerial,
+    advanceProductKeySerial,
+    getUsedProductKeySerialNumbers,
+  };
 }
 
 module.exports = { createProductKeySerials, decodeProductKeySerial, duplicateProductKeySerialError };

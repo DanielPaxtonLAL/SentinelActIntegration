@@ -44,8 +44,8 @@
         </div>
         <p v-if="!customersLoading && customers.length && !filteredCustomers.length" class="form-hint" role="status">No customers match your search.</p>
         <p v-if="customerError" class="form-error" role="alert">{{ customerError }}</p>
-        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :invalid="serialTooSmall || serialTooLarge || serialUsed">
-          <span v-if="serialTooSmall" id="serial-error" class="form-error" role="alert">Serial number must be at least 6,000.</span>
+        <serial-number-input v-if="baseSerialSegment" v-model="serialNumber" :max-digits="serialMax.toString().length" :disabled="loading || serialLoading || Boolean(serialError)" :read-only="true" :invalid="serialTooSmall || serialTooLarge || serialUsed">
+          <span v-if="serialTooSmall" id="serial-error" class="form-error" role="alert">Serial number must be at least 6,001.</span>
           <span v-else-if="serialTooLarge" id="serial-error" class="form-error" role="alert">Serial number must be {{ serialMax.toLocaleString('en-NZ') }} or less.</span>
           <span v-else-if="serialUsed" class="form-error" role="alert">This serial number is already claimed by another entitlement.</span>
         </serial-number-input>

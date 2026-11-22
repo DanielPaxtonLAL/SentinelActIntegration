@@ -10,6 +10,10 @@ const ids = (testId, productionId) => ({
 const valid = () => ({
   _comment: 'ignored',
   'base-product-id': ids('1', '11'),
+  'next-serial-number-customer-id': {
+    'test-ems-server-next-serial-number-customer-id': '1010',
+    'production-ems-server-next-serial-number-customer-id': '2020',
+  },
   'lease-expiry-range': { 'min-months': 6, 'max-months': 24 },
   'product-options': { a: { label: 'A', ...ids('2', '12') } },
   'optional-products': {},
@@ -29,7 +33,7 @@ test('repo form data selects the original product IDs for each EMS server', () =
       ...data.optionalProducts.map((p) => p.id), ...data.versionProducts.map((p) => p.id), data.lease.id,
     ], expected);
     assert.equal(data.defaultVersionLabel, 'Version 22');
-    assert.equal(data.highestProductKeySerialNumberCustomerId, '1');
+    assert.equal(data.nextProductKeySerialNumberCustomerId, '1');
     assert.deepEqual(data.leaseExpiryRange, { minMonths: 6, maxMonths: 13 });
   }
 });
@@ -37,6 +41,7 @@ test('repo form data selects the original product IDs for each EMS server', () =
 test('parses ids, labels and default version', () => {
   const data = parseFormData(valid(), true);
   assert.equal(data.baseProductId, '1');
+  assert.equal(data.nextProductKeySerialNumberCustomerId, '1010');
   assert.deepEqual(data.accessProducts, [{ id: '2', label: 'A' }]);
   assert.equal(data.defaultVersionLabel, 'V1');
   assert.deepEqual(data.versionProducts.map((p) => p.id), ['3']);
@@ -50,6 +55,7 @@ test('parses ids, labels and default version', () => {
   ]);
   const production = parseFormData(valid(), false);
   assert.equal(production.baseProductId, '11');
+  assert.equal(production.nextProductKeySerialNumberCustomerId, '2020');
   assert.equal(production.accessProducts[0].id, '12');
   assert.equal(production.versionProducts[0].id, '13');
   assert.equal(production.lease.id, '14');
@@ -72,8 +78,8 @@ test('rejects duplicate ids and missing sections', () => {
   delete missingRange['lease-expiry-range'];
   assert.throws(() => parseFormData(missingRange, true), /lease-expiry-range/);
   const invalidCustomer = valid();
-  invalidCustomer['highest-product-key-serial-number-customer-id'] = '../1010';
-  assert.throws(() => parseFormData(invalidCustomer, true), /highest-product-key-serial-number-customer-id/);
+  invalidCustomer['next-serial-number-customer-id']['test-ems-server-next-serial-number-customer-id'] = '../1010';
+  assert.throws(() => parseFormData(invalidCustomer, true), /next-serial-number-customer-id/);
 });
 
 test('requires valid IDs for both servers and an explicit mode', () => {

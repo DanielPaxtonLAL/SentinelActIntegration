@@ -4,6 +4,7 @@ const SerialNumberInput = {
     modelValue: { type: String, required: true },
     maxDigits: { type: Number, required: true },
     disabled: { type: Boolean, default: false },
+    readOnly: { type: Boolean, default: false },
     invalid: { type: Boolean, default: false },
   },
   emits: ['update:modelValue'],
@@ -53,6 +54,7 @@ const SerialNumberInput = {
       }
     },
     onKeydown(event, index) {
+      if (this.readOnly) return;
       if (/^\d$/.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
         if (this.atEnd) this.setPasteError(`Enter no more than ${this.digitCount} digits.`);
@@ -71,6 +73,7 @@ const SerialNumberInput = {
       }
     },
     onPaste(event, index) {
+      if (this.readOnly) return;
       event.preventDefault();
       const text = event.clipboardData.getData('text').trim();
       if (!/^[\d,\s]+$/.test(text)) {
@@ -96,11 +99,11 @@ const SerialNumberInput = {
         <input v-for="index in digitCount" :key="index" ref="digits"
           :value="modelValue[index - 1] || ''" type="text" inputmode="numeric" pattern="[0-9]" maxlength="1"
           :aria-label="'Serial number digit ' + index + ' of ' + digitCount" :aria-invalid="invalid || Boolean(pasteError)"
-          :required="index === 1" :disabled="disabled" autocomplete="off"
+          :required="index === 1" :disabled="disabled" :readonly="readOnly" autocomplete="off"
           @pointerdown="atEnd = false" @focus="onFocus($event, index - 1)" @input="onInput($event, index - 1)"
           @keydown="onKeydown($event, index - 1)" @paste="onPaste($event, index - 1)">
       </div>
-      <span id="serial-hint" class="form-hint">Enter digits from left to right.</span>
+      <span id="serial-hint" class="form-hint">{{ readOnly ? 'The serial number is assigned in chronological order.' : 'Enter digits from left to right.' }}</span>
       <span v-if="pasteError" id="serial-paste-error" class="form-error" role="alert">{{ pasteError }}</span>
       <slot></slot>
     </div>

@@ -116,26 +116,34 @@ test('customer search toggle focuses the input and clears the filter when closed
   assert.match(css, /\.customer-search-toggle\[aria-expanded="true"\]/);
 });
 
-test('creation form selects the lowest available serial above 06000', async () => {
-  let resolve;
-  const app = entitlementApp(() => new Promise((done) => { resolve = done; }));
+test('creation form uses the next chronological serial rather than filling gaps', async () => {
+  const pendingResponses = [];
+  const app = entitlementApp((url) => new Promise((resolve) => pendingResponses.push({ url, resolve })));
   const pending = app.loadSerialNumber();
   assert.equal(app.serialLoading, true);
-  resolve({ ok: true, json: async () => [6001, 6002, 6004] });
+  assert.equal(pendingResponses.length, 2);
+  for (const { url, resolve } of pendingResponses) {
+    resolve(url === '/api/product-key-serial-number'
+      ? { ok: true, json: async () => ({ nextSerial: 6005 }) }
+      : { ok: true, json: async () => [6001, 6002, 6004] });
+  }
   await pending;
-  assert.equal(app.serialNumber, '06003');
+  assert.equal(app.serialNumber, '06005');
   assert.deepEqual(Array.from(app.usedSerialNumbers), [6001, 6002, 6004]);
   assert.equal(app.serialLoading, false);
   assert.equal(app.serialError, '');
 
   app.baseProductId = '60';
   app.productMemory['60'] = { files: [serialFile()] };
-  app.serialNumber = '06002';
+  app.serialNumber = '06004';
   assert.equal(app.serialUsed, true);
-  app.serialNumber = '06003';
+  app.serialNumber = '06005';
   assert.equal(app.serialUsed, false);
 
-  const first = entitlementApp(async () => ({ ok: true, json: async () => ([]) }));
+  const first = entitlementApp(async (url) => ({
+    ok: true,
+    json: async () => url === '/api/product-key-serial-number' ? { nextSerial: 6001 } : [],
+  }));
   await first.loadSerialNumber();
   assert.equal(first.serialNumber, '06001');
   assert.equal(first.encodeSerialNumber(first.serialNumber, '4'), '31373731');
@@ -144,19 +152,23 @@ test('creation form selects the lowest available serial above 06000', async () =
   await failed.loadSerialNumber();
   assert.match(failed.serialError, /EMS unavailable/);
   assert.equal(failed.serialNumber, '');
-  const bad = entitlementApp(async () => ({ ok: true, json: async () => ['42'] }));
+  const bad = entitlementApp(async (url) => ({
+    ok: true,
+    json: async () => url === '/api/product-key-serial-number' ? { nextSerial: 6001 } : ['42'],
+  }));
   await bad.loadSerialNumber();
   assert.match(bad.serialError, /invalid used-serial list/);
   const noGap = entitlementApp(async () => ({
-    ok: true, json: async () => Array.from({ length: 65535 - 6001 + 1 }, (_value, index) => index + 6001),
+    ok: false, statusText: 'Conflict', json: async () => ({ error: 'No serial numbers remain above 06000.' }),
   }));
   await noGap.loadSerialNumber();
-  assert.match(noGap.serialError, /No unused serial numbers remain/);
+  assert.match(noGap.serialError, /No serial numbers remain above 06000/);
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'create-entitlement-form.html'), 'utf8');
   assert.match(html, /productError \|\| serialLoading \|\| serialError \|\|/);
   assert.match(html, /serialTooLarge \|\| serialUsed/);
   assert.match(html, /!productMemoryReady \|\| serialTooSmall \|\| serialTooLarge \|\| serialUsed \|\|/);
   assert.match(html, /@click="loadSerialNumber"/);
+  assert.match(html, /:read-only="true"/);
 });
 
 test('update form prevents editing a lease when the entitlement start date is unavailable', async () => {
@@ -514,7 +526,7 @@ test('serial input flags out-of-range values on both forms', () => {
       assert.equal(app.serialTooLarge, tooLarge);
     }
     if (page === 'create-entitlement-form.html') {
-      for (const [value, tooSmall] of [['05999', true], ['06000', false], ['06001', false], ['', false]]) {
+      for (const [value, tooSmall] of [['05999', true], ['06000', true], ['06001', false], ['', false]]) {
         app.serialNumber = value;
         assert.equal(app.serialTooSmall, tooSmall);
       }

@@ -3,6 +3,8 @@ const fs = require('fs');
 const isProductId = (value) => /^[1-9]\d*$/.test(String(value));
 const TEST_PRODUCT_ID = 'test-ems-server-product-id';
 const PRODUCTION_PRODUCT_ID = 'production-ems-server-product-id';
+const TEST_SERIAL_CUSTOMER_ID = 'test-ems-server-next-serial-number-customer-id';
+const PRODUCTION_SERIAL_CUSTOMER_ID = 'production-ems-server-next-serial-number-customer-id';
 
 function productIdFor(option, name, isTestMode) {
   if (!option || typeof option !== 'object' || Array.isArray(option)) {
@@ -36,9 +38,14 @@ function parseFormDataForMode(json, isTestMode) {
   const base = productIdFor(json['base-product-id'], 'base-product-id', isTestMode);
   if (!isProductId(base)) throw new Error('entitlement form data: "base-product-id" must be a positive number');
 
-  const serialCustomerId = json['highest-product-key-serial-number-customer-id'];
-  if (serialCustomerId !== undefined && (typeof serialCustomerId !== 'string' || !isProductId(serialCustomerId))) {
-    throw new Error('entitlement form data: "highest-product-key-serial-number-customer-id" must be a positive number');
+  const serialCustomer = json['next-serial-number-customer-id'];
+  if (!serialCustomer || typeof serialCustomer !== 'object' || Array.isArray(serialCustomer)) {
+    throw new Error('entitlement form data: "next-serial-number-customer-id" must contain test and production customer IDs');
+  }
+  for (const key of [TEST_SERIAL_CUSTOMER_ID, PRODUCTION_SERIAL_CUSTOMER_ID]) {
+    if (typeof serialCustomer[key] !== 'string' || !isProductId(serialCustomer[key].trim())) {
+      throw new Error(`entitlement form data: "next-serial-number-customer-id.${key}" must be a positive number`);
+    }
   }
   const range = json['lease-expiry-range'];
   if (!range || !Number.isSafeInteger(range['min-months']) || !Number.isSafeInteger(range['max-months']) ||
@@ -80,7 +87,9 @@ function parseFormDataForMode(json, isTestMode) {
 
   return {
     baseProductId: base,
-    highestProductKeySerialNumberCustomerId: serialCustomerId,
+    nextProductKeySerialNumberCustomerId: serialCustomer[
+      isTestMode ? TEST_SERIAL_CUSTOMER_ID : PRODUCTION_SERIAL_CUSTOMER_ID
+    ].trim(),
     accessProducts,
     optionalProducts,
     versionProducts,

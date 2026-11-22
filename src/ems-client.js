@@ -62,9 +62,9 @@ class EmsClient {
    * @param {string} [options.apiVersion='v90'] EMS web-service version.
    * @param {string} [options.userType='ISV'] EMS login user type.
    * @param {boolean} [options.insecure=false] Disable TLS verification process-wide.
-   * @param {string} [options.serialNumberCustomerId] Customer whose Ref ID holds the serial counter.
+   * @param {string} [options.nextSerialNumberCustomerId] Customer whose Ref ID stores the next serial number.
    */
-  constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, serialNumberCustomerId }) {
+  constructor({ baseUrl, username, password, apiVersion = 'v90', userType = 'ISV', insecure = false, nextSerialNumberCustomerId }) {
     if (!baseUrl) throw new Error('baseUrl is required');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
     this.apiVersion = apiVersion;
@@ -72,7 +72,7 @@ class EmsClient {
     this.username = username;
     this.password = password;
     this.userType = userType; // 'ISV' for the vendor login, 'CUSTOMER' for the customer portal
-    this.serialNumberCustomerId = serialNumberCustomerId;
+    this.nextSerialNumberCustomerId = nextSerialNumberCustomerId;
     this.cookies = new Map();
     this.authenticated = false;
     if (insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // self-signed certs
@@ -140,9 +140,9 @@ class EmsClient {
 
   /** Load the counter customer as an ordered XML document for safe updates. */
   async _serialNumberCustomer() {
-    const id = this.serialNumberCustomerId;
+    const id = this.nextSerialNumberCustomerId;
     if (typeof id !== 'string' || !/^[1-9]\d*$/.test(id)) {
-      throw new Error('Configure a valid highest-product-key-serial-number-customer-id before accessing the serial number.');
+      throw new Error('Configure a valid next-serial-number-customer-id before accessing the serial number.');
     }
     if (!this.authenticated) throw new Error('Call authenticate() first.');
     const response = await this._fetch(`${this.apiRoot}/customer/${id}.ws`, {
@@ -173,28 +173,45 @@ class EmsClient {
     return { document, reference: references[0], options };
   }
 
-  /** Read the counter from the configured customer's Ref ID. */
-  async getLargestProductKeySerial() {
+  /** Read the next serial number from the configured customer's JSON Ref ID. */
+  async getNextProductKeySerial() {
     const { reference } = await this._serialNumberCustomer();
     const value = reference.refId.map((node) => node['#text']).join('').trim();
-    if (!/^\d+$/.test(value) || BigInt(value) > 65535n) {
-      throw new Error('The serial number customer has an invalid Ref ID 1; expected a number from 0 to 65,535.');
+    const encodedCounter = /^\{\s*&quot;NextSerial&quot;\s*:\s*&quot;\d{5,6}&quot;\s*\}$/.test(value);
+    let counter;
+    try {
+      counter = JSON.parse(encodedCounter ? value.replace(/&quot;/g, '"') : value);
+    } catch {
+      throw new Error('The serial number customer has an invalid Ref ID 1; expected a JSON object with a NextSerial value.');
     }
-    return Number(value);
+    if (!counter || typeof counter !== 'object' || Array.isArray(counter) ||
+        typeof counter.NextSerial !== 'string' || !/^\d{5,6}$/.test(counter.NextSerial)) {
+      throw new Error('The serial number customer has an invalid Ref ID 1; expected a JSON object with a padded NextSerial string.');
+    }
+    const nextSerial = Number(counter.NextSerial);
+    if (counter.NextSerial !== String(nextSerial).padStart(5, '0') ||
+        nextSerial < 6001 || nextSerial > 65536) {
+      throw new Error('The serial number customer has an invalid NextSerial value; expected 06001 to 65536.');
+    }
+    return nextSerial;
   }
 
-  /** Update only the counter Ref ID, preserving the rest of the customer XML. */
-  async setLargestProductKeySerial(newSerialNumber) {
-    const value = String(newSerialNumber);
-    if (!/^\d+$/.test(value) || BigInt(value) > 65535n) {
-      throw new Error('Serial number must be a whole number from 0 to 65,535.');
+  /** Update only the next-serial counter Ref ID, preserving the rest of the customer XML. */
+  async setNextProductKeySerial(nextSerialNumber) {
+    if (!Number.isInteger(nextSerialNumber) || nextSerialNumber < 6001 || nextSerialNumber > 65536) {
+      throw new Error('Next serial number must be a whole number from 6,001 to 65,536.');
     }
     const { document, reference, options } = await this._serialNumberCustomer();
-    reference.refId = [{ '#text': String(Number(value)) }];
-    const response = await this._fetch(`${this.apiRoot}/customer/${this.serialNumberCustomerId}.ws`, {
+    reference.refId = [{
+      '#text': JSON.stringify({ NextSerial: String(nextSerialNumber).padStart(5, '0') }),
+    }];
+    // This field contains only generated JSON with decimal digits, so it is safe
+    // to send its quotes literally while preserving XML escaping in other fields.
+    const body = new XMLBuilder({ ...options, stopNodes: ['customer.refId'] }).build(document);
+    const response = await this._fetch(`${this.apiRoot}/customer/${this.nextSerialNumberCustomerId}.ws`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
-      body: new XMLBuilder(options).build(document),
+      body,
     });
     const text = await response.text();
     if (response.status === 401 || response.status === 302) {

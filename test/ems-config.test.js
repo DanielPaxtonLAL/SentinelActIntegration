@@ -59,11 +59,14 @@ test('the server uses matching connection settings and product IDs for each mode
     express.static = express.json = () => {};
     let productMode;
     let clientOptions;
+    let initializedSerial;
     let envFile;
     let formFile;
     class EmsClient {
       constructor(options) { clientOptions = options; }
       async authenticate() { this.authenticated = true; }
+      async listEntitlements() { return []; }
+      async setNextProductKeySerial(value) { initializedSerial = value; }
     }
     class ActClient { async authenticate() {} }
     const root = path.join(__dirname, '..');
@@ -72,7 +75,16 @@ test('the server uses matching connection settings and product IDs for each mode
       if (name === 'fs') return { existsSync(file) { envFile = file; return false; }, watch() {} };
       if (name === './ems-client') return { EmsClient };
       if (name === './act-client') return { ActClient };
-      if (name === './entitlement-form-data') return { loadFormData(file, isTestMode) { formFile = file; productMode = isTestMode; return {}; } };
+      if (name === './entitlement-form-data') return {
+        loadFormData(file, isTestMode) {
+          formFile = file;
+          productMode = isTestMode;
+          return {
+            baseProductId: '60',
+            nextProductKeySerialNumberCustomerId: isTestMode ? '2' : '1',
+          };
+        },
+      };
       if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
       return require(name);
     };
@@ -104,5 +116,7 @@ test('the server uses matching connection settings and product IDs for each mode
     assert.equal(clientOptions.insecure, expected.insecure);
     assert.equal(clientOptions.apiVersion, expected.apiVersion);
     assert.equal(clientOptions.userType, expected.userType);
+    assert.equal(clientOptions.nextSerialNumberCustomerId, expected.emsMode === 'test' ? '2' : '1');
+    assert.equal(initializedSerial, undefined);
   }
 });

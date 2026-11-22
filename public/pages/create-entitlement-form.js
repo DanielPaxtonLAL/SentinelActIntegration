@@ -1,6 +1,5 @@
 const { createApp } = Vue;
 const DEFAULT_LEASE_LENGTH_YEARS = 1;
-const FIRST_SERIAL_NUMBER = 6001;
 const MAX_SERIAL_NUMBER = 65535;
 
 createApp({
@@ -84,7 +83,7 @@ createApp({
       return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) > this.serialMax;
     },
     serialTooSmall() {
-      return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) < 6000n;
+      return /^\d+$/.test(this.serialNumber) && BigInt(this.serialNumber) < 6001n;
     },
     serialUsed() {
       return /^\d+$/.test(this.serialNumber) && this.usedSerialNumbers.includes(Number(this.serialNumber));
@@ -233,22 +232,27 @@ createApp({
       this.serialLoading = true;
       this.serialError = '';
       try {
-        const response = await fetch('/api/product-key-serial-numbers', { cache: 'no-store' });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || response.statusText);
-        if (!Array.isArray(data) || data.some((serial) =>
+        const [nextResponse, usedResponse] = await Promise.all([
+          fetch('/api/product-key-serial-number', { cache: 'no-store' }),
+          fetch('/api/product-key-serial-numbers', { cache: 'no-store' }),
+        ]);
+        const [nextData, usedData] = await Promise.all([nextResponse.json(), usedResponse.json()]);
+        if (!nextResponse.ok) throw new Error(nextData.error || nextResponse.statusText);
+        if (!usedResponse.ok) throw new Error(usedData.error || usedResponse.statusText);
+        if (!Number.isInteger(nextData?.nextSerial) || nextData.nextSerial < 6001 ||
+            nextData.nextSerial > MAX_SERIAL_NUMBER) {
+          throw new Error('The server returned an invalid next serial number.');
+        }
+        if (!Array.isArray(usedData) || usedData.some((serial) =>
           !Number.isInteger(serial) || serial < 0 || serial > MAX_SERIAL_NUMBER
         )) {
           throw new Error('The server returned an invalid used-serial list.');
         }
-        this.usedSerialNumbers = [...new Set(data)];
-        const used = new Set(this.usedSerialNumbers);
-        let nextSerial = FIRST_SERIAL_NUMBER;
-        while (nextSerial <= MAX_SERIAL_NUMBER && used.has(nextSerial)) nextSerial++;
-        if (nextSerial > MAX_SERIAL_NUMBER) {
-          throw new Error('No unused serial numbers remain above 06000.');
+        this.usedSerialNumbers = [...new Set(usedData)];
+        if (this.usedSerialNumbers.includes(nextData.nextSerial)) {
+          throw new Error('The next serial number is already claimed. Reload the form or contact support.');
         }
-        this.serialNumber = String(nextSerial).padStart(5, '0');
+        this.serialNumber = String(nextData.nextSerial).padStart(5, '0');
       } catch (err) {
         this.serialError = 'Failed to load the serial number: ' + err.message;
       } finally {

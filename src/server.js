@@ -103,8 +103,21 @@ async function withSession(ems, fn) {
 const app = express();
 const publicDir = path.join(projectRoot, 'public');
 const reloadClients = new Set();
-const { withProductKeySerialLock, incrementProductKeySerial, getUsedProductKeySerialNumbers } =
-  createProductKeySerials({ baseProductId: formData.baseProductId, withSession });
+const {
+  withProductKeySerialLock,
+  initializeNextProductKeySerial,
+  advanceProductKeySerial,
+  getUsedProductKeySerialNumbers,
+} = createProductKeySerials({ baseProductId: formData.baseProductId, withSession });
+
+async function ensureNextProductKeySerialInitialized(ems) {
+  if (ems.nextProductKeySerialInitialized) return;
+  await withProductKeySerialLock(async () => {
+    if (ems.nextProductKeySerialInitialized) return;
+    await initializeNextProductKeySerial(ems);
+    ems.nextProductKeySerialInitialized = true;
+  });
+}
 
 // SSE endpoint used by the browser to refresh static pages when HTML files change during development.
 app.get('/__dev/reload', (req, res) => {
@@ -134,7 +147,7 @@ const sessions = createActSessions(() => ({
       insecure: emsConfig.insecure,
       apiVersion: emsConfig.apiVersion,
       userType: emsConfig.userType,
-      serialNumberCustomerId: formData.highestProductKeySerialNumberCustomerId,
+      nextSerialNumberCustomerId: formData.nextProductKeySerialNumberCustomerId,
     });
     try {
       await this.ems.authenticate();
@@ -236,8 +249,12 @@ app.get('/api/product-key-serial-number', async (req, res) => {
   const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   try {
-    const largest = await withSession(ems, () => ems.getLargestProductKeySerial());
-    res.json({ largest });
+    await ensureNextProductKeySerialInitialized(ems);
+    const nextSerial = await withSession(ems, () => ems.getNextProductKeySerial());
+    if (nextSerial > 65535) {
+      return res.status(409).json({ error: 'No serial numbers remain above 06000.' });
+    }
+    res.json({ nextSerial });
   } catch (err) {
     console.error(err.message);
     res.status(502).json({ error: err.message });
@@ -601,8 +618,8 @@ const saveEntitlement = async (req, res) => {
       return res.status(400).json({ error: 'The serial number segment must contain four ASCII hexadecimal digits.' });
     }
     const serialNumberValue = Number(BigInt(`0x${digits}`));
-    if (!existingId && serialNumberValue < 6000) {
-      return res.status(400).json({ error: 'The serial number must be at least 6,000.' });
+    if (!existingId && serialNumberValue < 6001) {
+      return res.status(400).json({ error: 'The serial number must be at least 6,001.' });
     }
     const previousSerialText = existing?.products
       ?.find((product) => String(product.productId) === baseProductId)
@@ -669,24 +686,36 @@ const saveEntitlement = async (req, res) => {
       });
       return res.status(200).json(result);
     }
+    await ensureNextProductKeySerialInitialized(ems);
+    let serialCounterError;
     const result = await withProductKeySerialLock(async () => {
       const usedSerialNumbers = await getUsedProductKeySerialNumbers(ems);
       if (usedSerialNumbers.has(serialNumberValue)) {
         throw duplicateProductKeySerialError(serialNumberValue);
       }
-      return ems.createEntitlement(entitlementData);
+      const nextSerial = await withSession(ems, () => ems.getNextProductKeySerial());
+      if (nextSerial !== serialNumberValue) {
+        const error = new Error(`The next serial number is ${String(nextSerial).padStart(5, '0')}. Reload the form and try again.`);
+        error.status = 409;
+        throw error;
+      }
+      const created = await withSession(ems, () => ems.createEntitlement(entitlementData));
+      try {
+        await advanceProductKeySerial(ems, serialNumberValue);
+      } catch (err) {
+        serialCounterError = err;
+      }
+      return created;
     });
-    try {
-      const serialNumber = await incrementProductKeySerial(ems);
-      return res.status(201).json({ ...result, serialNumber, serialNumberUpdated: true });
-    } catch (err) {
-      console.error(`Draft saved, but the serial number customer could not be updated: ${err.message}`);
+    if (serialCounterError) {
+      console.error(`Draft saved, but the next serial number could not be updated: ${serialCounterError.message}`);
       return res.status(201).json({
         ...result,
         serialNumberUpdated: false,
-        serialNumberError: err.message,
+        serialNumberError: serialCounterError.message,
       });
     }
+    return res.status(201).json({ ...result, serialNumber: serialNumberValue, serialNumberUpdated: true });
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
