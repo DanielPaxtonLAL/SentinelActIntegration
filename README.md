@@ -21,3 +21,6 @@ Sentinel-EMS doesn't have an up-to-date certificate, so the security mode ignore
 This root directory should contain no secrets. The ACT! saved password is encrypted with the EMS credentials and stored in the browser's local storage. Inspect this with `inspect|storage|local-storage`.
 
 Sentinel-EMS provides a session cookie, which is stored in your browser's cookies.
+
+`New-NetFirewallRule -DisplayName "Sentinel Integration" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -Profile Domain -RemoteAddress LocalSubnet` will allow other devices to connect to this 
+
