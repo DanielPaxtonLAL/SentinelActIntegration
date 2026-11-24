@@ -13,7 +13,7 @@ const workerFile = path.join(root, 'public', 'login-crypto-worker.js');
 const loginScript = fs.readFileSync(path.join(root, 'public', 'pages', 'login.js'), 'utf8');
 
 function context(extra = {}) {
-  const sandbox = { crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, ...extra };
+  const sandbox = { crypto: webcrypto, TextEncoder, TextDecoder, btoa, atob, setInterval, clearInterval, ...extra };
   vm.createContext(sandbox);
   vm.runInContext(cryptoScript, sandbox);
   return sandbox;
@@ -86,10 +86,10 @@ function loginPage(storage, loginResult = { ok: true }, overrides = {}, emsMode 
     setAttribute() {},
     addEventListener(name, callback) { this[name] = callback; },
   });
-  for (const id of ['loginForm', 'submitButton', 'status', 'configureButton', 'actCredentials', 'continueLink', 'savedActHint']) {
+  for (const id of ['loginForm', 'submitButton', 'status', 'loginDots', 'configureButton', 'actCredentials', 'continueLink', 'savedActHint']) {
     elements[id] = create();
   }
-  elements.actCredentials.hidden = elements.continueLink.hidden = true;
+  elements.actCredentials.hidden = elements.continueLink.hidden = elements.loginDots.hidden = true;
   elements.loginForm.elements = Object.fromEntries(
     ['username', 'password', 'actUsername', 'actPassword'].map((name) => [name, create()])
   );
@@ -105,7 +105,9 @@ function loginPage(storage, loginResult = { ok: true }, overrides = {}, emsMode 
     },
     async fetch(url, options) {
       if (url === '/api/session') return { ok: true, async json() { return { authenticated: false, emsMode }; } };
-      requests.push(JSON.parse(options.body));
+      const { progressId, ...credentials } = JSON.parse(options.body);
+      assert.match(progressId, /^[a-f0-9]{32}$/);
+      requests.push(credentials);
       return { ok: loginResult.ok, async json() { return loginResult.ok ? { ok: true } : { error: 'Rejected' }; } };
     },
     ...overrides,
@@ -114,6 +116,63 @@ function loginPage(storage, loginResult = { ok: true }, overrides = {}, emsMode 
   vm.runInContext(loginScript, sandbox);
   return { elements, requests, redirects, ready: vm.runInContext('sessionReady', sandbox) };
 }
+
+test('login shows preparation and service progress, then stops the dots on failure', async () => {
+  let release;
+  let notifyStarted;
+  const timers = new Map();
+  let nextTimer = 0;
+  let phase = 'ems';
+  let loginProgressId;
+  const started = new Promise((resolve) => { notifyStarted = resolve; });
+  const pending = new Promise((resolve) => { release = resolve; });
+  const storage = { getItem() { return null; }, setItem() {} };
+  const page = loginPage(storage, undefined, {
+    setInterval(callback) { const id = ++nextTimer; timers.set(id, callback); return id; },
+    clearInterval(id) { assert.equal(timers.delete(id), true); },
+    async fetch(url, options) {
+      if (url === '/api/session') return { ok: true, async json() { return { authenticated: false, emsMode: 'production' }; } };
+      if (url === '/api/login-progress') {
+        assert.equal(options.headers['X-Login-Progress'], loginProgressId);
+        return { ok: true, async json() { return { phase }; } };
+      }
+      loginProgressId = JSON.parse(options.body).progressId;
+      notifyStarted();
+      await pending;
+      return { ok: false, async json() { return { error: 'Rejected' }; } };
+    },
+  });
+  await page.ready;
+  const form = page.elements.loginForm;
+  form.elements.username.value = 'ems-user';
+  form.elements.password.value = 'ems-secret';
+  page.elements.configureButton.click();
+  form.elements.actUsername.value = 'act-user';
+  form.elements.actPassword.value = 'act-secret';
+  const submission = form.submit({ preventDefault() {} });
+  assert.equal(page.elements.status.textContent, 'Preparing Act! credentials');
+  assert.equal(page.elements.loginDots.hidden, false);
+  assert.equal(page.elements.loginDots.textContent, '.');
+  timers.get(1)();
+  assert.equal(page.elements.loginDots.textContent, '..');
+  timers.get(1)();
+  assert.equal(page.elements.loginDots.textContent, '...');
+  timers.get(1)();
+  assert.equal(page.elements.loginDots.textContent, '.');
+  await started;
+  assert.equal(page.elements.status.textContent, 'Connecting to EMS and Act!');
+  await timers.get(2)();
+  assert.equal(page.elements.status.textContent, 'Signing in to EMS');
+  phase = 'act';
+  await timers.get(2)();
+  assert.equal(page.elements.status.textContent, 'Signing in to Act!');
+  release();
+  await submission;
+  assert.equal(page.elements.status.textContent, 'Log in failed: Rejected');
+  assert.equal(page.elements.loginDots.hidden, true);
+  assert.equal(timers.size, 0);
+  assert.equal(page.elements.submitButton.disabled, false);
+});
 
 test('configuration is understated only when saved credentials exist for the entered EMS username', async () => {
   const page = loginPage({ getItem(key) { return key === 'act-credentials:v2:production:alice' ? 'encrypted' : null; } });

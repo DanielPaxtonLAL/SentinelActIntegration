@@ -138,8 +138,9 @@ for (const [directory, extensions] of [[publicDir, ['.html', '.js']], [path.join
   });
 }
 
+const loginProgress = new Map();
 const sessions = createActSessions(() => ({
-  async authenticate(username, password, actUsername, actPassword) {
+  async authenticate(username, password, actUsername, actPassword, reportProgress = () => {}) {
     this.ems = new EmsClient({
       baseUrl: emsConfig.baseUrl,
       username,
@@ -149,6 +150,7 @@ const sessions = createActSessions(() => ({
       userType: emsConfig.userType,
       nextSerialNumberCustomerId: formData.nextProductKeySerialNumberCustomerId,
     });
+    reportProgress('ems');
     try {
       await this.ems.authenticate();
     } catch (err) {
@@ -163,6 +165,7 @@ const sessions = createActSessions(() => ({
       baseUrl: ACT_URL,
       database: ACT_DATABASE || 'Irricad',
     });
+    reportProgress('act');
     try {
       await this.act.authenticate(actUsername, actPassword);
     } catch (err) {
@@ -192,7 +195,7 @@ app.get('/vendor/forge.min.js', (req, res) => {
 });
 
 app.post('/api/login', express.json(), async (req, res) => {
-  const { username, password, actUsername, actPassword, emsMode } = req.body || {};
+  const { username, password, actUsername, actPassword, emsMode, progressId } = req.body || {};
   if (emsMode !== undefined && emsMode !== (is_test_mode ? 'test' : 'production')) {
     return res.status(409).json({ error: 'EMS server mode changed. Reload the login page and try again.' });
   }
@@ -200,8 +203,20 @@ app.post('/api/login', express.json(), async (req, res) => {
       typeof actUsername !== 'string' || !actUsername.trim() || typeof actPassword !== 'string' || !actPassword) {
     return res.status(400).json({ error: 'EMS and Act! usernames and passwords are required' });
   }
+  if (progressId !== undefined && (typeof progressId !== 'string' || !/^[a-f0-9]{32}$/.test(progressId))) {
+    return res.status(400).json({ error: 'Invalid login progress ID.' });
+  }
+  if (progressId && loginProgress.has(progressId)) {
+    return res.status(409).json({ error: 'Login progress ID is already in use.' });
+  }
+  if (progressId) {
+    loginProgress.set(progressId, 'waiting');
+    res.on('close', () => loginProgress.delete(progressId));
+  }
   try {
-    await sessions.login(req, res, username, password, actUsername, actPassword);
+    await sessions.login(req, res, username, password, actUsername, actPassword, (phase) => {
+      if (progressId && loginProgress.has(progressId)) loginProgress.set(progressId, phase);
+    });
     res.json({ ok: true });
   } catch (err) {
     const invalidCredentials = [200, 302, 401, 403].includes(err.status);
@@ -210,7 +225,18 @@ app.post('/api/login', express.json(), async (req, res) => {
     res.status(invalidCredentials ? 401 : 502).json({
       error: invalidCredentials ? `${service} login failed. Check your credentials and try again.` : `Could not connect to ${service}.`,
     });
+  } finally {
+    if (progressId) loginProgress.delete(progressId);
   }
+});
+
+app.get('/api/login-progress', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const id = req.get('X-Login-Progress');
+  if (typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)) {
+    return res.status(400).json({ error: 'Invalid login progress ID.' });
+  }
+  res.json({ phase: loginProgress.get(id) || 'waiting' });
 });
 
 app.post('/api/logout', (req, res) => {

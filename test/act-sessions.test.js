@@ -233,6 +233,11 @@ test('extracted customer and custom entity scripts mount their pages', () => {
 test('real HTTP login protects pages and API requests', async () => {
   const express = require('express');
   let server;
+  let releaseEms, releaseAct, notifyEms, notifyAct;
+  const emsStarted = new Promise((resolve) => { notifyEms = resolve; });
+  const actStarted = new Promise((resolve) => { notifyAct = resolve; });
+  const emsGate = new Promise((resolve) => { releaseEms = resolve; });
+  const actGate = new Promise((resolve) => { releaseAct = resolve; });
   const watchers = new Map();
   const createApp = () => {
     const app = express();
@@ -244,13 +249,20 @@ test('real HTTP login protects pages and API requests', async () => {
   createApp.json = express.json;
   class EmsClient {
     constructor({ username, password }) { this.username = username; this.password = password; }
-    async authenticate() { this.authenticated = true; }
+    async authenticate() {
+      if (this.username === 'phase-user') { notifyEms(); await emsGate; }
+      this.authenticated = true;
+    }
     async listEntitlements() { return []; }
     async setNextProductKeySerial() {}
     async listCustomers() { return [this.username]; }
   }
   class ActClient {
-    async authenticate(username, password) { this.name = username; assert.equal(password, 'act-password'); }
+    async authenticate(username, password) {
+      if (username === 'phase-act') { notifyAct(); await actGate; }
+      this.name = username;
+      assert.equal(password, 'act-password');
+    }
     async listCompanies() { return [this.name]; }
   }
   const root = path.join(__dirname, '..');
@@ -327,6 +339,25 @@ test('real HTTP login protects pages and API requests', async () => {
     }
     await fetch(`${base}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal((await fetch(`${base}/api/customers`, { headers: { Cookie: cookie } })).status, 401);
+    const progressId = 'a'.repeat(32);
+    const phaseLogin = fetch(`${base}/api/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'phase-user', password: 'password', actUsername: 'phase-act', actPassword: 'act-password', progressId }),
+    });
+    const progress = async (id = progressId) => {
+      const response = await fetch(`${base}/api/login-progress`, { headers: { 'X-Login-Progress': id } });
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      return response.json();
+    };
+    await emsStarted;
+    assert.deepEqual(await progress(), { phase: 'ems' });
+    assert.deepEqual(await progress('b'.repeat(32)), { phase: 'waiting' });
+    releaseEms();
+    await actStarted;
+    assert.deepEqual(await progress(), { phase: 'act' });
+    releaseAct();
+    assert.equal((await phaseLogin).status, 200);
+    assert.deepEqual(await progress(), { phase: 'waiting' });
   } finally {
     await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
   }

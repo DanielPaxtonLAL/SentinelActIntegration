@@ -1,6 +1,7 @@
 const form = document.querySelector('#loginForm');
 const button = document.querySelector('#submitButton');
 const status = document.querySelector('#status');
+const loginDots = document.querySelector('#loginDots');
 const configureButton = document.querySelector('#configureButton');
 const actFields = document.querySelector('#actCredentials');
 const continueLink = document.querySelector('#continueLink');
@@ -64,7 +65,14 @@ async function checkSession() {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   button.disabled = true;
-  status.textContent = 'Logging in…';
+  status.textContent = 'Preparing Act! credentials';
+  let dots = 1;
+  loginDots.textContent = '.';
+  loginDots.hidden = false;
+  const dotsTimer = setInterval(() => {
+    dots = dots % 3 + 1;
+    loginDots.textContent = '.'.repeat(dots);
+  }, 500);
   status.classList.remove('error');
   const fields = new FormData(form);
   try {
@@ -94,17 +102,51 @@ form.addEventListener('submit', async (event) => {
       }
       if (!localStorage.getItem(storageKey)) encrypted = saved;
     }
-    const response = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username,
-        password,
-        actUsername: act.username,
-        actPassword: act.password,
-        emsMode,
-      }),
-    });
+    const progressId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      (byte) => byte.toString(16).padStart(2, '0')).join('');
+    let active = true;
+    let checking = false;
+    status.textContent = 'Connecting to EMS and Act!';
+    const progressTimer = setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const progress = await fetch('/api/login-progress', {
+          headers: { 'X-Login-Progress': progressId },
+          cache: 'no-store',
+        });
+        if (!progress.ok) throw new Error(`HTTP ${progress.status}`);
+        const { phase } = await progress.json();
+        if (!['waiting', 'ems', 'act'].includes(phase)) throw new Error('Invalid login progress response');
+        if (active && phase === 'ems') status.textContent = 'Signing in to EMS';
+        if (active && phase === 'act') status.textContent = 'Signing in to Act!';
+      } catch (err) {
+        if (active) {
+          status.textContent = 'Signing in to EMS and Act! (progress unavailable)';
+          console.warn('Login progress unavailable:', err.message);
+        }
+      } finally {
+        checking = false;
+      }
+    }, 500);
+    let response;
+    try {
+      response = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username,
+          password,
+          actUsername: act.username,
+          actPassword: act.password,
+          emsMode,
+          progressId,
+        }),
+      });
+    } finally {
+      active = false;
+      clearInterval(progressTimer);
+    }
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
     form.elements.password.value = '';
@@ -126,6 +168,9 @@ form.addEventListener('submit', async (event) => {
     status.textContent = 'Log in failed: ' + err.message;
     status.classList.add('error');
     button.disabled = false;
+  } finally {
+    clearInterval(dotsTimer);
+    loginDots.hidden = true;
   }
 });
 
