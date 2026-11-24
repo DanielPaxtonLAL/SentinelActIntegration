@@ -18,6 +18,23 @@ const formJson = {
   lease: { lease: { label: 'Lease', ...ids('6050') } },
 };
 
+test('pending updates validates input, returns the package and preserves EMS errors', async () => {
+  const route = createRoute([]);
+  const invalid = await route.pendingUpdates({ c2v: '' });
+  assert.equal(invalid.statusCode, 400);
+  assert.deepEqual(route.events, []);
+  const result = await route.pendingUpdates({ c2v: '  <hasp_info/>  ' });
+  assert.equal(result.body.package, '<hasp_info/>');
+  assert.equal(result.headers['Cache-Control'], 'no-store');
+  assert.deepEqual(route.events, ['pending-updates']);
+  const missing = createRoute([], undefined, [], true, true, true, undefined, {
+    pendingUpdatesError: Object.assign(new Error('EMS returned 404'), { status: 404 }),
+  });
+  const error = await missing.pendingUpdates({ c2v: '<hasp_info/>' });
+  assert.equal(error.statusCode, 404);
+  assert.match(error.body.error, /404/);
+});
+
 function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemory = [], pivotAvailable = true, leaseAvailable = true, versionAvailable = true, existingStartDate = '2026-11-10', serialOptions = {}) {
   let handler;
   let updateHandler;
@@ -25,6 +42,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   let usedSerialsHandler;
   let productKeysHandler;
   let activateHandler;
+  let pendingUpdatesHandler;
   let produceHandler;
   let reopenHandler;
   let deleteHandler;
@@ -94,6 +112,11 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       if (serialOptions.activateError) throw serialOptions.activateError;
       return { aid: 'aid-1', license: c2v };
     }
+    async fetchPendingUpdates(c2v) {
+      events.push('pending-updates');
+      if (serialOptions.pendingUpdatesError) throw serialOptions.pendingUpdatesError;
+      return c2v;
+    }
     async updateEntitlement(_id, data) { saved = data; return { saved: true }; }
     async produceEntitlement(id) {
       events.push(`produce:${id}`);
@@ -117,6 +140,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
       if (route === '/api/entitlements') handler = handlers.at(-1);
       if (route === '/api/entitlements/:id/produce') produceHandler = handlers.at(-1);
       if (route === '/api/entitlements/:id/activate') activateHandler = handlers.at(-1);
+      if (route === '/api/pending-updates') pendingUpdatesHandler = handlers.at(-1);
       if (route === '/api/entitlements/:id/reopen') reopenHandler = handlers.at(-1);
     },
     put(route, ...handlers) { if (route === '/api/entitlements/:id') updateHandler = handlers.at(-1); },
@@ -156,6 +180,16 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   const ems = new EmsClient();
   return {
     events,
+    async pendingUpdates(body) {
+      const res = {
+        statusCode: 200,
+        set(name, value) { this.headers = { [name]: value }; return this; },
+        status(code) { this.statusCode = code; return this; },
+        json(data) { this.body = data; return this; },
+      };
+      await pendingUpdatesHandler({ body, ems }, res);
+      return res;
+    },
     async activate(id, body) {
       const res = {
         statusCode: 200,

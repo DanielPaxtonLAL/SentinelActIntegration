@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'entitlements.js'), 'utf8');
+const pendingUpdatesScript = fs.readFileSync(path.join(__dirname, '..', 'public', 'pending-updates.js'), 'utf8');
 let definition;
 let fetchMemory;
 let confirmProduce = () => true;
@@ -16,7 +17,7 @@ const pageWindow = {
   setTimeout,
   clearTimeout,
 };
-vm.runInNewContext(script, {
+vm.runInNewContext(pendingUpdatesScript + '\n' + script, {
   fetch: (...args) => fetchMemory(...args),
   window: pageWindow,
   URLSearchParams,
@@ -265,6 +266,35 @@ test('product key link downloads the exact key with a safe customer filename', (
   assert.equal(productKeyFilename.call({}, key), 'Product Key - Example _ Co.txt');
   assert.equal(productKeyFilename.call({ selectedEntitlement: { customerName: 'Fallback' } }, { productKeyId: 'abc' }), 'Product Key - Fallback.txt');
   assert.match(html, /<a v-if="field.name === 'productKeyId'" :href="productKeyDownloadUrl\(key.productKeyId\)" :download="productKeyFilename\(key\)">/);
+});
+
+test('fetches a key-wide V2CP and discards results after changing entitlement', async () => {
+  const app = definition.data();
+  const file = { name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' };
+  const event = () => ({ target: { files: [file], value: 'file' } });
+  const v2cp = '<hasp_info><v2cp>YWJj</v2cp></hasp_info>';
+  fetchMemory = async (url, options) => {
+    assert.equal(url, '/api/pending-updates');
+    assert.deepEqual(JSON.parse(options.body), { c2v: '<hasp_info/>' });
+    return { ok: true, json: async () => ({ package: v2cp }) };
+  };
+  const selectedFile = event();
+  await definition.methods.fetchPendingUpdates.call(app, selectedFile);
+  assert.equal(selectedFile.target.value, '');
+  assert.equal(app.pendingUpdatePackage, v2cp);
+  assert.match(html, /all pending updates for that key, not just this entitlement/);
+  assert.match(html, /download="Pending-updates\.v2cp"/);
+  fetchMemory = async () => {
+    app.detailRequest++;
+    return { ok: true, json: async () => ({ package: v2cp }) };
+  };
+  await definition.methods.fetchPendingUpdates.call(app, event());
+  assert.equal(app.pendingUpdatePackage, '');
+  fetchMemory = async () => ({ ok: false, json: async () => ({ error: 'EMS returned 404' }) });
+  await definition.methods.fetchPendingUpdates.call(app, event());
+  assert.match(app.pendingUpdateError, /404/);
+  await definition.methods.fetchPendingUpdates.call(app, { target: { files: [{ name: 'wrong.txt', size: 1 }] } });
+  assert.match(app.pendingUpdateError, /C2V/);
 });
 
 test('activates the selected generated product key and exposes the V2C download', async () => {

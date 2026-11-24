@@ -291,15 +291,12 @@ app.get('/api/activations', async (req, res) => {
   const ems = req.ems;
   res.set('Cache-Control', 'no-store');
   try {
-    const entitlements = await withSession(ems, () => ems.listEntitlements());
-    const generated = entitlements.filter((entitlement) =>
-      String(entitlement.entState ?? entitlement.state ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED'
-    );
+    const entitlements = await withSession(ems, () => ems.listEntitlementsForActivations());
     const keys = [];
-    for (let index = 0; index < generated.length; index += 10) {
-      const batch = await Promise.all(generated.slice(index, index + 10).map(async (entitlement) => ({
+    for (let index = 0; index < entitlements.length; index += 10) {
+      const batch = await Promise.all(entitlements.slice(index, index + 10).map(async (entitlement) => ({
         entitlement,
-        productKeys: await withSession(ems, () => ems.getEntitlementProductKeys(
+        productKeys: await withSession(ems, () => ems.getProductKeysForActivations(
           entitlement.id ?? entitlement.entitlementId
         )),
       })));
@@ -310,25 +307,30 @@ app.get('/api/activations', async (req, res) => {
     }
 
     const candidates = [];
-    const seenAids = new Set();
     for (const { key, entitlement } of keys) {
+      if (!key.activationIds.length) candidates.push({ aid: null, key, entitlement });
       for (const aid of key.activationIds || []) {
-        if (seenAids.has(aid)) continue;
-        seenAids.add(aid);
         candidates.push({ aid, key, entitlement });
       }
     }
-    const activations = [];
-    for (let index = 0; index < candidates.length; index += 10) {
-      const batch = await Promise.all(candidates.slice(index, index + 10).map(async ({ aid, key, entitlement }) => ({
-        ...await withSession(ems, () => ems.getActivationLicense(aid)),
-        productKeyId: key.productKeyId,
-        entitlementId: key.entitlementId,
-        customerName: key.customerName ?? entitlement.customerName ?? entitlement.customer,
+    const uniqueAids = [...new Set(candidates.map(({ aid }) => aid).filter(Boolean))];
+    const licensesByAid = new Map();
+    for (let index = 0; index < uniqueAids.length; index += 10) {
+      const batch = await Promise.all(uniqueAids.slice(index, index + 10).map(async (aid) => ({
+        aid,
+        license: await withSession(ems, () => ems.getActivationLicense(aid)),
       })));
-      activations.push(...batch);
+      for (const { aid, license } of batch) licensesByAid.set(aid, license);
     }
-    res.json(activations);
+    const activations = candidates.map(({ aid, key, entitlement }) => ({
+      ...(aid ? licensesByAid.get(aid) : {
+        aid: null, protectionKeyId: null, activationString: null,
+      }),
+      productKeyId: key.productKeyId,
+      entitlementId: key.entitlementId,
+      customerName: key.customerName ?? entitlement.customerName ?? entitlement.customer,
+    }));
+    res.json({ activations });
   } catch (err) {
     if (err.status === 401) {
       ems.authenticated = false;
@@ -336,6 +338,33 @@ app.get('/api/activations', async (req, res) => {
     }
     console.error(err.message);
     res.status(502).json({ error: err.message });
+  }
+});
+
+app.post('/api/activations/:aid/pending-updates', async (req, res) => {
+  const ems = req.ems;
+  res.set('Cache-Control', 'no-store');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(req.params.aid)) {
+    return res.status(400).json({ error: 'Activation ID is invalid.' });
+  }
+  try {
+    const c2v = await withSession(ems, () => ems.getActivationC2V(req.params.aid));
+    const packageXml = await ems.fetchPendingUpdates(c2v);
+    res.json({ package: packageXml });
+  } catch (err) {
+    console.error(err.message);
+    if (err.c2vDiagnostic) console.error('Saved C2V diagnostic:', JSON.stringify(err.c2vDiagnostic));
+    if (typeof err.c2vValue === 'string') console.error('Invalid saved C2V value:', err.c2vValue);
+    if (typeof err.c2vValue === 'string' && err.c2vDiagnostic &&
+        Number.isInteger(err.c2vDiagnostic.line) && Number.isInteger(err.c2vDiagnostic.column)) {
+      const line = err.c2vValue.split(/\r?\n/)[err.c2vDiagnostic.line - 1];
+      const index = err.c2vDiagnostic.column - 1;
+      if (line !== undefined && index >= 0 && index < line.length) {
+        console.error('C2V at error position:', JSON.stringify(line.slice(Math.max(0, index - 12), index + 13)));
+      }
+    }
+    res.status(err.status === 401 ? 401 : err.status === 400 ? 400 : err.status === 404 ? 404 : 502)
+      .json({ error: err.message });
   }
 });
 
@@ -393,15 +422,9 @@ app.get('/api/entitlements/:id/product-keys', async (req, res) => {
   }
 });
 
-/** Reject malformed activation inputs before contacting EMS. */
-function validateActivationInput(productKeyId, c2v) {
-  const trimmedKey = typeof productKeyId === 'string' ? productKeyId.trim() : '';
+/** Reject malformed C2V inputs before contacting EMS. */
+function validateC2VInput(c2v) {
   const trimmedC2V = typeof c2v === 'string' ? c2v.trim() : '';
-
-  if (!trimmedKey || trimmedKey.length > 128 || /\s/.test(trimmedKey) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(trimmedKey)) {
-    return 'Provide a product key value that looks like a real key and does not contain whitespace.';
-  }
-
   if (!trimmedC2V) {
     return 'A C2V value is required.';
   }
@@ -417,6 +440,28 @@ function validateActivationInput(productKeyId, c2v) {
 
   return null;
 }
+
+/** Reject malformed activation inputs before contacting EMS. */
+function validateActivationInput(productKeyId, c2v) {
+  const trimmedKey = typeof productKeyId === 'string' ? productKeyId.trim() : '';
+  if (!trimmedKey || trimmedKey.length > 128 || /\s/.test(trimmedKey) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(trimmedKey)) {
+    return 'Provide a product key value that looks like a real key and does not contain whitespace.';
+  }
+  return validateC2VInput(c2v);
+}
+
+app.post('/api/pending-updates', express.json({ limit: '20mb' }), async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const c2v = req.body?.c2v;
+  const inputError = validateC2VInput(c2v);
+  if (inputError) return res.status(400).json({ error: inputError });
+  try {
+    res.json({ package: await req.ems.fetchPendingUpdates(c2v.trim()) });
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : err.status === 404 ? 404 : 502).json({ error: err.message });
+  }
+});
 
 app.post('/api/entitlements/:id/activate', express.json({ limit: '20mb' }), async (req, res) => {
   const ems = req.ems;

@@ -14,6 +14,9 @@ createApp({
       activationError: '',
       activationUncertainKeys: [],
       activationDownloads: [],
+      pendingUpdateLoading: false,
+      pendingUpdateError: '',
+      pendingUpdatePackage: '',
       productKeyFields: [
         { name: 'productKeyId', label: 'Product Key' },
         { name: 'totalEntitled', label: 'Total entitled' },
@@ -162,6 +165,23 @@ createApp({
     licenseDownloadUrl(license) {
       return 'data:application/xml;charset=utf-8,' + encodeURIComponent(license);
     },
+    async fetchPendingUpdates(event) {
+      const file = event.target.files[0];
+      event.target.value = '';
+      if (!file || this.pendingUpdateLoading) return;
+      this.pendingUpdateError = '';
+      this.pendingUpdatePackage = '';
+      const request = this.detailRequest;
+      this.pendingUpdateLoading = true;
+      try {
+        const packageXml = await PendingUpdates.fetchPackage(file);
+        if (request === this.detailRequest) this.pendingUpdatePackage = packageXml;
+      } catch (err) {
+        if (request === this.detailRequest) this.pendingUpdateError = 'Failed to fetch pending updates: ' + err.message;
+      } finally {
+        this.pendingUpdateLoading = false;
+      }
+    },
     async activateProductKey(key, event) {
       const file = event.target.files[0];
       event.target.value = '';
@@ -217,6 +237,8 @@ createApp({
       this.productKeyLoading = false;
       this.activationError = '';
       this.activationDownloads = [];
+      this.pendingUpdateError = '';
+      this.pendingUpdatePackage = '';
       this.reopenError = '';
       this.reopenUncertain = false;
       this.produceError = '';

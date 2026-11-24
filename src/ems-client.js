@@ -7,7 +7,8 @@ function findActivationIds(value, ids = new Set()) {
   for (const [name, child] of Object.entries(value)) {
     if (['aid', 'activationid'].includes(name.toLowerCase().replace(/[^a-z]/g, ''))) {
       for (const candidate of Array.isArray(child) ? child : [child]) {
-        if (typeof candidate === 'string' && candidate.trim()) ids.add(candidate.trim());
+        const id = typeof candidate === 'string' ? candidate : candidate?.['#text'];
+        if (typeof id === 'string' && id.trim()) ids.add(id.trim());
       }
     } else {
       findActivationIds(child, ids);
@@ -266,6 +267,48 @@ class EmsClient {
     return Array.isArray(inst) ? inst : [inst];
   }
 
+  /** Read every entitlement page for activation discovery. */
+  async listEntitlementsForActivations() {
+    if (!this.authenticated) throw new Error('Call authenticate() first.');
+    const entitlements = [];
+    const seen = new Set();
+    let total;
+    for (let page = 1; ; page++) {
+      const response = await this._fetch(`${this.apiRoot}/entitlement.ws?pageIndex=${page}&pageSize=100`, {
+        headers: { Accept: 'application/xml' },
+      });
+      if (response.status === 401 || response.status === 302) {
+        const error = new Error('EMS session expired while loading entitlements.');
+        error.status = 401;
+        throw error;
+      }
+      if (!response.ok) throw new Error(`EMS entitlement list failed: HTTP ${response.status}.`);
+      const count = response.headers.get('X-Total-Count');
+      if (count === null || !/^\d+$/.test(count) || !Number.isSafeInteger(Number(count))) {
+        throw new Error('EMS did not return a valid entitlement count for pagination.');
+      }
+      if (total !== undefined && total !== Number(count)) throw new Error('EMS entitlement count changed while paging; retry.');
+      total = Number(count);
+      const xml = await response.text();
+      if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid entitlement list XML.');
+      const list = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false }).parse(xml)?.listResponse;
+      if (list === undefined || list === null || typeof list !== 'object' && list !== '') {
+        throw new Error('EMS returned an invalid entitlement list.');
+      }
+      const instances = !list?.instance ? [] : Array.isArray(list.instance) ? list.instance : [list.instance];
+      for (const entry of instances) {
+        const id = String(entry?.id ?? entry?.entitlementId ?? '');
+        if (!/^[1-9]\d*$/.test(id) || seen.has(id)) throw new Error('EMS returned an invalid or duplicate entitlement ID while paging.');
+        seen.add(id);
+        entitlements.push(entry);
+      }
+      if (entitlements.length > total || (!instances.length && entitlements.length < total)) {
+        throw new Error('EMS returned an incomplete entitlement list.');
+      }
+      if (entitlements.length === total) return entitlements;
+    }
+  }
+
   /** List enforcement products available to the vendor. */
   async listEnforcements(vendorId = '2') {
     const xml = await this.call(`/enforcement.xml?vendorId=${encodeURIComponent(vendorId)}`);
@@ -518,14 +561,25 @@ class EmsClient {
       error.status = 400;
       throw error;
     }
+    return this._getEntitlementProductKeys(id, entitlement, false);
+  }
+
+  /** Find existing product keys regardless of entitlement state for activation discovery. */
+  async getProductKeysForActivations(id) {
+    const entitlement = await this.getEntitlementDetails(id, { includeCustomer: false });
+    return this._getEntitlementProductKeys(id, entitlement, true);
+  }
+
+  async _getEntitlementProductKeys(id, entitlement, existingOnly) {
     const items = Array.isArray(entitlement.entitlementItem) ? entitlement.entitlementItem : [entitlement.entitlementItem];
     const ids = items.flatMap((item) => {
+      if (existingOnly && (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId)) return [];
       if (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId) {
         throw new Error('EMS did not return a product key ID for every entitlement item.');
       }
       return Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId];
     });
-    if (!ids.length || ids.some((key) => typeof key !== 'string' || !key.trim())) {
+    if ((!existingOnly && !ids.length) || ids.some((key) => typeof key !== 'string' || !key.trim())) {
       throw new Error('EMS returned an invalid product key ID.');
     }
     return Promise.all([...new Set(ids)].map(async (key) => {
@@ -553,6 +607,43 @@ class EmsClient {
         activationIds: findActivationIds(productKey),
       };
     }));
+  }
+
+  /** Fetch the pending update package for the protection key described by a C2V. */
+  async fetchPendingUpdates(c2v) {
+    if (typeof c2v !== 'string' || XMLValidator.validate(c2v) !== true) {
+      const error = new Error('The C2V file must contain valid XML.');
+      error.status = 400;
+      throw error;
+    }
+    const input = new XMLParser({ parseTagValue: false }).parse(c2v)?.hasp_info;
+    if (!input || typeof input !== 'object' || !input.haspscope || !input.c2v) {
+      const error = new Error('The C2V file must contain hasp_info, haspscope and c2v.');
+      error.status = 400;
+      throw error;
+    }
+    const response = await fetch(`${this.apiRoot}/activation/target.ws`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/xml', Accept: 'application/xml' },
+      body: c2v,
+    });
+    if (response.status === 404) {
+      const error = new Error('EMS returned HTTP 404 for this C2V; the pending updates request failed.');
+      error.status = 404;
+      throw error;
+    }
+    if (!response.ok) {
+      throw new Error(`EMS pending updates request failed: HTTP ${response.status}${response.statusText ? ' ' + response.statusText : ''}. If EMS is unavailable or busy, retry later.`);
+    }
+    const xml = await response.text();
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid pending update XML.');
+    const output = new XMLParser({ parseTagValue: false }).parse(xml)?.hasp_info;
+    const payload = typeof output?.v2cp === 'string' ? output.v2cp.replace(/\s/g, '') : '';
+    if (!payload || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload)) {
+      throw new Error('EMS did not return a valid V2CP package.');
+    }
+    return xml;
   }
 
   /**
@@ -623,8 +714,8 @@ class EmsClient {
     }
   }
 
-  /** Read an existing activation and verify its returned Activation ID. */
-  async getActivationLicense(aid) {
+  /** Fetch an activation document from EMS and verify its Activation ID. */
+  async _getActivationXml(aid) {
     if (typeof aid !== 'string' || !aid.trim()) throw new Error('Activation ID is required');
     const response = await this._fetch(`${this.apiRoot}/activation/${encodeURIComponent(aid)}.ws`, {
       headers: { Accept: 'application/xml' },
@@ -642,6 +733,12 @@ class EmsClient {
       throw error;
     }
     if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid activation XML.');
+    return xml;
+  }
+
+  /** Read an existing activation and verify the returned Activation ID. */
+  async getActivationLicense(aid) {
+    const xml = await this._getActivationXml(aid);
     const activation = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '',
@@ -658,6 +755,98 @@ class EmsClient {
       protectionKeyId: output.protectionKeyId,
       activationString: output.activationString,
     };
+  }
+
+  /** Read the C2V stored with an activation record, without exposing it to the browser. */
+  async getActivationC2V(aid) {
+    const xml = await this._getActivationXml(aid);
+    const options = {
+      preserveOrder: true, ignoreAttributes: false, attributeNamePrefix: '',
+      parseTagValue: false, trimValues: false,
+    };
+    const document = new XMLParser(options).parse(xml);
+    const roots = document.filter((node) => Object.hasOwn(node, 'activation'));
+    if (roots.length !== 1 || !Array.isArray(roots[0].activation)) {
+      throw new Error('EMS returned an invalid activation record.');
+    }
+    const fields = roots[0].activation;
+    const textOf = (nodes, name) => {
+      const matches = nodes.filter((node) => Object.hasOwn(node, name));
+      if (matches.length !== 1 || !Array.isArray(matches[0][name]) ||
+          matches[0][name].some((node) => !Object.hasOwn(node, '#text'))) return null;
+      return matches[0][name].map((node) => String(node['#text'])).join('');
+    };
+    const output = fields.find((node) => Object.hasOwn(node, 'activationOutput'))?.activationOutput;
+    if (!Array.isArray(output) || textOf(output, 'AID')?.trim() !== aid) {
+      throw new Error('EMS returned activation details for an unexpected Activation ID.');
+    }
+    const inputs = fields.filter((node) => Object.hasOwn(node, 'activationInput'));
+    if (inputs.length !== 1 || !Array.isArray(inputs[0].activationInput)) {
+      throw new Error(`EMS activation record does not contain one usable activationInput (found ${inputs.length}).`);
+    }
+    const attributes = inputs[0].activationInput
+      .filter((node) => Object.hasOwn(node, 'activationAttribute'))
+      .map((node) => node.activationAttribute)
+      .filter(Array.isArray);
+    const c2vAttributes = attributes.filter((attribute) =>
+      textOf(attribute, 'attributeName')?.trim().toUpperCase() === 'C2V'
+    );
+    if (c2vAttributes.length !== 1) {
+      throw new Error(`EMS activation record must contain exactly one saved C2V attribute (found ${c2vAttributes.length} among ${attributes.length} activation attributes).`);
+    }
+    const valueElements = c2vAttributes[0].filter((node) => Object.hasOwn(node, 'attributeValue'));
+    if (valueElements.length !== 1) throw new Error(`EMS C2V attribute must contain one attributeValue (found ${valueElements.length}).`);
+    const valueNodes = valueElements[0].attributeValue;
+    if (!Array.isArray(valueNodes)) throw new Error('EMS activation record does not contain a saved C2V value.');
+    const textOnly = valueNodes.every((node) => Object.hasOwn(node, '#text'));
+    let c2v = textOnly
+      ? valueNodes.map((node) => String(node['#text'])).join('').trim()
+      : new XMLBuilder(options).build(valueNodes).trim();
+    const escapedXml = textOnly && c2v.match(/^(<\?xml\s[^?]*\?>\s*)(&lt;hasp_info(?:\s|&gt;)[\s\S]*)$/);
+    let decodedEscapedXml = false;
+    if (escapedXml && !escapedXml[2].includes('<') &&
+        XMLValidator.validate(`<value>${escapedXml[2]}</value>`) === true) {
+      const decoded = new XMLParser({ parseTagValue: false, trimValues: false }).parse(`<value>${escapedXml[2]}</value>`).value;
+      if (typeof decoded === 'string') {
+        c2v = escapedXml[1] + decoded;
+        decodedEscapedXml = true;
+      }
+    }
+    if (textOnly) {
+      // Character references outside the root are not XML whitespace until decoded.
+      c2v = c2v.replace(/^(<\?xml\s[^?]*\?>)((?:[ \t\r\n]|&#x[dD];)+)(?=<)/,
+        (_, declaration, whitespace) => declaration + whitespace.replace(/&#x[dD];/g, '\r'));
+      c2v = c2v.replace(/(>)((?:[ \t\r\n]|&#x[dD];)*&#x[dD];(?:[ \t\r\n]|&#x[dD];)*)$/,
+        (_, closing, whitespace) => closing + whitespace.replace(/&#x[dD];/g, '\r'));
+    }
+    const format = textOnly ? 'text' : 'nested XML';
+    const size = Buffer.byteLength(c2v, 'utf8');
+    if (!c2v || c2v.toLowerCase() === 'null') {
+      throw new Error(`EMS activation record has ${c2v ? 'a null' : 'an empty'} C2V value (format: ${format}; size: ${size} bytes).`);
+    }
+    const validation = XMLValidator.validate(c2v);
+    if (validation !== true) {
+      const code = /^[A-Za-z]+$/.test(validation.err.code) ? validation.err.code : 'unknown';
+      const line = Number.isInteger(validation.err.line) ? validation.err.line : 'unknown';
+      const column = Number.isInteger(validation.err.col) ? validation.err.col : 'unknown';
+      const error = new Error(`EMS activation record contains an invalid saved C2V (format: ${format}; size: ${size} bytes; XML error: ${code}, line ${line}, column ${column}).`);
+      error.c2vValue = c2v;
+      error.c2vDiagnostic = {
+        format,
+        sizeBytes: size,
+        xmlError: code,
+        line,
+        column,
+        reason: validation.err.msg === "char '&' is not expected." ? 'unexpected ampersand' : 'XML validation failed',
+        startsWithXmlDeclaration: /^<\?xml(?:\s|\?)/i.test(c2v),
+        containsHASPInfoMarkup: /<hasp_info(?:\s|>|\/)/i.test(c2v),
+        containsEscapedHASPInfoMarkup: /&lt;hasp_info(?:\s|&gt;|\/)/i.test(c2v),
+        extraEscapingDetected: Boolean(escapedXml),
+        extraEscapingDecoded: decodedEscapedXml,
+      };
+      throw error;
+    }
+    return c2v;
   }
 
   /** Build the EMS entitlement XML for the requested products and memory values. */

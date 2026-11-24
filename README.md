@@ -13,6 +13,11 @@ When serials are first requested after EMS login, the app scans existing base-pr
 
 5. Lastly, run `npm run dev -- --test` or `npm run dev -- --production`. The output will provide links to access the application.
 
+To fetch pending updates, use **Get V2CP** on the Product Keys page to use the C2V stored with that activation, or open **Fetch pending updates (V2CP)** on an entitlement to upload a C2V. Download the returned V2CP and apply it using the Sentinel Runtime API or Admin Control Center. EMS returns all pending updates for the protection key in the C2V, not just the selected product key or entitlement. Product keys without an activation ID have no activation-stored C2V available for this action. The target needs RTE 7.63 or later and must not be an SL-Legacy key. The app does not poll automatically; if EMS is unavailable or busy, the guide recommends retrying after 60 minutes.
+
+The **Product Keys** tab scans entitlement product keys and retrieves licenses for activation IDs returned by EMS. Keys without a returned activation ID are also listed, but no license can be fetched for them; they may not be activated.
+If the saved C2V is invalid XML, the server logs the value being validated along with its format, size, validation position, structural clues and a short excerpt around the error. Server logs can therefore contain C2V data and should be handled accordingly.
+
 ## Security
 This integration passes authentication along to Sentinel-EMS and ACT!, so communicating with them over HTTP is **INSECURE**.
 
