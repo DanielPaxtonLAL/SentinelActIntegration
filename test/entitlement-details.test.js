@@ -44,7 +44,7 @@ test('produce eligibility requires a draft and only Product Key line items', () 
 });
 
 test('uses one confirmation button instead of per-field checkboxes', () => {
-  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div class="detail-footer"/)[1];
+  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div v-if="!isKeyUpdate \|\| canProduce" class="detail-footer"/)[1];
   assert.doesNotMatch(details, /<input type="checkbox"/);
   assert.match(html, /<button type="button"[^>]*:aria-pressed="detailsConfirmed" @click="confirmDetailsReviewed">I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
 });
@@ -218,6 +218,40 @@ test('opening or reloading entitlement details clears the review confirmation', 
   app.detailsConfirmed = true;
   await definition.methods.openEntitlementDetails.call(app, { id: '2' });
   assert.equal(app.detailsConfirmed, false);
+});
+
+test('keeps the selected list type for the details outline after loading', async () => {
+  const app = {
+    producing: false, detailRequest: 0, customers: [],
+    loadVersionMemory: async () => undefined,
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
+  };
+  fetchMemory = async () => ({ ok: true, json: async () => ({ products: [] }) });
+  for (const type of [2, 3, 1]) {
+    await definition.methods.openEntitlementDetails.call(app, { id: '1', type });
+    assert.equal(app.selectedEntitlement.type, type);
+  }
+  fetchMemory = async () => ({ ok: true, json: async () => ({ products: [], type: 3 }) });
+  await definition.methods.openEntitlementDetails.call(app, { id: '1', type: 2 });
+  assert.equal(app.selectedEntitlement.type, 2);
+  await definition.methods.openEntitlementDetails.call(app, { id: '1' });
+  assert.equal(app.selectedEntitlement.type, 3);
+  assert.match(html, /class="entitlement-details" :class="selectedEntitlement \? typeMarkerClass\(selectedEntitlement\.type\) : null"/);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.entitlement-details\.product-key \{ border: 2px solid var\(--entitlement-product-key-color\); \}/);
+  assert.match(styles, /\.entitlement-details\.key-update \{ border: 2px solid var\(--entitlement-key-update-color\); \}/);
+});
+
+test('hides the base-product details table and footnote only for key updates', () => {
+  const app = { selectedEntitlement: { type: ' 3 ' }, typeMarkerClass: definition.methods.typeMarkerClass };
+  assert.equal(definition.computed.isKeyUpdate.call(app), true);
+  for (const type of [2, 1, undefined]) {
+    app.selectedEntitlement.type = type;
+    assert.equal(definition.computed.isKeyUpdate.call(app), false);
+  }
+  assert.match(html, /class="entitlement-detail-fields" v-if="!isKeyUpdate" role="table" aria-label="Entitlement attributes"/);
+  assert.match(html, /<p v-if="!isKeyUpdate" class="detail-footnote">/);
+  assert.match(html, /<section v-if="isEntitlementComplete" class="product-key-details">/);
 });
 
 test('loads product key details and ignores responses for a previous selection', async () => {
@@ -467,8 +501,10 @@ test('marks entitlement types with an accessible thin color cell', () => {
   assert.match(html, /class="entitlement-type-marker" :class="typeMarkerClass\(entitlement.type\)" :title="displayValue\(typeLabel\(entitlement.type\)\)" :aria-label="displayValue\(typeLabel\(entitlement.type\)\)"/);
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
   assert.match(styles, /td\.entitlement-type-marker \{ width: \.5rem; min-width: \.5rem; padding: 0; \}/);
-  assert.match(styles, /td\.entitlement-type-marker\.product-key \{ background: #00ffff; \}/);
-  assert.match(styles, /td\.entitlement-type-marker\.key-update \{ background: #ff00ff; \}/);
+  assert.match(styles, /--entitlement-product-key-color: #00ffff/);
+  assert.match(styles, /--entitlement-key-update-color: #ff00ff/);
+  assert.match(styles, /td\.entitlement-type-marker\.product-key \{ background: var\(--entitlement-product-key-color\); \}/);
+  assert.match(styles, /td\.entitlement-type-marker\.key-update \{ background: var\(--entitlement-key-update-color\); \}/);
 });
 
 test('shows entitlement dates in local time with date-only values unchanged', () => {
@@ -499,10 +535,10 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
 
 test('shows customer, serial number, and expiry date in order in entitlement details', () => {
   assert.match(html, /<th>Irricad Order Code \(Ref ID 1\)<\/th>/);
-  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div class="detail-footer"/)[1];
+  const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div v-if="!isKeyUpdate \|\| canProduce" class="detail-footer"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   assert.doesNotMatch(details, /<input type="checkbox"/);
-  assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">[\s\S]*?<\/p>\s*<div v-if="canProduce" class="detail-actions">\s*<button type="button"[^>]*>I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
+  assert.match(html, /<div v-if="!isKeyUpdate \|\| canProduce" class="detail-footer">\s*<p v-if="!isKeyUpdate" class="detail-footnote">[\s\S]*?<\/p>\s*<div v-if="canProduce" class="detail-actions">\s*<button type="button"[^>]*>I have checked these<\/button>\s*<button type="button" class="button--constructive"[^>]*:disabled="!detailsConfirmed/);
   assert.deepEqual(labels, ['Customer', 'Serial Number*', 'Irricad Order Code (Ref ID 1)', 'Created Date', 'Start Date', 'End Date', 'Standalone Irricad', 'Link Irricad', 'Pivot Irricad', 'Lease Irricad', 'Lease Expiry Date*', 'Irricad Version*']);
   assert.match(details, /Irricad Order Code \(Ref ID 1\)<\/div>\s*<div class="detail-value" role="cell">\{\{ displayValue\(selectedEntitlement\.refId1\) \}\}/);
   const app = { selectedEntitlement: {

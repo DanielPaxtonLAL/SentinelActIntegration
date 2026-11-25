@@ -48,6 +48,9 @@ createApp({
     };
   },
   computed: {
+    isKeyUpdate() {
+      return this.typeMarkerClass(this.selectedEntitlement?.type) === 'key-update';
+    },
     isProductKeyGenerated() {
       return String(this.selectedEntitlement?.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED';
     },
@@ -263,6 +266,7 @@ createApp({
         );
         this.selectedEntitlement = {
           ...data,
+          type: entitlement.type ?? data.type,
           customerName: customer?.name ?? customer?.customerName ??
             data.customerName ?? data.customer ?? entitlement.customer,
         };

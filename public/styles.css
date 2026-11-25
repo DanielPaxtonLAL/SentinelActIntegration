@@ -412,7 +412,7 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .customers-page .company-details dd { margin: 0; overflow-wrap: anywhere; }
 .customers-page .sync-error { margin-top: 1rem; }
 
-.entitlements-page { padding: 0; }
+.entitlements-page { padding: 0; --entitlement-product-key-color: #00ffff; --entitlement-key-update-color: #ff00ff; }
 .entitlements-page .entitlements-subheading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1rem; }
 .entitlements-page .entitlements-subheading h2 { margin: 0; font-size: 1.1rem; }
 .entitlements-page .entitlement-filter { box-sizing: border-box; width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
@@ -431,8 +431,8 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-list th.entitlement-type-header,
 .entitlements-page .entitlement-row > td.entitlement-type-marker { width: .5rem; min-width: .5rem; padding: 0; }
 .entitlements-page .entitlement-row > td.entitlement-type-marker { background: var(--color-border-strong); }
-.entitlements-page .entitlement-row > td.entitlement-type-marker.product-key { background: #00ffff; }
-.entitlements-page .entitlement-row > td.entitlement-type-marker.key-update { background: #ff00ff; }
+.entitlements-page .entitlement-row > td.entitlement-type-marker.product-key { background: var(--entitlement-product-key-color); }
+.entitlements-page .entitlement-row > td.entitlement-type-marker.key-update { background: var(--entitlement-key-update-color); }
 .entitlements-page .entitlement-row .entitlement-actions button { padding: .15rem .5rem; }
 .entitlements-page .entitlement-row .entitlement-actions button:disabled { display: none; }
 .entitlements-page .entitlement-row:hover,
@@ -441,6 +441,8 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .date-cell { max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entitlements-page .create-entitlement { max-width: 54rem; margin: 1.5rem auto; }
 .entitlements-page .entitlement-details { min-width: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
+.entitlements-page .entitlement-details.product-key { border: 2px solid var(--entitlement-product-key-color); }
+.entitlements-page .entitlement-details.key-update { border: 2px solid var(--entitlement-key-update-color); }
 .entitlements-page .entitlement-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .entitlements-page .entitlement-details h3 { margin: 1.5rem 0 .6rem; }
 .entitlements-page .entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }

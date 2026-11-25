@@ -61,14 +61,14 @@
           <p v-else-if="!loading && !error" class="entitlement-empty-list">{{ filter ? 'No matching entitlements.' : 'No entitlements found.' }}</p>
         </div>
       </div>
-      <section class="entitlement-details" aria-live="polite">
+      <section class="entitlement-details" :class="selectedEntitlement ? typeMarkerClass(selectedEntitlement.type) : null" aria-live="polite">
         <template v-if="selectedEntitlement">
           <h2 class="entitlement-heading">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }} - Entitlement Details - <span class="status-tag" :class="statusTagClass(selectedEntitlement.entState || selectedEntitlement.state)">{{ displayValue(selectedEntitlement.entState || selectedEntitlement.state) }}</span></h2>
           <p class="entitlement-description">{{ displayValue(selectedEntitlement.description || selectedEntitlement.descr) }}</p>
           <p v-if="detailLoading" role="status">Loading entitlement details…</p>
           <p v-if="detailError" class="form-error" role="alert">{{ detailError }}</p>
           <template v-if="!detailLoading && !detailError">
-            <div class="entitlement-detail-fields" role="table" aria-label="Entitlement attributes">
+            <div class="entitlement-detail-fields" v-if="!isKeyUpdate" role="table" aria-label="Entitlement attributes">
               <div class="detail-row" role="row">
                 <div class="detail-label" role="rowheader">Customer</div>
                 <div class="detail-value" role="cell">{{ displayValue(selectedEntitlement.customerName || selectedEntitlement.customer || selectedEntitlement.customerId) }}</div>
@@ -118,8 +118,8 @@
                 <div class="detail-value" role="cell">{{ decodedVersion }}</div>
               </div>
             </div>
-            <div class="detail-footer">
-              <p class="detail-footnote">* Derived from Memory Segments in Base Product</p>
+            <div v-if="!isKeyUpdate || canProduce" class="detail-footer">
+              <p v-if="!isKeyUpdate" class="detail-footnote">* Derived from Memory Segments in Base Product</p>
               <div v-if="canProduce" class="detail-actions">
                 <button type="button" :disabled="detailsConfirmed || detailLoading || loading || producing || deleting"
                   :aria-pressed="detailsConfirmed" @click="confirmDetailsReviewed">I have checked these</button>
