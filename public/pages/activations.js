@@ -56,13 +56,12 @@ createApp({
         state.loading = false;
       }
     },
-    async fetchPendingUpdates(activation) {
-      if (!activation.aid || activation.pendingUpdate?.loading) return;
-      activation.pendingUpdate = { loading: true, error: '', package: '' };
-      const state = activation.pendingUpdate;
+    async fetchHistoryPackage(activation) {
+      if (!activation.protectionKeyId || activation.historyPackage?.loading) return;
+      activation.historyPackage = { loading: true, error: '', package: '' };
+      const state = activation.historyPackage;
       try {
-        const response = await fetch(`/api/activations/${encodeURIComponent(activation.aid)}/pending-updates`, {
-          method: 'POST',
+        const response = await fetch(`/api/protection-keys/${encodeURIComponent(activation.protectionKeyId)}/v2cp`, {
           cache: 'no-store',
         });
         const data = await response.json();
@@ -70,7 +69,7 @@ createApp({
         if (typeof data.package !== 'string' || !data.package.trim()) throw new Error('The server returned an invalid V2CP package.');
         state.package = data.package;
       } catch (err) {
-        state.error = 'Failed to fetch pending updates: ' + err.message;
+        state.error = 'Failed to build V2CP: ' + err.message;
       } finally {
         state.loading = false;
       }

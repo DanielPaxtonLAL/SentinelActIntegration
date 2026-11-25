@@ -17,6 +17,26 @@ function findActivationIds(value, ids = new Set()) {
   return [...ids];
 }
 
+/** Preserve the protection-key attribute attached to each activation ID. */
+function findActivationReferences(value, references = []) {
+  if (!value || typeof value !== 'object') return references;
+  for (const [name, child] of Object.entries(value)) {
+    if (['aid', 'activationid'].includes(name.toLowerCase().replace(/[^a-z]/g, ''))) {
+      for (const candidate of Array.isArray(child) ? child : [child]) {
+        const id = typeof candidate === 'string' ? candidate : candidate?.['#text'];
+        const protectionKeyId = typeof candidate?.['@_protectionKeyId'] === 'string'
+          ? candidate['@_protectionKeyId'].trim() : '';
+        if (typeof id === 'string' && id.trim()) {
+          references.push({ aid: id.trim(), protectionKeyId: protectionKeyId || null });
+        }
+      }
+    } else {
+      findActivationReferences(child, references);
+    }
+  }
+  return references;
+}
+
 /** Extract readable diagnostics without including credentials, keys or C2V data. */
 function activationErrorDetail(text, c2v, secrets) {
   const trimmed = text.trim();
@@ -607,6 +627,9 @@ class EmsClient {
         productInfo: asList(productKey.productInfo),
         activationAttribute: asList(productKey.activationAttribute),
         activationIds: findActivationIds(productKey),
+        activationReferences: findActivationReferences(
+          new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false }).parse(xml).productKey
+        ),
       };
     }));
   }
@@ -679,7 +702,9 @@ class EmsClient {
     const updateInfo = document?.ProtectionKey?.ProtectionKeyOutput?.UpdateInfo;
     const wrapped = typeof updateInfo === 'string' && XMLValidator.validate(updateInfo.trim()) === true
       ? parser.parse(updateInfo.trim()) : updateInfo;
-    const key = document?.sentinel_ldk_info?.key ?? wrapped?.sentinel_ldk_info?.key;
+    const key = document?.sentinel_ldk_info?.key ??
+      document?.ProtectionKey?.ProtectionKeyOutput?.C2V?.sentinel_ldk_info?.key ??
+      wrapped?.sentinel_ldk_info?.key;
     if (String(key?.id ?? '').trim() !== protectionKeyId ||
         typeof key?.update_counter !== 'string' || !/^\d+$/.test(key.update_counter.trim())) {
       const knownRoots = ['sentinel_ldk_info', 'ProtectionKey', 'activation', 'listResponse', 'error', 'html'];
@@ -915,7 +940,6 @@ class EmsClient {
       const line = Number.isInteger(validation.err.line) ? validation.err.line : 'unknown';
       const column = Number.isInteger(validation.err.col) ? validation.err.col : 'unknown';
       const error = new Error(`EMS activation record contains an invalid saved C2V (format: ${format}; size: ${size} bytes; XML error: ${code}, line ${line}, column ${column}).`);
-      error.c2vValue = c2v;
       error.c2vDiagnostic = {
         format,
         sizeBytes: size,

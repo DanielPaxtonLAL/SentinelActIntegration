@@ -3,11 +3,19 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const AdmZip = require('adm-zip');
+const { XMLParser } = require('fast-xml-parser');
+const { buildHistoryV2cp } = require('../src/v2cp-package');
 
-function activationsRoute({ c2vError, logger = console } = {}) {
+function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
+  return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
+}
+
+function activationsRoute({ c2vError, logger = console, validHistory = false } = {}) {
   let handler;
   let pendingUpdatesHandler;
   let historyHandler;
+  let historyPackageHandler;
   const calls = [];
   class EmsClient {
     constructor() {
@@ -35,6 +43,7 @@ function activationsRoute({ c2vError, logger = console } = {}) {
     }
     async getActivationLicense(aid) {
       calls.push(['activation', aid]);
+      if (validHistory) return { aid, protectionKeyId: '12345', activationString: v2c('12345', '42', aid === 'history-base' ? 'YWJj' : 'ZGVm') };
       if (aid.startsWith('history-')) return {
         aid, protectionKeyId: aid === 'history-other' ? '999' : '12345', activationString: 'license-' + aid,
       };
@@ -42,15 +51,38 @@ function activationsRoute({ c2vError, logger = console } = {}) {
     }
     async getProtectionKeyEntitlements(id) {
       calls.push(['entitlements', id]);
+      if (validHistory) return ['10'];
       return ['10', '20'];
     }
     async getProtectionKeyActivationCandidates(id) {
       calls.push(['history-keys', id]);
-      return id === '10' ? { keys: [{ productKeyId: 'base', activationIds: ['history-base', 'history-other'] }], missingUpdateProductKey: false } :
-        { keys: [{ productKeyId: 'update', activationIds: ['history-update'] }, { productKeyId: 'missing', activationIds: [] }], missingUpdateProductKey: true };
+      if (validHistory) return { keys: [{
+        productKeyId: 'base',
+        activationIds: ['history-update', 'history-base'],
+        activationReferences: [
+          { aid: 'history-update', protectionKeyId: '12345' },
+          { aid: 'history-base', protectionKeyId: '12345' },
+        ],
+      }], missingUpdateProductKey: false };
+      return id === '10' ? { keys: [{
+        productKeyId: 'base',
+        activationIds: ['history-base', 'history-other', 'history-unknown', 'history-conflict'],
+        activationReferences: [
+          { aid: 'history-base', protectionKeyId: '12345' },
+          { aid: 'history-other', protectionKeyId: '999' },
+          { aid: 'history-unknown', protectionKeyId: null },
+          { aid: 'history-conflict', protectionKeyId: '12345' },
+          { aid: 'history-conflict', protectionKeyId: '999' },
+        ],
+      }], missingUpdateProductKey: false } :
+        { keys: [{
+          productKeyId: 'update', activationIds: ['history-update'],
+          activationReferences: [{ aid: 'history-update', protectionKeyId: '12345' }],
+        }, { productKeyId: 'missing', activationIds: [], activationReferences: [] }], missingUpdateProductKey: true };
     }
     async getActivationUpdateCounter(id, aid) {
       calls.push(['counter', id, aid]);
+      if (validHistory) return aid === 'history-base' ? '0' : '1';
       if (aid === 'history-update') throw new Error('EMS key history lookup failed: HTTP 404.');
       return '4';
     }
@@ -68,6 +100,7 @@ function activationsRoute({ c2vError, logger = console } = {}) {
     get(route, ...handlers) {
       if (route === '/api/activations') handler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/activations') historyHandler = handlers.at(-1);
+      if (route === '/api/protection-keys/:id/v2cp') historyPackageHandler = handlers.at(-1);
     },
     post(route, ...handlers) {
       if (route === '/api/activations/:aid/pending-updates') pendingUpdatesHandler = handlers.at(-1);
@@ -108,6 +141,7 @@ function activationsRoute({ c2vError, logger = console } = {}) {
   return {
     load: () => invoke(handler),
     history: (id) => invoke(historyHandler, { id }),
+    historyPackage: (id) => invoke(historyPackageHandler, { id }),
     pendingUpdates: (aid) => invoke(pendingUpdatesHandler, { aid }),
   };
 }
@@ -146,7 +180,9 @@ test('history discovers update licenses, filters other keys and reports missing 
   ]);
   assert.match(res.body.activations[1].counterError, /404/);
   assert.equal(res.body.activations[1].activationString, 'license-history-update');
-  assert.equal(res.body.warnings.length, 2);
+  assert.equal(res.body.warnings.length, 5);
+  assert.equal(calls.some((call) => call[0] === 'activation' &&
+    ['history-other', 'history-unknown', 'history-conflict'].includes(call[1])), false);
   assert.equal(calls.some((call) => call[0] === 'counter' && call[2] === 'history-other'), false);
   assert.equal((await route.history('invalid/key')).res.statusCode, 400);
 });
@@ -182,7 +218,7 @@ test('fetches V2CP using the C2V saved with the activation', async () => {
   ]);
 });
 
-test('logs the invalid C2V and diagnostics without returning its contents to the browser', async () => {
+test('logs invalid C2V diagnostics without exposing its contents', async () => {
   const logged = [];
   const c2vError = Object.assign(new Error('Invalid saved C2V'), {
     c2vDiagnostic: { format: 'text', xmlError: 'InvalidChar', line: 1, column: 39 },
@@ -195,8 +231,6 @@ test('logs the invalid C2V and diagnostics without returning its contents to the
   assert.deepEqual(logged, [
     ['Invalid saved C2V'],
     ['Saved C2V diagnostic:', '{"format":"text","xmlError":"InvalidChar","line":1,"column":39}'],
-    ['Invalid saved C2V value:', c2vError.c2vValue],
-    ['C2V at error position:', JSON.stringify(c2vError.c2vValue.slice(26, 51))],
   ]);
   assert.deepEqual(calls, [['stored-c2v', 'aid-001']]);
 });
@@ -213,7 +247,7 @@ test('activations page provides a V2C download for an existing license', () => {
   assert.match(html, /:download="'Activation-' \+ activation\.aid\.replace/);
 });
 
-test('activations page loads keys without IDs and disables unavailable V2CP requests', async () => {
+test('activations page loads keys without IDs and disables V2CP without a protection key', async () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
   const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
   let definition;
@@ -229,11 +263,11 @@ test('activations page loads keys without IDs and disables unavailable V2CP requ
   assert.equal(app.activations[0].productKeyId, 'key-1');
   assert.equal(app.activations[0].aid, null);
   assert.match(html, /No activation ID returned; license unavailable/);
-  assert.match(html, /No activation record to retrieve a saved C2V/);
+  assert.match(html, /No protection key ID available/);
   assert.doesNotMatch(html, /missingActivationIds/);
 });
 
-test('fetches V2CP for the chosen activation and surfaces EMS errors', async () => {
+test('builds V2CP for the chosen protection key and surfaces errors', async () => {
   const root = path.join(__dirname, '..', 'public');
   const html = fs.readFileSync(path.join(root, 'activations.html'), 'utf8');
   const script = fs.readFileSync(path.join(root, 'pages', 'activations.js'), 'utf8');
@@ -244,8 +278,7 @@ test('fetches V2CP for the chosen activation and surfaces EMS errors', async () 
   vm.runInNewContext(script, {
     fetch: async (url, options) => {
       calls++;
-      assert.equal(url, '/api/activations/aid-1/pending-updates');
-      assert.equal(options.method, 'POST');
+      assert.equal(url, '/api/protection-keys/12345/v2cp');
       assert.equal(options.cache, 'no-store');
       return fail
         ? { ok: false, json: async () => ({ error: 'EMS returned 404' }) }
@@ -253,22 +286,53 @@ test('fetches V2CP for the chosen activation and surfaces EMS errors', async () 
     },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
-  const first = { aid: 'aid-1', productKeyId: 'key-001' };
+  const first = { aid: 'aid-1', productKeyId: 'key-001', protectionKeyId: '12345' };
   const other = { productKeyId: 'key-002' };
-  await definition.methods.fetchPendingUpdates.call({}, first);
-  assert.equal(first.pendingUpdate.package, v2cp);
-  assert.equal(first.pendingUpdate.loading, false);
-  assert.equal(other.pendingUpdate, undefined);
-  assert.match(html, /@click="fetchPendingUpdates\(activation\)"/);
-  assert.match(html, /:disabled="!activation\.aid \|\| activation\.pendingUpdate\?\.loading"/);
+  await definition.methods.fetchHistoryPackage.call({}, first);
+  assert.equal(first.historyPackage.package, v2cp);
+  assert.equal(first.historyPackage.loading, false);
+  assert.equal(other.historyPackage, undefined);
+  assert.match(html, /@click="fetchHistoryPackage\(activation\)"/);
+  assert.match(html, /:disabled="!activation\.protectionKeyId \|\| activation\.historyPackage\?\.loading"/);
   assert.match(html, /Download V2CP/);
-  assert.match(html, /C2V saved by EMS for the activation/);
+  assert.match(html, /may include updates already applied/);
   assert.equal(calls, 1);
-  await definition.methods.fetchPendingUpdates.call({}, other);
+  await definition.methods.fetchHistoryPackage.call({}, other);
   assert.equal(calls, 1);
-  assert.equal(other.pendingUpdate, undefined);
+  assert.equal(other.historyPackage, undefined);
   fail = true;
-  await definition.methods.fetchPendingUpdates.call({}, first);
-  assert.match(first.pendingUpdate.error, /404/);
-  assert.equal(first.pendingUpdate.package, '');
+  await definition.methods.fetchHistoryPackage.call({}, first);
+  assert.match(first.historyPackage.error, /404/);
+  assert.equal(first.historyPackage.package, '');
+});
+
+test('builds a V2CP from key history in counter order with numbered V2Cs', async () => {
+  const route = activationsRoute({ validHistory: true });
+  const { res, calls } = await route.historyPackage('12345');
+  assert.equal(res.statusCode, 200);
+  const document = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false }).parse(res.body.package);
+  assert.equal(document.hasp_info.haspscope.vendor.hasp['@_id'], '12345');
+  const zip = new AdmZip(Buffer.from(document.hasp_info.v2cp, 'base64'));
+  assert.deepEqual(zip.getEntries().map((entry) => entry.entryName), ['1.v2c', '2.v2c']);
+  assert.equal(zip.readAsText('1.v2c'), v2c('12345', '42', 'YWJj'));
+  assert.equal(zip.readAsText('2.v2c'), v2c('12345', '42', 'ZGVm'));
+  assert.equal(calls.filter((call) => call[0] === 'activation').length, 2);
+  assert.equal((await route.historyPackage('invalid/key')).res.statusCode, 400);
+  const incomplete = await activationsRoute({ logger: { error() {} } }).historyPackage('12345');
+  assert.equal(incomplete.res.statusCode, 502);
+  assert.match(incomplete.res.body.error, /warnings/);
+});
+
+test('refuses incomplete, ambiguous or mismatched history packages', () => {
+  const entry = (aid, updateCounter, activationString = v2c()) =>
+    ({ aid, updateCounter, activationString, protectionKeyId: '12345', counterError: null });
+  const build = (activations, warnings = []) => buildHistoryV2cp('12345', { activations, warnings });
+  assert.throws(() => build([entry('a', '0')], ['missing product key']), /warnings/);
+  assert.throws(() => build([entry('a', '0'), entry('b', '2')]), /complete sequence/);
+  assert.throws(() => build([entry('a', '0'), entry('b', '0')]), /complete sequence/);
+  assert.throws(() => build([entry('a', '0', v2c('999'))]), /scope/);
+  assert.throws(() => build([entry('a', '0'), entry('b', '1', v2c('12345', '99'))]), /different protection key scopes/);
+  assert.throws(() => build([entry('a', null)]), /missing/);
+  assert.throws(() => build([entry('a', '0', '<bad')]), /invalid V2C XML/);
+  assert.throws(() => build([entry('a', '0'), entry('a', '1')]), /conflicting records/);
 });

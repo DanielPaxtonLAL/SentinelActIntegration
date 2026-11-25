@@ -23,14 +23,14 @@
           aria-label="Filter activations by customer, product key, Activation ID, or protection key">
       </div>
       <p class="form-hint">Product keys without an activation ID are also shown; these may not be activated.</p>
-      <p class="form-hint">Get V2CP uses the C2V saved by EMS for the activation. EMS returns pending updates for the protection key described by that C2V.</p>
+      <p class="form-hint">Get V2CP packages the protection key's complete available activation history in update-counter order. It may include updates already applied; it does not check the key's current state.</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="!error && loading" role="status">Loading activations…</p>
       <p v-else-if="!error && !filteredActivations.length">{{ filter ? 'No matching records.' : 'No product keys or activations found.' }}</p>
       <div v-else-if="!error && !loading" class="table-wrap">
         <table>
           <thead>
-            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th><th>Activation history</th><th>Pending updates</th></tr>
+            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th><th>Activation history</th><th>V2CP</th></tr>
           </thead>
           <tbody>
             <tr v-for="activation in filteredActivations" :key="activation.productKeyId + ':' + (activation.aid || '')">
@@ -74,13 +74,13 @@
                 </template>
               </td>
               <td>
-                <button type="button" :disabled="!activation.aid || activation.pendingUpdate?.loading" @click="fetchPendingUpdates(activation)">
-                  {{ activation.pendingUpdate?.loading ? 'Fetching…' : 'Get V2CP' }}
+                <button type="button" :disabled="!activation.protectionKeyId || activation.historyPackage?.loading" @click="fetchHistoryPackage(activation)">
+                  {{ activation.historyPackage?.loading ? 'Building…' : 'Get V2CP' }}
                 </button>
-                <span v-if="!activation.aid">No activation record to retrieve a saved C2V</span>
-                <p v-if="activation.pendingUpdate?.error" class="form-error" role="alert">{{ activation.pendingUpdate.error }}</p>
-                <a v-if="activation.pendingUpdate?.package" :href="licenseDownloadUrl(activation.pendingUpdate.package)"
-                  :download="'Pending-updates-' + activation.productKeyId.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2cp'">Download V2CP</a>
+                <span v-if="!activation.protectionKeyId">No protection key ID available</span>
+                <p v-if="activation.historyPackage?.error" class="form-error" role="alert">{{ activation.historyPackage.error }}</p>
+                <a v-if="activation.historyPackage?.package" :href="licenseDownloadUrl(activation.historyPackage.package)"
+                  :download="'Protection-key-' + activation.protectionKeyId.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2cp'">Download V2CP</a>
               </td>
             </tr>
           </tbody>

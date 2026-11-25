@@ -161,6 +161,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
     if (name === './ems-config') return require('../src/ems-config');
     if (name === './product-key-serials') return require('../src/product-key-serials');
     if (name === './environment') return require('../src/environment');
+    if (name === './v2cp-package') return require('../src/v2cp-package');
     if (name === './entitlement-memory') return require('../src/entitlement-memory');
     if (name === './entitlement-form-data') return { loadFormData: () => require('../src/entitlement-form-data').parseFormData(formJson, false) };
     if (name === '../public/lease-dates') return require('../public/lease-dates');

@@ -45,6 +45,11 @@ test('reads product-key AIDs with protection key attributes and multiple activat
   });
   const [key] = await client.getEntitlementProductKeys('123');
   assert.deepEqual(key.activationIds, ['activation-001', 'activation-002']);
+  assert.deepEqual(key.activationReferences, [
+    { aid: 'activation-001', protectionKeyId: '712734935' },
+    { aid: 'activation-002', protectionKeyId: '712734936' },
+    { aid: 'activation-001', protectionKeyId: null },
+  ]);
 });
 
 test('handles multiple keys and rejects missing IDs or non-generated entitlements', async () => {
@@ -142,6 +147,8 @@ test('reads an activation history counter and rejects a different protection key
   };
   assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '32');
   const history = '<sentinel_ldk_info><key><id>12345</id><update_counter>33</update_counter></key></sentinel_ldk_info>';
+  xml = `<ProtectionKey><ProtectionKeyOutput><C2V>${history}</C2V></ProtectionKeyOutput></ProtectionKey>`;
+  assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '33');
   xml = `<ProtectionKey><ProtectionKeyOutput><UpdateInfo>${history}</UpdateInfo></ProtectionKeyOutput></ProtectionKey>`;
   assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '33');
   const escaped = history.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -277,7 +284,7 @@ test('reports saved C2V shape and validation errors without exposing its content
     assert.equal(error.c2vDiagnostic.containsHASPInfoMarkup, true);
     assert.equal(error.c2vDiagnostic.extraEscapingDecoded, false);
     assert.doesNotMatch(JSON.stringify(error.c2vDiagnostic), /SECRET_FINGERPRINT/);
-    assert.equal(error.c2vValue, '<hasp_info>SECRET_FINGERPRINT');
+    assert.equal(error.c2vValue, undefined);
     return true;
   });
   xml = record(attribute('&lt;hasp_info&gt;abc &amp; SECRET_FINGERPRINT&lt;/hasp_info&gt;'));
