@@ -570,10 +570,12 @@ class EmsClient {
     return this._getEntitlementProductKeys(id, entitlement, true);
   }
 
-  async _getEntitlementProductKeys(id, entitlement, existingOnly) {
+  async _getEntitlementProductKeys(id, entitlement, existingOnly, includeUpdates = false) {
     const items = Array.isArray(entitlement.entitlementItem) ? entitlement.entitlementItem : [entitlement.entitlementItem];
     const ids = items.flatMap((item) => {
-      if (existingOnly && (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId)) return [];
+      if (existingOnly && (!item || !(item.lineItemType === 'Product_Key' ||
+          includeUpdates && item.lineItemType === 'ProtectionKey_Update') || !item.productKeyId)) return [];
+      if (existingOnly) return Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId];
       if (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId) {
         throw new Error('EMS did not return a product key ID for every entitlement item.');
       }
@@ -607,6 +609,89 @@ class EmsClient {
         activationIds: findActivationIds(productKey),
       };
     }));
+  }
+
+  /** List the entitlements EMS associates with a protection key. */
+  async getProtectionKeyEntitlements(protectionKeyId) {
+    const response = await this._fetch(`${this.apiRoot}/target/${encodeURIComponent(protectionKeyId)}/entitlement.ws`, {
+      headers: { Accept: 'application/xml' },
+    });
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading protection key entitlements.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) throw new Error(`EMS protection key entitlement lookup failed: HTTP ${response.status}.`);
+    const xml = await response.text();
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid protection key entitlement XML.');
+    const document = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '', parseTagValue: false }).parse(xml);
+    const root = document?.entitlementListResponse !== undefined ? 'entitlementListResponse' :
+      document?.listResponse !== undefined ? 'listResponse' : null;
+    const list = root ? document[root] : null;
+    const headerCount = response.headers?.get('X-Total-Count');
+    const count = list?.count ?? headerCount;
+    if (!list || typeof list !== 'object' || !/^\d+$/.test(count ?? '') ||
+        !Number.isSafeInteger(Number(count))) {
+      const knownRoots = ['entitlementListResponse', 'listResponse', 'ProtectionKey', 'activation', 'error', 'html'];
+      const observedRoot = knownRoots.find((name) => Object.hasOwn(document, name)) || 'other';
+      const countStatus = count == null ? 'missing' : /^\d+$/.test(count) ? 'out of range' : 'non-numeric';
+      const fields = list && typeof list === 'object'
+        ? ['count', 'entitlementInstance', 'instance'].filter((name) => Object.hasOwn(list, name)).join(',') || 'none'
+        : 'unavailable';
+      throw new Error(`EMS returned an invalid protection key entitlement list (root: ${observedRoot}; count: ${countStatus}; recognized fields: ${fields}).`);
+    }
+    const instances = root === 'entitlementListResponse' ? list.entitlementInstance : list.instance;
+    const entries = instances === undefined ? [] : Array.isArray(instances) ? instances : [instances];
+    const ids = entries.map((entry) => root === 'entitlementListResponse' ? entry?.entId : entry?.id);
+    if (headerCount != null && (!/^\d+$/.test(headerCount) || Number(headerCount) !== Number(count)) ||
+        ids.length !== Number(count) || ids.some((id) => !/^[1-9]\d*$/.test(id ?? '')) ||
+        new Set(ids).size !== ids.length) {
+      throw new Error('EMS returned an incomplete or invalid protection key entitlement list.');
+    }
+    return ids;
+  }
+
+  /** Find existing product keys, including those for protection-key updates. */
+  async getProtectionKeyActivationCandidates(entitlementId) {
+    const entitlement = await this.getEntitlementDetails(entitlementId, { includeCustomer: false });
+    const items = Array.isArray(entitlement.entitlementItem) ? entitlement.entitlementItem : [entitlement.entitlementItem];
+    const missingUpdateProductKey = items.some((item) =>
+      item?.lineItemType === 'ProtectionKey_Update' && !item.productKeyId);
+    const keys = await this._getEntitlementProductKeys(entitlementId, entitlement, true, true);
+    return { keys, missingUpdateProductKey };
+  }
+
+  /** Get the counter in the key state EMS associates with an activation. */
+  async getActivationUpdateCounter(protectionKeyId, aid) {
+    const response = await this._fetch(`${this.apiRoot}/target/${encodeURIComponent(protectionKeyId)}/activation.ws?AID=${encodeURIComponent(aid)}`, {
+      headers: { Accept: 'application/xml' },
+    });
+    if (response.status === 401 || response.status === 302) {
+      const error = new Error('EMS session expired while loading activation key history.');
+      error.status = 401;
+      throw error;
+    }
+    if (!response.ok) throw new Error(`EMS key history lookup failed: HTTP ${response.status}.`);
+    const xml = await response.text();
+    if (XMLValidator.validate(xml) !== true) throw new Error('EMS returned invalid key history XML.');
+    const parser = new XMLParser({ parseTagValue: false });
+    const document = parser.parse(xml);
+    const updateInfo = document?.ProtectionKey?.ProtectionKeyOutput?.UpdateInfo;
+    const wrapped = typeof updateInfo === 'string' && XMLValidator.validate(updateInfo.trim()) === true
+      ? parser.parse(updateInfo.trim()) : updateInfo;
+    const key = document?.sentinel_ldk_info?.key ?? wrapped?.sentinel_ldk_info?.key;
+    if (String(key?.id ?? '').trim() !== protectionKeyId ||
+        typeof key?.update_counter !== 'string' || !/^\d+$/.test(key.update_counter.trim())) {
+      const knownRoots = ['sentinel_ldk_info', 'ProtectionKey', 'activation', 'listResponse', 'error', 'html'];
+      const root = knownRoots.find((name) => Object.hasOwn(document, name)) || 'other';
+      const wrapper = updateInfo === undefined ? 'missing' : typeof updateInfo === 'string' ? 'text' : 'nested';
+      const idStatus = key?.id == null || key.id === '' ? 'missing' :
+        String(key.id).trim() === protectionKeyId ? 'matches' : 'different or non-text';
+      const counterStatus = key?.update_counter == null || key.update_counter === '' ? 'missing' :
+        typeof key.update_counter === 'string' && /^\d+$/.test(key.update_counter.trim()) ? 'numeric' : 'invalid';
+      throw new Error(`EMS returned an invalid or unexpected key history (root: ${root}; UpdateInfo: ${wrapper}; key: ${key ? 'present' : 'missing'}; key ID: ${idStatus}; update counter: ${counterStatus}).`);
+    }
+    return key.update_counter.trim();
   }
 
   /** Fetch the pending update package for the protection key described by a C2V. */

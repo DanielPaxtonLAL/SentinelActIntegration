@@ -83,6 +83,87 @@ test('discovers existing product keys across entitlement states without changing
   assert.deepEqual(await client.getProductKeysForActivations('123'), []);
 });
 
+test('discovers update product keys for history and reports missing update keys', async () => {
+  const client = createClient();
+  client.getEntitlementDetails = async () => ({ entitlementItem: [
+    { lineItemType: 'Product_Key', productKeyId: 'key-001' },
+    { lineItemType: 'ProtectionKey_Update', productKeyId: 'key-002' },
+    { lineItemType: 'ProtectionKey_Update' },
+    { lineItemType: 'Hardware_Key', productKeyId: 'other' },
+  ] });
+  client._fetch = async (url) => ({
+    ok: true,
+    text: async () => url.includes('key-002') ? responseXml.replace('key-001', 'key-002') : responseXml,
+  });
+  const result = await client.getProtectionKeyActivationCandidates('123');
+  assert.deepEqual(result.keys.map((key) => key.productKeyId), ['key-001', 'key-002']);
+  assert.equal(result.missingUpdateProductKey, true);
+  assert.deepEqual((await client.getProductKeysForActivations('123')).map((key) => key.productKeyId), ['key-001']);
+});
+
+test('reads associated protection key entitlements and rejects incomplete results', async () => {
+  const client = createClient();
+  let xml = '<entitlementListResponse count="2"><entitlementInstance entId="123"/><entitlementInstance entId="456"/></entitlementListResponse>';
+  client._fetch = async (url) => {
+    assert.equal(url, 'https://ems.example/ems/v90/ws/target/12345/entitlement.ws');
+    return { ok: true, text: async () => xml };
+  };
+  assert.deepEqual(await client.getProtectionKeyEntitlements('12345'), ['123', '456']);
+  xml = '<listResponse type="entitlement" count="2"><instance id="123"/><instance id="456"/></listResponse>';
+  assert.deepEqual(await client.getProtectionKeyEntitlements('12345'), ['123', '456']);
+  client._fetch = async () => ({ ok: true, headers: { get: () => '1' }, text: async () => xml });
+  xml = '<listResponse type="entitlement"><instance id="123"/></listResponse>';
+  assert.deepEqual(await client.getProtectionKeyEntitlements('12345'), ['123']);
+  xml = '<listResponse type="entitlement" count="2"><instance id="123"/><instance id="456"/></listResponse>';
+  await assert.rejects(() => client.getProtectionKeyEntitlements('12345'), /incomplete/);
+  client._fetch = async () => ({ ok: true, text: async () => xml });
+  xml = '<entitlementListResponse count="0"/>';
+  assert.deepEqual(await client.getProtectionKeyEntitlements('12345'), []);
+  xml = '<entitlementListResponse count="2"><entitlementInstance entId="123"/></entitlementListResponse>';
+  await assert.rejects(() => client.getProtectionKeyEntitlements('12345'), /incomplete/);
+  xml = '<entitlementListResponse count="2"><entitlementInstance entId="123"/><entitlementInstance entId="123"/></entitlementListResponse>';
+  await assert.rejects(() => client.getProtectionKeyEntitlements('12345'), /invalid/);
+  xml = '<listResponse><instance customer="private customer" id="123"/></listResponse>';
+  await assert.rejects(() => client.getProtectionKeyEntitlements('12345'), (err) => {
+    assert.match(err.message, /root: listResponse; count: missing; recognized fields: instance/);
+    assert.doesNotMatch(err.message, /private customer|123/);
+    return true;
+  });
+  xml = '<entitlementListResponse><entitlementInstance entId="123"/></entitlementListResponse>';
+  await assert.rejects(() => client.getProtectionKeyEntitlements('12345'), /count: missing; recognized fields: entitlementInstance/);
+});
+
+test('reads an activation history counter and rejects a different protection key', async () => {
+  const client = createClient();
+  let xml = '<sentinel_ldk_info><key><id>12345</id><update_counter>32</update_counter></key></sentinel_ldk_info>';
+  client._fetch = async (url) => {
+    assert.equal(url, 'https://ems.example/ems/v90/ws/target/12345/activation.ws?AID=aid%2F1');
+    return { ok: true, text: async () => xml };
+  };
+  assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '32');
+  const history = '<sentinel_ldk_info><key><id>12345</id><update_counter>33</update_counter></key></sentinel_ldk_info>';
+  xml = `<ProtectionKey><ProtectionKeyOutput><UpdateInfo>${history}</UpdateInfo></ProtectionKeyOutput></ProtectionKey>`;
+  assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '33');
+  const escaped = history.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  xml = `<ProtectionKey><ProtectionKeyOutput><UpdateInfo>${escaped}</UpdateInfo></ProtectionKeyOutput></ProtectionKey>`;
+  assert.equal(await client.getActivationUpdateCounter('12345', 'aid/1'), '33');
+  xml = '<sentinel_ldk_info><key><id>12345</id><update_counter>32</update_counter></key></sentinel_ldk_info>';
+  xml = xml.replace('<id>12345</id>', '<id>54321</id>');
+  await assert.rejects(() => client.getActivationUpdateCounter('12345', 'aid/1'), (err) => {
+    assert.match(err.message, /root: sentinel_ldk_info; UpdateInfo: missing; key: present; key ID: different or non-text; update counter: numeric/);
+    assert.doesNotMatch(err.message, /12345|54321|32/);
+    return true;
+  });
+  xml = '<sentinel_ldk_info><key><id>12345</id></key></sentinel_ldk_info>';
+  await assert.rejects(() => client.getActivationUpdateCounter('12345', 'aid/1'), /key ID: matches; update counter: missing/);
+  xml = '<ProtectionKey><ProtectionKeyOutput><secret>private</secret></ProtectionKeyOutput></ProtectionKey>';
+  await assert.rejects(() => client.getActivationUpdateCounter('12345', 'aid/1'), (err) => {
+    assert.match(err.message, /root: ProtectionKey; UpdateInfo: missing; key: missing/);
+    assert.doesNotMatch(err.message, /private/);
+    return true;
+  });
+});
+
 test('paginates entitlement discovery and rejects incomplete or changing results', async () => {
   const client = createClient();
   client.authenticated = true;

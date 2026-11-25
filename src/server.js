@@ -367,6 +367,63 @@ app.get('/api/activations', async (req, res) => {
   }
 });
 
+app.get('/api/protection-keys/:id/activations', async (req, res) => {
+  const ems = req.ems;
+  const protectionKeyId = req.params.id;
+  res.set('Cache-Control', 'no-store');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(protectionKeyId)) {
+    return res.status(400).json({ error: 'Protection key ID is invalid.' });
+  }
+  try {
+    const entitlementIds = await withSession(ems, () => ems.getProtectionKeyEntitlements(protectionKeyId));
+    const candidates = [];
+    const warnings = [];
+    for (let index = 0; index < entitlementIds.length; index += 10) {
+      const batch = await Promise.all(entitlementIds.slice(index, index + 10).map(async (entitlementId) => ({
+        entitlementId,
+        ...await withSession(ems, () => ems.getProtectionKeyActivationCandidates(entitlementId)),
+      })));
+      for (const { entitlementId, keys, missingUpdateProductKey } of batch) {
+        if (missingUpdateProductKey) warnings.push(`Entitlement ${entitlementId}: EMS did not return an update product key ID.`);
+        for (const key of keys) {
+          if (!key.activationIds.length) warnings.push(`Entitlement ${entitlementId}: a product key has no activation IDs returned by EMS.`);
+          for (const aid of key.activationIds) candidates.push({ aid, productKeyId: key.productKeyId, entitlementId });
+        }
+      }
+    }
+    const results = new Map();
+    const aids = [...new Set(candidates.map(({ aid }) => aid))];
+    for (let index = 0; index < aids.length; index += 10) {
+      const batch = await Promise.all(aids.slice(index, index + 10).map(async (aid) => {
+        const license = await withSession(ems, () => ems.getActivationLicense(aid));
+        if (!String(license.protectionKeyId ?? '').trim()) return { aid, license: null, missingProtectionKeyId: true };
+        if (String(license.protectionKeyId ?? '').trim() !== protectionKeyId) return { aid, license: null };
+        try {
+          const updateCounter = await withSession(ems, () => ems.getActivationUpdateCounter(protectionKeyId, aid));
+          return { aid, license, updateCounter, counterError: null };
+        } catch (err) {
+          if (err.status === 401) throw err;
+          console.error(`Key history lookup failed for activation: ${err.message}`);
+          return { aid, license, updateCounter: null, counterError: err.message };
+        }
+      }));
+      for (const result of batch) {
+        results.set(result.aid, result);
+        if (result.missingProtectionKeyId) warnings.push(`Activation ${result.aid}: EMS did not return a protection key ID.`);
+      }
+    }
+    const activations = candidates.flatMap((candidate) => {
+      const result = results.get(candidate.aid);
+      if (!result.license) return [];
+      return [{ ...candidate, ...result.license, updateCounter: result.updateCounter, counterError: result.counterError }];
+    });
+    res.json({ activations, warnings });
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 401 ? 401 : 502).json({ error: err.message });
+  }
+});
+
 app.post('/api/activations/:aid/pending-updates', async (req, res) => {
   const ems = req.ems;
   res.set('Cache-Control', 'no-store');

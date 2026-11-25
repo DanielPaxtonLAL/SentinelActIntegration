@@ -7,6 +7,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const python = process.env.PYTHON || 'python';
 const hasPython = spawnSync(python, ['--version'], { stdio: 'ignore' }).status === 0;
 const script = path.join(__dirname, '..', 'config-helper-scripts', 'get-ems-activations.py');
+const productKeyScript = path.join(__dirname, '..', 'config-helper-scripts', 'get-ems-product-key.py');
 
 test('activation helper parses dotenv inline comments', { skip: !hasPython }, () => {
   const code = `
@@ -113,6 +114,58 @@ test('activation helper reports incomplete paging instead of claiming success', 
       res.end('Customer,Product\n');
     } else {
       res.end('<listResponse/>');
+    }
+  });
+
+  test('product key helper prompts for a key and prints the raw EMS response', { skip: !hasPython }, async () => {
+    const paths = [];
+    const server = http.createServer((req, res) => {
+      paths.push(req.url);
+      if (req.url === '/ems/login.html') {
+        res.setHeader('Set-Cookie', 'JSESSIONID=mock; Path=/ems');
+        res.end('login');
+      } else if (req.url === '/ems/verifyLogin.html') {
+        res.writeHead(302, { Location: '/ems/homePage' });
+        res.end();
+      } else if (req.url === '/ems/homePage') {
+        res.end('home');
+      } else if (req.url === '/ems/v90/ws/productKey/key%2Fa%20b.ws') {
+        assert.match(req.headers.cookie, /JSESSIONID=mock/);
+        res.setHeader('Content-Type', 'application/xml');
+        res.end('<productKey><productKeyId>key/a b</productKeyId><AID protectionKeyId="123">aid-1</AID></productKey>');
+      } else {
+        res.writeHead(404);
+        res.end('Product key does not exist');
+      }
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const run = (args, input) => new Promise((resolve, reject) => {
+      const child = spawn(python, [productKeyScript, ...args, '--base-url', `http://127.0.0.1:${server.address().port}`], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 30000,
+        env: { ...process.env, EMS_USER: '', EMS_PASS: '' },
+      });
+      let stdout = '', stderr = '';
+      child.stdout.on('data', (data) => { stdout += data; });
+      child.stderr.on('data', (data) => { stderr += data; });
+      child.on('error', reject);
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+      child.stdin.end(input);
+    });
+    try {
+      const result = await run([], 'key/a b\ntest-user\ntest-password\n');
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stdout, '<productKey><productKeyId>key/a b</productKeyId><AID protectionKeyId="123">aid-1</AID></productKey>\n');
+      assert.match(result.stderr, /Product key ID:/);
+      assert.doesNotMatch(result.stdout + result.stderr, /test-password/);
+      assert.ok(paths.includes('/ems/v90/ws/productKey/key%2Fa%20b.ws'));
+
+      const missing = await run(['missing-key'], 'test-user\ntest-password\n');
+      assert.equal(missing.code, 1);
+      assert.match(missing.stderr, /404/);
+      assert.equal(missing.stdout, '');
+    } finally {
+      await new Promise((resolve, reject) => server.close((err) => err ? reject(err) : resolve()));
     }
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

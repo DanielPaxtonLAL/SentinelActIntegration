@@ -30,7 +30,7 @@
       <div v-else-if="!error && !loading" class="table-wrap">
         <table>
           <thead>
-            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th><th>Pending updates</th></tr>
+            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th><th>Activation history</th><th>Pending updates</th></tr>
           </thead>
           <tbody>
             <tr v-for="activation in filteredActivations" :key="activation.productKeyId + ':' + (activation.aid || '')">
@@ -48,6 +48,30 @@
                   </details>
                 </template>
                 <span v-else>{{ activation.aid ? 'License not provided by EMS' : 'No activation ID returned; license unavailable' }}</span>
+              </td>
+              <td>
+                <button type="button" :disabled="!activation.protectionKeyId || activation.history?.loading" @click="loadHistory(activation)">
+                  {{ activation.history?.loading ? 'Loading…' : 'Get activation history' }}
+                </button>
+                <template v-if="activation.history && !activation.history.loading">
+                  <p v-if="activation.history.error" class="form-error" role="alert">{{ activation.history.error }}</p>
+                  <template v-else>
+                    <p>Highest available EMS update counter first. This does not confirm what is applied on the customer key.</p>
+                    <p v-for="warning in activation.history.warnings" :key="warning" class="form-error">{{ warning }}</p>
+                    <p v-if="!activation.history.activations.length">No matching activations returned by EMS.</p>
+                    <ul v-else>
+                      <li v-for="entry in orderedHistory(activation.history.activations)" :key="entry.entitlementId + ':' + entry.productKeyId + ':' + entry.aid">
+                        Entitlement {{ entry.entitlementId }}, product key {{ entry.productKeyId }}, AID <code>{{ entry.aid }}</code>,
+                        update counter {{ displayValue(entry.updateCounter) }}
+                        <span v-if="entry.counterError" class="form-error">({{ entry.counterError }})</span>
+                        <a v-if="typeof entry.activationString === 'string' && entry.activationString.trim()"
+                          :href="licenseDownloadUrl(entry.activationString)"
+                          :download="'Activation-' + entry.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
+                        <span v-else>License not provided by EMS</span>
+                      </li>
+                    </ul>
+                  </template>
+                </template>
               </td>
               <td>
                 <button type="button" :disabled="!activation.aid || activation.pendingUpdate?.loading" @click="fetchPendingUpdates(activation)">

@@ -7,6 +7,7 @@ const vm = require('node:vm');
 function activationsRoute({ c2vError, logger = console } = {}) {
   let handler;
   let pendingUpdatesHandler;
+  let historyHandler;
   const calls = [];
   class EmsClient {
     constructor() {
@@ -34,7 +35,24 @@ function activationsRoute({ c2vError, logger = console } = {}) {
     }
     async getActivationLicense(aid) {
       calls.push(['activation', aid]);
+      if (aid.startsWith('history-')) return {
+        aid, protectionKeyId: aid === 'history-other' ? '999' : '12345', activationString: 'license-' + aid,
+      };
       return { aid, protectionKeyId: 'pk-' + aid, activationString: 'license' };
+    }
+    async getProtectionKeyEntitlements(id) {
+      calls.push(['entitlements', id]);
+      return ['10', '20'];
+    }
+    async getProtectionKeyActivationCandidates(id) {
+      calls.push(['history-keys', id]);
+      return id === '10' ? { keys: [{ productKeyId: 'base', activationIds: ['history-base', 'history-other'] }], missingUpdateProductKey: false } :
+        { keys: [{ productKeyId: 'update', activationIds: ['history-update'] }, { productKeyId: 'missing', activationIds: [] }], missingUpdateProductKey: true };
+    }
+    async getActivationUpdateCounter(id, aid) {
+      calls.push(['counter', id, aid]);
+      if (aid === 'history-update') throw new Error('EMS key history lookup failed: HTTP 404.');
+      return '4';
     }
     async getActivationC2V(aid) {
       calls.push(['stored-c2v', aid]);
@@ -49,6 +67,7 @@ function activationsRoute({ c2vError, logger = console } = {}) {
   const app = {
     get(route, ...handlers) {
       if (route === '/api/activations') handler = handlers.at(-1);
+      if (route === '/api/protection-keys/:id/activations') historyHandler = handlers.at(-1);
     },
     post(route, ...handlers) {
       if (route === '/api/activations/:aid/pending-updates') pendingUpdatesHandler = handlers.at(-1);
@@ -88,6 +107,7 @@ function activationsRoute({ c2vError, logger = console } = {}) {
   };
   return {
     load: () => invoke(handler),
+    history: (id) => invoke(historyHandler, { id }),
     pendingUpdates: (aid) => invoke(pendingUpdatesHandler, { aid }),
   };
 }
@@ -114,6 +134,41 @@ test('lists activations and keys without IDs regardless of entitlement counts', 
     ['activation', 'aid-002'],
     ['activation', 'aid-003'],
   ]);
+});
+
+test('history discovers update licenses, filters other keys and reports missing IDs and counters', async () => {
+  const route = activationsRoute({ logger: { error() {} } });
+  const { res, calls } = await route.history('12345');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(Array.from(res.body.activations, (item) => [item.aid, item.productKeyId, item.updateCounter]), [
+    ['history-base', 'base', '4'],
+    ['history-update', 'update', null],
+  ]);
+  assert.match(res.body.activations[1].counterError, /404/);
+  assert.equal(res.body.activations[1].activationString, 'license-history-update');
+  assert.equal(res.body.warnings.length, 2);
+  assert.equal(calls.some((call) => call[0] === 'counter' && call[2] === 'history-other'), false);
+  assert.equal((await route.history('invalid/key')).res.statusCode, 400);
+});
+
+test('activation history loads on demand and orders counters without losing large integers', async () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
+  let definition;
+  vm.runInNewContext(script, {
+    fetch: async (url) => {
+      assert.equal(url, '/api/protection-keys/12345/activations');
+      return { ok: true, json: async () => ({
+        activations: [{ updateCounter: '9' }, { updateCounter: null }, { updateCounter: '10000000000000000000' }],
+        warnings: ['Missing ID'],
+      }) };
+    },
+    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
+  });
+  const activation = { protectionKeyId: '12345' };
+  await definition.methods.loadHistory.call({}, activation);
+  assert.equal(activation.history.warnings[0], 'Missing ID');
+  assert.deepEqual(Array.from(definition.methods.orderedHistory(activation.history.activations), (entry) => entry.updateCounter),
+    ['10000000000000000000', '9', null]);
 });
 
 test('fetches V2CP using the C2V saved with the activation', async () => {

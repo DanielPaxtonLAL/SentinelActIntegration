@@ -9,6 +9,8 @@
 
 4. Optionally, you may need to adjust `entitlement-form-data.json`. Run `.\config-helper-scripts\get-ems-products.ps1 https://your-ems-host:8080` to get `product_id` values from the EMS. Enter them manually in the JSON file. The `next-serial-number-customer-id` values select the customer whose Ref ID 1 stores the next number as JSON, for example `{"NextSerial":"06003"}`.
 
+To inspect the raw EMS response for a product key, run `python .\config-helper-scripts\get-ems-product-key.py` and enter the key ID. The script uses the configured EMS mode and prompts for credentials if needed; use `--test` or `--production` to select a mode explicitly. Its output can contain customer and product-key details.
+
 When serials are first requested after EMS login, the app scans existing base-product entitlements and sets the counter to the highest valid serial number plus one, starting at 06001. Out-of-range values are skipped. New drafts use that number and advance the counter, so gaps are not reused. Serial numbers are padded to five digits.
 
 5. Lastly, run `npm run dev -- --test` or `npm run dev -- --production`. The output will provide links to access the application.
@@ -16,6 +18,7 @@ When serials are first requested after EMS login, the app scans existing base-pr
 To fetch pending updates, use **Get V2CP** on the Product Keys page to use the C2V stored with that activation, or open **Fetch pending updates (V2CP)** on an entitlement to upload a C2V. Download the returned V2CP and apply it using the Sentinel Runtime API or Admin Control Center. EMS returns all pending updates for the protection key in the C2V, not just the selected product key or entitlement. Product keys without an activation ID have no activation-stored C2V available for this action. The target needs RTE 7.63 or later and must not be an SL-Legacy key. The app does not poll automatically; if EMS is unavailable or busy, the guide recommends retrying after 60 minutes.
 
 The **Product Keys** tab scans entitlement product keys and retrieves licenses for activation IDs returned by EMS. Keys without a returned activation ID are also listed, but no license can be fetched for them; they may not be activated.
+Use **Get activation history** on a row with a protection key ID to look up associated entitlements, including protection-key updates, and download the V2Cs for activation IDs EMS returns. The list sorts available key-history update counters highest first; counters are EMS history, not confirmation of what has been applied on the customer machine. Missing product keys or activation IDs are reported, so the list may be incomplete.
 If the saved C2V is invalid XML, the server logs the value being validated along with its format, size, validation position, structural clues and a short excerpt around the error. Server logs can therefore contain C2V data and should be handled accordingly.
 
 ## Security
