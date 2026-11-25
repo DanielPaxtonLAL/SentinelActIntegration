@@ -66,6 +66,21 @@ test('handles multiple keys and rejects missing IDs or non-generated entitlement
   await assert.rejects(() => client.getEntitlementProductKeys('123'), /product key ID/);
 });
 
+test('loads completed entitlement product and update keys and rejects missing key IDs', async () => {
+  const client = createClient();
+  client.getEntitlementDetails = async () => ({ entState: 'COMPLETED', entitlementItem: [
+    { lineItemType: 'Product_Key', productKeyId: 'key-001' },
+    { lineItemType: 'ProtectionKey_Update', productKeyId: 'key-002' },
+  ] });
+  client._fetch = async (url) => ({
+    ok: true,
+    text: async () => url.includes('key-002') ? responseXml.replace('key-001', 'key-002') : responseXml,
+  });
+  assert.deepEqual((await client.getEntitlementProductKeys('123')).map((key) => key.productKeyId), ['key-001', 'key-002']);
+  client.getEntitlementDetails = async () => ({ entState: 'COMPLETED', entitlementItem: { lineItemType: 'ProtectionKey_Update' } });
+  await assert.rejects(() => client.getEntitlementProductKeys('123'), /product key ID/);
+});
+
 test('discovers existing product keys across entitlement states without changing the generated-key API', async () => {
   const client = createClient();
   client.getEntitlementDetails = async (id, options) => {

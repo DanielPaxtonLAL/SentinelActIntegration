@@ -15,11 +15,9 @@ When serials are first requested after EMS login, the app scans existing base-pr
 
 5. Lastly, run `npm run dev -- --test` or `npm run dev -- --production`. The output will provide links to access the application.
 
-To fetch pending updates, open **Fetch pending updates (V2CP)** on an entitlement and upload a current C2V. Download the returned V2CP and apply it using the Sentinel Runtime API or Admin Control Center. EMS returns all pending updates for the protection key in the C2V, not just the selected product key or entitlement. The target needs RTE 7.63 or later and must not be an SL-Legacy key. The app does not poll automatically; if EMS is unavailable or busy, the guide recommends retrying after 60 minutes.
-
-The **Product Keys** tab scans entitlement product keys and retrieves licenses for activation IDs returned by EMS. Keys without a returned activation ID are also listed, but no license can be fetched for them; they may not be activated.
-Use **Get activation history** on a row with a protection key ID to look up associated entitlements, including protection-key updates, and download the V2Cs for activation IDs EMS returns. The list sorts available key-history update counters highest first; counters are EMS history, not confirmation of what has been applied on the customer machine. Missing product keys or activation IDs are reported, so the list may be incomplete.
-Use **Get V2CP** on the Product Keys tab to build a package from that key's existing V2Cs in ascending update-counter order. It may contain updates already applied and does not check the current key state. Package creation fails if history has warnings, missing licenses, or counters that do not form a complete sequence starting at zero. This history-based package is constructed locally, not returned by the EMS pending-update service.
+The **Product Keys** tab scans entitlement product keys and retrieves activation details for activation IDs returned by EMS. Keys without a returned activation ID are also listed; they may not be activated.
+Use **Download V2CP** on the Product Keys tab to build and automatically download a package from that key's existing V2Cs in ascending update-counter order. It may contain updates already applied and does not check the current key state. Package creation fails if history has warnings, missing licenses, or counters that do not form a complete sequence starting at zero. This history-based package is constructed locally, not returned by the EMS pending-update service.
+Completed entitlement details also show their product keys and available protection key IDs, with a V2CP download for each protection key.
 If the saved C2V is invalid XML, the server logs its format, size, validation position and structural clues, without logging its contents.
 
 ## Security

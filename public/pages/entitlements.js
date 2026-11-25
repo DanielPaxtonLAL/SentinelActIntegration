@@ -10,13 +10,11 @@ createApp({
       productKeys: [],
       productKeyLoading: false,
       productKeyError: '',
+      historyPackages: {},
       activating: false,
       activationError: '',
       activationUncertainKeys: [],
       activationDownloads: [],
-      pendingUpdateLoading: false,
-      pendingUpdateError: '',
-      pendingUpdatePackage: '',
       productKeyFields: [
         { name: 'productKeyId', label: 'Product Key' },
         { name: 'totalEntitled', label: 'Total entitled' },
@@ -52,6 +50,9 @@ createApp({
   computed: {
     isProductKeyGenerated() {
       return String(this.selectedEntitlement?.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED';
+    },
+    isEntitlementComplete() {
+      return String(this.selectedEntitlement?.entState ?? '').toUpperCase() === 'COMPLETED';
     },
     canReopen() {
       return ['PRODUCT_KEY_GENERATED', 'QUEUED'].includes(
@@ -162,25 +163,28 @@ createApp({
     },
   },
   methods: {
+    protectionKeyIds(key) {
+      return [...new Set((key.activationReferences || [])
+        .map((reference) => reference.protectionKeyId)
+        .filter((id) => typeof id === 'string' && id.trim())
+        .map((id) => id.trim()))];
+    },
+    async downloadHistoryPackage(id) {
+      if (!id || this.historyPackages[id]?.loading) return;
+      const state = { loading: true, error: '' };
+      this.historyPackages[id] = state;
+      const request = this.detailRequest;
+      try {
+        const packageXml = await V2cpDownload.fetchPackage(id);
+        if (request === this.detailRequest) V2cpDownload.downloadPackage(id, packageXml);
+      } catch (err) {
+        if (request === this.detailRequest) state.error = 'Failed to build V2CP: ' + err.message;
+      } finally {
+        state.loading = false;
+      }
+    },
     licenseDownloadUrl(license) {
       return 'data:application/xml;charset=utf-8,' + encodeURIComponent(license);
-    },
-    async fetchPendingUpdates(event) {
-      const file = event.target.files[0];
-      event.target.value = '';
-      if (!file || this.pendingUpdateLoading) return;
-      this.pendingUpdateError = '';
-      this.pendingUpdatePackage = '';
-      const request = this.detailRequest;
-      this.pendingUpdateLoading = true;
-      try {
-        const packageXml = await PendingUpdates.fetchPackage(file);
-        if (request === this.detailRequest) this.pendingUpdatePackage = packageXml;
-      } catch (err) {
-        if (request === this.detailRequest) this.pendingUpdateError = 'Failed to fetch pending updates: ' + err.message;
-      } finally {
-        this.pendingUpdateLoading = false;
-      }
     },
     async activateProductKey(key, event) {
       const file = event.target.files[0];
@@ -235,10 +239,9 @@ createApp({
       this.productKeys = [];
       this.productKeyError = '';
       this.productKeyLoading = false;
+      this.historyPackages = {};
       this.activationError = '';
       this.activationDownloads = [];
-      this.pendingUpdateError = '';
-      this.pendingUpdatePackage = '';
       this.reopenError = '';
       this.reopenUncertain = false;
       this.produceError = '';
@@ -263,7 +266,7 @@ createApp({
           customerName: customer?.name ?? customer?.customerName ??
             data.customerName ?? data.customer ?? entitlement.customer,
         };
-        if (String(data.entState ?? '').toUpperCase() === 'PRODUCT_KEY_GENERATED') {
+        if (['PRODUCT_KEY_GENERATED', 'COMPLETED'].includes(String(data.entState ?? '').toUpperCase())) {
           await this.loadProductKeys(entitlement.id, request);
         }
         try {

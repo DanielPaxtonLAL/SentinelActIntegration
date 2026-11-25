@@ -187,26 +187,6 @@ test('history discovers update licenses, filters other keys and reports missing 
   assert.equal((await route.history('invalid/key')).res.statusCode, 400);
 });
 
-test('activation history loads on demand and orders counters without losing large integers', async () => {
-  const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
-  let definition;
-  vm.runInNewContext(script, {
-    fetch: async (url) => {
-      assert.equal(url, '/api/protection-keys/12345/activations');
-      return { ok: true, json: async () => ({
-        activations: [{ updateCounter: '9' }, { updateCounter: null }, { updateCounter: '10000000000000000000' }],
-        warnings: ['Missing ID'],
-      }) };
-    },
-    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
-  });
-  const activation = { protectionKeyId: '12345' };
-  await definition.methods.loadHistory.call({}, activation);
-  assert.equal(activation.history.warnings[0], 'Missing ID');
-  assert.deepEqual(Array.from(definition.methods.orderedHistory(activation.history.activations), (entry) => entry.updateCounter),
-    ['10000000000000000000', '9', null]);
-});
-
 test('fetches V2CP using the C2V saved with the activation', async () => {
   const route = activationsRoute();
   const { res, calls } = await route.pendingUpdates('aid-001');
@@ -235,18 +215,6 @@ test('logs invalid C2V diagnostics without exposing its contents', async () => {
   assert.deepEqual(calls, [['stored-c2v', 'aid-001']]);
 });
 
-test('activations page provides a V2C download for an existing license', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
-  const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
-  let definition;
-  vm.runInNewContext(script, {
-    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
-  });
-  const license = '<hasp_info><v2c>YWJj</v2c></hasp_info>';
-  assert.equal(definition.methods.licenseDownloadUrl(license), 'data:application/xml;charset=utf-8,' + encodeURIComponent(license));
-  assert.match(html, /:download="'Activation-' \+ activation\.aid\.replace/);
-});
-
 test('activations page loads keys without IDs and disables V2CP without a protection key', async () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
   const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
@@ -262,18 +230,22 @@ test('activations page loads keys without IDs and disables V2CP without a protec
   await definition.methods.loadActivations.call(app);
   assert.equal(app.activations[0].productKeyId, 'key-1');
   assert.equal(app.activations[0].aid, null);
-  assert.match(html, /No activation ID returned; license unavailable/);
+  assert.doesNotMatch(html, /<th>License<\/th>|<th>Activation history<\/th>|<th>Activation ID \(AID\)<\/th>/);
   assert.match(html, /No protection key ID available/);
   assert.doesNotMatch(html, /missingActivationIds/);
 });
 
-test('builds V2CP for the chosen protection key and surfaces errors', async () => {
+test('downloads V2CP for the chosen protection key and surfaces errors', async () => {
   const root = path.join(__dirname, '..', 'public');
   const html = fs.readFileSync(path.join(root, 'activations.html'), 'utf8');
-  const script = fs.readFileSync(path.join(root, 'pages', 'activations.js'), 'utf8');
+  const script = fs.readFileSync(path.join(root, 'v2cp-download.js'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(root, 'pages', 'activations.js'), 'utf8');
   let definition;
   let calls = 0;
   let fail = false;
+  let downloadFails = false;
+  const downloads = [];
+  let removed = 0;
   const v2cp = '<hasp_info><v2cp>YWJj</v2cp></hasp_info>';
   vm.runInNewContext(script, {
     fetch: async (url, options) => {
@@ -284,26 +256,48 @@ test('builds V2CP for the chosen protection key and surfaces errors', async () =
         ? { ok: false, json: async () => ({ error: 'EMS returned 404' }) }
         : { ok: true, json: async () => ({ package: v2cp }) };
     },
+    document: {
+      createElement(tag) {
+        assert.equal(tag, 'a');
+        return {
+          click() {
+            if (downloadFails) throw new Error('Download failed');
+            downloads.push({ href: this.href, filename: this.download });
+          },
+          remove() { removed++; },
+        };
+      },
+      body: { appendChild() {} },
+    },
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const first = { aid: 'aid-1', productKeyId: 'key-001', protectionKeyId: '12345' };
   const other = { productKeyId: 'key-002' };
-  await definition.methods.fetchHistoryPackage.call({}, first);
-  assert.equal(first.historyPackage.package, v2cp);
+  await definition.methods.fetchHistoryPackage.call(definition.methods, first);
+  assert.deepEqual(downloads, [{
+    href: 'data:application/xml;charset=utf-8,' + encodeURIComponent(v2cp),
+    filename: 'Protection-key-12345.v2cp',
+  }]);
+  assert.equal(removed, 1);
   assert.equal(first.historyPackage.loading, false);
   assert.equal(other.historyPackage, undefined);
   assert.match(html, /@click="fetchHistoryPackage\(activation\)"/);
   assert.match(html, /:disabled="!activation\.protectionKeyId \|\| activation\.historyPackage\?\.loading"/);
   assert.match(html, /Download V2CP/);
-  assert.match(html, /may include updates already applied/);
+  assert.doesNotMatch(html, /historyPackage\?\.package/);
   assert.equal(calls, 1);
-  await definition.methods.fetchHistoryPackage.call({}, other);
+  await definition.methods.fetchHistoryPackage.call(definition.methods, other);
   assert.equal(calls, 1);
   assert.equal(other.historyPackage, undefined);
   fail = true;
-  await definition.methods.fetchHistoryPackage.call({}, first);
+  await definition.methods.fetchHistoryPackage.call(definition.methods, first);
   assert.match(first.historyPackage.error, /404/);
-  assert.equal(first.historyPackage.package, '');
+  assert.equal(downloads.length, 1);
+  fail = false;
+  downloadFails = true;
+  await definition.methods.fetchHistoryPackage.call(definition.methods, first);
+  assert.match(first.historyPackage.error, /Download failed/);
+  assert.equal(removed, 2);
 });
 
 test('builds a V2CP from key history in counter order with numbered V2Cs', async () => {

@@ -573,15 +573,16 @@ class EmsClient {
     };
   }
 
-  /** Load and verify the product keys of a generated entitlement. */
+  /** Load and verify the product keys of a generated or completed entitlement. */
   async getEntitlementProductKeys(id) {
     const entitlement = await this.getEntitlementDetails(id);
-    if (String(entitlement.entState ?? '').toUpperCase() !== 'PRODUCT_KEY_GENERATED') {
-      const error = new Error('Product keys are only available for generated entitlements.');
+    const state = String(entitlement.entState ?? '').toUpperCase();
+    if (!['PRODUCT_KEY_GENERATED', 'COMPLETED'].includes(state)) {
+      const error = new Error('Product keys are only available for generated or completed entitlements.');
       error.status = 400;
       throw error;
     }
-    return this._getEntitlementProductKeys(id, entitlement, false);
+    return this._getEntitlementProductKeys(id, entitlement, false, state === 'COMPLETED');
   }
 
   /** Find existing product keys regardless of entitlement state for activation discovery. */
@@ -596,7 +597,8 @@ class EmsClient {
       if (existingOnly && (!item || !(item.lineItemType === 'Product_Key' ||
           includeUpdates && item.lineItemType === 'ProtectionKey_Update') || !item.productKeyId)) return [];
       if (existingOnly) return Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId];
-      if (!item || item.lineItemType !== 'Product_Key' || !item.productKeyId) {
+      if (!item || !(item.lineItemType === 'Product_Key' ||
+          includeUpdates && item.lineItemType === 'ProtectionKey_Update') || !item.productKeyId) {
         throw new Error('EMS did not return a product key ID for every entitlement item.');
       }
       return Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId];

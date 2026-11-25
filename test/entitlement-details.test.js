@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'entitlements.html'), 'utf8');
 const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'entitlements.js'), 'utf8');
-const pendingUpdatesScript = fs.readFileSync(path.join(__dirname, '..', 'public', 'pending-updates.js'), 'utf8');
+const v2cpDownloadScript = fs.readFileSync(path.join(__dirname, '..', 'public', 'v2cp-download.js'), 'utf8');
 let definition;
 let fetchMemory;
 let confirmProduce = () => true;
@@ -17,9 +17,17 @@ const pageWindow = {
   setTimeout,
   clearTimeout,
 };
-vm.runInNewContext(pendingUpdatesScript + '\n' + script, {
+const downloads = [];
+const pageDocument = {
+  createElement() {
+    return { click() { downloads.push({ href: this.href, filename: this.download }); }, remove() {} };
+  },
+  body: { appendChild() {} },
+};
+vm.runInNewContext(v2cpDownloadScript + '\n' + script, {
   fetch: (...args) => fetchMemory(...args),
   window: pageWindow,
+  document: pageDocument,
   URLSearchParams,
   Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
 });
@@ -259,6 +267,59 @@ test('opening a generated entitlement loads its product keys', async () => {
   assert.equal(app.detailLoading, false);
 });
 
+test('completed entitlement displays its product keys and associated protection keys', async () => {
+  const app = {
+    producing: false, detailRequest: 0, customers: [],
+    clearDetailsConfirmation: definition.methods.clearDetailsConfirmation,
+    loadVersionMemory: async () => undefined,
+    loadProductKeys: definition.methods.loadProductKeys,
+  };
+  fetchMemory = async (url) => {
+    if (url === '/api/entitlements/123') {
+      return { ok: true, json: async () => ({ id: '123', entState: 'COMPLETED', products: [] }) };
+    }
+    assert.equal(url, '/api/entitlements/123/product-keys');
+    return { ok: true, json: async () => [{
+      productKeyId: 'key-001',
+      activationReferences: [
+        { protectionKeyId: '12345' }, { protectionKeyId: '12345' },
+        { protectionKeyId: '67890' }, { protectionKeyId: null },
+      ],
+    }] };
+  };
+  await definition.methods.openEntitlementDetails.call(app, { id: '123' });
+  assert.equal(app.productKeys[0].productKeyId, 'key-001');
+  assert.deepEqual(Array.from(definition.methods.protectionKeyIds(app.productKeys[0])), ['12345', '67890']);
+  assert.deepEqual(Array.from(definition.methods.protectionKeyIds({})), []);
+  assert.equal(definition.computed.isEntitlementComplete.call(app), true);
+  assert.equal(definition.computed.isEntitlementComplete.call({ selectedEntitlement: { entState: 'DRAFT' } }), false);
+  assert.match(html, /v-if="isEntitlementComplete"[\s\S]*?Product key ID:[\s\S]*?Protection key ID:[\s\S]*?@click="downloadHistoryPackage\(id\)"/);
+  assert.match(html, /Protection key ID: Unavailable/);
+  assert.doesNotMatch(html, /Fetch pending updates \(V2CP\)/);
+});
+
+test('completed entitlement downloads a V2CP and discards results after selection changes', async () => {
+  downloads.length = 0;
+  const app = definition.data();
+  app.detailRequest = 1;
+  fetchMemory = async (url) => {
+    assert.equal(url, '/api/protection-keys/12345/v2cp');
+    return { ok: true, json: async () => ({ package: '<hasp_info/>' }) };
+  };
+  await definition.methods.downloadHistoryPackage.call(app, '12345');
+  assert.equal(downloads[0].filename, 'Protection-key-12345.v2cp');
+  assert.equal(downloads[0].href, 'data:application/xml;charset=utf-8,' + encodeURIComponent('<hasp_info/>'));
+  fetchMemory = async () => {
+    app.detailRequest++;
+    return { ok: true, json: async () => ({ package: '<hasp_info/>' }) };
+  };
+  await definition.methods.downloadHistoryPackage.call(app, '12345');
+  assert.equal(downloads.length, 1);
+  fetchMemory = async () => ({ ok: false, json: async () => ({ error: 'incomplete history' }) });
+  await definition.methods.downloadHistoryPackage.call(app, '12345');
+  assert.match(app.historyPackages['12345'].error, /incomplete history/);
+});
+
 test('product key link downloads the exact key with a safe customer filename', () => {
   const { productKeyDownloadUrl, productKeyFilename } = definition.methods;
   const key = { productKeyId: '0001-ab&cd', customerName: 'Example / Co' };
@@ -266,35 +327,6 @@ test('product key link downloads the exact key with a safe customer filename', (
   assert.equal(productKeyFilename.call({}, key), 'Product Key - Example _ Co.txt');
   assert.equal(productKeyFilename.call({ selectedEntitlement: { customerName: 'Fallback' } }, { productKeyId: 'abc' }), 'Product Key - Fallback.txt');
   assert.match(html, /<a v-if="field.name === 'productKeyId'" :href="productKeyDownloadUrl\(key.productKeyId\)" :download="productKeyFilename\(key\)">/);
-});
-
-test('fetches a key-wide V2CP and discards results after changing entitlement', async () => {
-  const app = definition.data();
-  const file = { name: 'machine.c2v', size: 12, text: async () => '<hasp_info/>' };
-  const event = () => ({ target: { files: [file], value: 'file' } });
-  const v2cp = '<hasp_info><v2cp>YWJj</v2cp></hasp_info>';
-  fetchMemory = async (url, options) => {
-    assert.equal(url, '/api/pending-updates');
-    assert.deepEqual(JSON.parse(options.body), { c2v: '<hasp_info/>' });
-    return { ok: true, json: async () => ({ package: v2cp }) };
-  };
-  const selectedFile = event();
-  await definition.methods.fetchPendingUpdates.call(app, selectedFile);
-  assert.equal(selectedFile.target.value, '');
-  assert.equal(app.pendingUpdatePackage, v2cp);
-  assert.match(html, /all pending updates for that key, not just this entitlement/);
-  assert.match(html, /download="Pending-updates\.v2cp"/);
-  fetchMemory = async () => {
-    app.detailRequest++;
-    return { ok: true, json: async () => ({ package: v2cp }) };
-  };
-  await definition.methods.fetchPendingUpdates.call(app, event());
-  assert.equal(app.pendingUpdatePackage, '');
-  fetchMemory = async () => ({ ok: false, json: async () => ({ error: 'EMS returned 404' }) });
-  await definition.methods.fetchPendingUpdates.call(app, event());
-  assert.match(app.pendingUpdateError, /404/);
-  await definition.methods.fetchPendingUpdates.call(app, { target: { files: [{ name: 'wrong.txt', size: 1 }] } });
-  assert.match(app.pendingUpdateError, /C2V/);
 });
 
 test('activates the selected generated product key and exposes the V2C download', async () => {

@@ -126,14 +126,6 @@
               </div>
             </div>
             <p v-if="produceError" class="form-error" role="alert">{{ produceError }}</p>
-            <details class="detail-collapsible">
-              <summary>Fetch pending updates (V2CP)</summary>
-              <p>Choose a current C2V from the target protection key. EMS returns all pending updates for that key, not just this entitlement; verify the C2V belongs to the intended key. Requires RTE 7.63 or later and a non-SL-Legacy key.</p>
-              <button type="button" :disabled="pendingUpdateLoading" @click="$event.currentTarget.nextElementSibling.click()">{{ pendingUpdateLoading ? 'Fetching…' : 'Choose C2V and fetch updates' }}</button>
-              <input type="file" accept=".c2v" hidden aria-label="Choose C2V for pending updates" @change="fetchPendingUpdates($event)">
-              <p v-if="pendingUpdateError" class="form-error" role="alert">{{ pendingUpdateError }}</p>
-              <p v-if="pendingUpdatePackage"><a :href="licenseDownloadUrl(pendingUpdatePackage)" download="Pending-updates.v2cp">Download V2CP</a></p>
-            </details>
             <details v-if="isProductKeyGenerated" class="detail-collapsible product-key-details">
               <summary>Product Key</summary>
               <p v-if="productKeyLoading" role="status">Loading product key details…</p>
@@ -173,6 +165,24 @@
                 <a :href="licenseDownloadUrl(result.license)" :download="'Activation-' + result.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
               </p>
             </details>
+            <section v-if="isEntitlementComplete" class="product-key-details">
+              <h3>Product Keys</h3>
+              <p v-if="productKeyLoading" role="status">Loading product key details…</p>
+              <p v-else-if="productKeyError" class="form-error" role="alert">{{ productKeyError }} <button type="button" @click="loadProductKeys(selectedEntitlement.id, detailRequest)">Retry</button></p>
+              <template v-else>
+                <div v-for="key in productKeys" :key="key.productKeyId">
+                  <p>Product key ID: {{ displayValue(key.productKeyId) }}</p>
+                  <p v-if="!protectionKeyIds(key).length">Protection key ID: Unavailable</p>
+                  <div v-for="id in protectionKeyIds(key)" :key="id">
+                    <p>Protection key ID: {{ id }}</p>
+                    <button type="button" :disabled="historyPackages[id]?.loading" @click="downloadHistoryPackage(id)">
+                      {{ historyPackages[id]?.loading ? 'Building…' : 'Download V2CP' }}
+                    </button>
+                    <p v-if="historyPackages[id]?.error" class="form-error" role="alert">{{ historyPackages[id].error }}</p>
+                  </div>
+                </div>
+              </template>
+            </section>
             <details class="detail-collapsible">
             <summary>Verbose Details</summary>
             <h3>Products</h3>
@@ -229,7 +239,7 @@
     </section>
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
-  <script src="/pending-updates.js"></script>
+  <script src="/v2cp-download.js"></script>
   <script src="/pages/entitlements.js"></script>
 </body>
 </html>

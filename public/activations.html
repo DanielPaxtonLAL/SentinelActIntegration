@@ -22,65 +22,25 @@
         <input v-model.trim="filter" type="search" placeholder="Filter activations"
           aria-label="Filter activations by customer, product key, Activation ID, or protection key">
       </div>
-      <p class="form-hint">Product keys without an activation ID are also shown; these may not be activated.</p>
-      <p class="form-hint">Get V2CP packages the protection key's complete available activation history in update-counter order. It may include updates already applied; it does not check the key's current state.</p>
       <p v-if="error" class="form-error" role="alert">{{ error }}</p>
       <p v-if="!error && loading" role="status">Loading activations…</p>
       <p v-else-if="!error && !filteredActivations.length">{{ filter ? 'No matching records.' : 'No product keys or activations found.' }}</p>
       <div v-else-if="!error && !loading" class="table-wrap">
         <table>
           <thead>
-            <tr><th>Customer</th><th>Product key</th><th>Activation ID (AID)</th><th>Protection key ID</th><th>License</th><th>Activation history</th><th>V2CP</th></tr>
+            <tr><th>Customer</th><th>Product key</th><th>Protection key ID</th><th>V2CP</th></tr>
           </thead>
           <tbody>
             <tr v-for="activation in filteredActivations" :key="activation.productKeyId + ':' + (activation.aid || '')">
               <td>{{ displayValue(activation.customerName) }}</td>
               <td>{{ displayValue(activation.productKeyId) }}</td>
-              <td><code>{{ displayValue(activation.aid) }}</code></td>
               <td>{{ displayValue(activation.protectionKeyId) }}</td>
               <td>
-                <template v-if="activation.aid && typeof activation.activationString === 'string' && activation.activationString.trim()">
-                  <a :href="licenseDownloadUrl(activation.activationString)"
-                    :download="'Activation-' + activation.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
-                  <details>
-                    <summary>View license</summary>
-                    <pre class="activation-license">{{ displayValue(activation.activationString) }}</pre>
-                  </details>
-                </template>
-                <span v-else>{{ activation.aid ? 'License not provided by EMS' : 'No activation ID returned; license unavailable' }}</span>
-              </td>
-              <td>
-                <button type="button" :disabled="!activation.protectionKeyId || activation.history?.loading" @click="loadHistory(activation)">
-                  {{ activation.history?.loading ? 'Loading…' : 'Get activation history' }}
-                </button>
-                <template v-if="activation.history && !activation.history.loading">
-                  <p v-if="activation.history.error" class="form-error" role="alert">{{ activation.history.error }}</p>
-                  <template v-else>
-                    <p>Highest available EMS update counter first. This does not confirm what is applied on the customer key.</p>
-                    <p v-for="warning in activation.history.warnings" :key="warning" class="form-error">{{ warning }}</p>
-                    <p v-if="!activation.history.activations.length">No matching activations returned by EMS.</p>
-                    <ul v-else>
-                      <li v-for="entry in orderedHistory(activation.history.activations)" :key="entry.entitlementId + ':' + entry.productKeyId + ':' + entry.aid">
-                        Entitlement {{ entry.entitlementId }}, product key {{ entry.productKeyId }}, AID <code>{{ entry.aid }}</code>,
-                        update counter {{ displayValue(entry.updateCounter) }}
-                        <span v-if="entry.counterError" class="form-error">({{ entry.counterError }})</span>
-                        <a v-if="typeof entry.activationString === 'string' && entry.activationString.trim()"
-                          :href="licenseDownloadUrl(entry.activationString)"
-                          :download="'Activation-' + entry.aid.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2c'">Download V2C</a>
-                        <span v-else>License not provided by EMS</span>
-                      </li>
-                    </ul>
-                  </template>
-                </template>
-              </td>
-              <td>
                 <button type="button" :disabled="!activation.protectionKeyId || activation.historyPackage?.loading" @click="fetchHistoryPackage(activation)">
-                  {{ activation.historyPackage?.loading ? 'Building…' : 'Get V2CP' }}
+                  {{ activation.historyPackage?.loading ? 'Building…' : 'Download V2CP' }}
                 </button>
                 <span v-if="!activation.protectionKeyId">No protection key ID available</span>
                 <p v-if="activation.historyPackage?.error" class="form-error" role="alert">{{ activation.historyPackage.error }}</p>
-                <a v-if="activation.historyPackage?.package" :href="licenseDownloadUrl(activation.historyPackage.package)"
-                  :download="'Protection-key-' + activation.protectionKeyId.replace(/[^a-zA-Z0-9_-]/g, '_') + '.v2cp'">Download V2CP</a>
               </td>
             </tr>
           </tbody>
@@ -89,6 +49,7 @@
     </section>
   </main>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/v2cp-download.js"></script>
   <script src="/pages/activations.js"></script>
 </body>
 </html>
