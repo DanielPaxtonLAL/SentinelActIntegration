@@ -478,6 +478,9 @@ createApp({
       const labels = { 1: 'HL Key', 2: 'Product Key', 3: 'Key Update' };
       return labels[String(type).trim()] ?? type;
     },
+    typeMarkerClass(type) {
+      return { 2: 'product-key', 3: 'key-update' }[String(type).trim()] ?? 'other';
+    },
     hexValue(segment) {
       const text = String(segment.text ?? '').trim();
       if (!/^[0-9a-f]*$/i.test(text)) return this.displayValue(text);

@@ -451,9 +451,24 @@ test('labels entitlement types and allows filtering by key update', () => {
   assert.equal(typeLabel(3), 'Key Update');
   assert.equal(typeLabel(' 3 '), 'Key Update');
   assert.equal(typeLabel(4), 4);
+  assert.match(html, /<th>Type<\/th>/);
+  assert.match(html, /<td><template v-for="\(part, partIndex\) in highlightParts\(typeLabel\(entitlement\.type\)\)"/);
   const app = { filter: 'key update', entitlements: [{ id: '1', type: 3 }, { id: '2', type: 2 }], typeLabel };
   assert.equal(definition.computed.filteredEntitlements.call(app)[0].id, '1');
   assert.equal(definition.computed.filteredEntitlements.call(app).length, 1);
+});
+
+test('marks entitlement types with an accessible thin color cell', () => {
+  const { typeMarkerClass } = definition.methods;
+  assert.equal(typeMarkerClass(2), 'product-key');
+  assert.equal(typeMarkerClass(' 3 '), 'key-update');
+  assert.equal(typeMarkerClass(1), 'other');
+  assert.match(html, /<th class="entitlement-type-header" aria-label="Entitlement type"><\/th>/);
+  assert.match(html, /class="entitlement-type-marker" :class="typeMarkerClass\(entitlement.type\)" :title="displayValue\(typeLabel\(entitlement.type\)\)" :aria-label="displayValue\(typeLabel\(entitlement.type\)\)"/);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /td\.entitlement-type-marker \{ width: \.5rem; min-width: \.5rem; padding: 0; \}/);
+  assert.match(styles, /td\.entitlement-type-marker\.product-key \{ background: #00ffff; \}/);
+  assert.match(styles, /td\.entitlement-type-marker\.key-update \{ background: #ff00ff; \}/);
 });
 
 test('shows entitlement dates in local time with date-only values unchanged', () => {

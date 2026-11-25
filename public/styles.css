@@ -428,6 +428,11 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-list th { position: sticky; top: 0; z-index: 1; }
 .entitlements-page .entitlement-row { cursor: pointer; }
 .entitlements-page .entitlement-row > td { padding: 0.5em .6rem; white-space: nowrap; vertical-align: middle; }
+.entitlements-page .entitlement-list th.entitlement-type-header,
+.entitlements-page .entitlement-row > td.entitlement-type-marker { width: .5rem; min-width: .5rem; padding: 0; }
+.entitlements-page .entitlement-row > td.entitlement-type-marker { background: var(--color-border-strong); }
+.entitlements-page .entitlement-row > td.entitlement-type-marker.product-key { background: #00ffff; }
+.entitlements-page .entitlement-row > td.entitlement-type-marker.key-update { background: #ff00ff; }
 .entitlements-page .entitlement-row .entitlement-actions button { padding: .15rem .5rem; }
 .entitlements-page .entitlement-row .entitlement-actions button:disabled { display: none; }
 .entitlements-page .entitlement-row:hover,
