@@ -426,6 +426,9 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-list { max-height: calc(100vh - 14rem); overflow: auto; }
 .entitlements-page .entitlement-list > table { width: 100%; margin: 0; }
 .entitlements-page .entitlement-list th { position: sticky; top: 0; z-index: 1; }
+.entitlements-page .entitlement-list th.entitlement-sort-header { cursor: pointer; }
+.entitlements-page .entitlement-sort { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; }
+.entitlements-page .entitlement-sort:hover:not(:disabled) { background: transparent; text-decoration: underline; }
 .entitlements-page .entitlement-row { cursor: pointer; }
 .entitlements-page .entitlement-row > td { padding: 0.5em .6rem; white-space: nowrap; vertical-align: middle; }
 .entitlements-page .entitlement-list th.entitlement-type-header,
@@ -441,8 +444,8 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .date-cell { max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .entitlements-page .create-entitlement { max-width: 54rem; margin: 1.5rem auto; }
 .entitlements-page .entitlement-details { min-width: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
-.entitlements-page .entitlement-details.product-key { border: 2px solid var(--entitlement-product-key-color); }
-.entitlements-page .entitlement-details.key-update { border: 2px solid var(--entitlement-key-update-color); }
+.entitlements-page .entitlement-details.product-key { border-color: var(--entitlement-product-key-color); }
+.entitlements-page .entitlement-details.key-update { border-color: var(--entitlement-key-update-color); }
 .entitlements-page .entitlement-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .entitlements-page .entitlement-details h3 { margin: 1.5rem 0 .6rem; }
 .entitlements-page .entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }
@@ -617,12 +620,12 @@ td { overflow-wrap: anywhere; }
 .entitlement-actions button + button { margin-left: 0.4rem; }
 .entitlements-page .entitlement-description { margin: 0 0 1rem; overflow-wrap: anywhere; }
 .status-tag { display: inline-block; padding: .15rem .75rem; border-radius: 999px; font-size: .8rem; font-weight: 600; line-height: 1.4; white-space: nowrap; }
-.status-tag.status-complete { background: var(--status-complete-bg); color: var(--status-complete-text); }
-.status-tag.status-draft { background: var(--status-draft-bg); color: var(--status-draft-text); }
-.status-tag.status-acknowledged { background: var(--status-acknowledged-bg); color: var(--status-acknowledged-text); }
-.status-tag.status-queued { background: var(--status-queued-bg); color: var(--status-queued-text); }
-.status-tag.status-produced { background: var(--status-produced-bg); color: var(--status-produced-text); }
-.status-tag.status-unknown { background: var(--status-unknown-bg); color: var(--status-unknown-text); }
+.status-tag.status-complete, .entitlements-page .search-filter-controls option.status-complete { background: var(--status-complete-bg); color: var(--status-complete-text); }
+.status-tag.status-draft, .entitlements-page .search-filter-controls option.status-draft { background: var(--status-draft-bg); color: var(--status-draft-text); }
+.status-tag.status-acknowledged, .entitlements-page .search-filter-controls option.status-acknowledged { background: var(--status-acknowledged-bg); color: var(--status-acknowledged-text); }
+.status-tag.status-queued, .entitlements-page .search-filter-controls option.status-queued { background: var(--status-queued-bg); color: var(--status-queued-text); }
+.status-tag.status-produced, .entitlements-page .search-filter-controls option.status-produced { background: var(--status-produced-bg); color: var(--status-produced-text); }
+.status-tag.status-unknown, .entitlements-page .search-filter-controls option.status-unknown { background: var(--status-unknown-bg); color: var(--status-unknown-text); }
 .entitlements-page td.status-cell { text-align: center; vertical-align: middle; }
 .entitlements-page td.status-cell .status-tag { display: block; width: 100%; box-sizing: border-box; text-align: center; }
 .entitlements-page .entitlement-heading .status-tag { vertical-align: middle; margin-left: .25rem; }
@@ -630,6 +633,44 @@ td { overflow-wrap: anywhere; }
 .entitlements-page .detail-collapsible > summary { padding: .6rem .75rem; font-weight: 600; cursor: pointer; background: var(--color-surface-header); border-radius: 6px; }
 .entitlements-page .detail-collapsible[open] > summary { border-bottom: 1px solid var(--color-border); border-radius: 6px 6px 0 0; }
 .entitlements-page .detail-collapsible > :not(summary) { margin: .75rem; }
+.entitlements-page .entitlement-list-panel .search-filter { margin: 0 0 .75rem; }
+.entitlements-page .search-filter > summary { display: flex; align-items: center; gap: .5rem; }
+.entitlements-page .search-filter > summary::-webkit-details-marker { display: none; }
+.entitlements-page .search-filter > summary::before { content: "\25b6"; font-size: .75em; }
+.entitlements-page .search-filter[open] > summary::before { transform: rotate(90deg); }
+.entitlements-page .search-filter-reset { margin-left: auto; padding: .15rem .5rem; }
+.entitlements-page .search-filter-controls { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.entitlements-page .search-filter-controls > label { flex: 1 1 12rem; min-width: 0; max-width: 22rem; }
+.entitlements-page .search-filter-controls label { display: grid; gap: .35rem; }
+.entitlements-page .search-filter-options { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
+.entitlements-page .search-filter-dropdowns { display: flex; flex-wrap: wrap; gap: .75rem; }
+.entitlements-page .search-filter-dates { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.entitlements-page .search-filter-controls input,
+.entitlements-page .search-filter-controls select { height: 2.6rem; }
+.entitlements-page .search-filter-controls select,
+.entitlements-page .search-filter-controls input[type="date"] { padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
+@property --active-filter-hue {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+.entitlements-page .search-filter-controls :is(input, select).filter-active,
+.entitlements-page .entitlement-list-panel .search-filter.filter-active {
+  border: 1px solid transparent;
+  background: linear-gradient(var(--color-surface), var(--color-surface)) padding-box,
+    linear-gradient(to bottom right in hsl increasing hue, hsl(var(--active-filter-hue) 100% 50%), hsl(calc(var(--active-filter-hue) + 180deg) 100% 50%)) border-box;
+  animation: active-filter-rainbow 3s linear infinite;
+}
+@keyframes active-filter-rainbow {
+  from { --active-filter-hue: 0deg; }
+  to { --active-filter-hue: 360deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entitlements-page .search-filter-controls :is(input, select).filter-active,
+  .entitlements-page .entitlement-list-panel .search-filter.filter-active { animation: none; }
+}
+.entitlements-page .search-filter-controls option[value="product-key"] { background: var(--entitlement-product-key-color); color: #000; }
+.entitlements-page .search-filter-controls option[value="key-update"] { background: var(--entitlement-key-update-color); color: #000; }
 @media (min-width: 641px) {
   .entitlements-page .entitlement-details { max-height: calc(100vh - 11rem); overflow-y: auto; }
 }

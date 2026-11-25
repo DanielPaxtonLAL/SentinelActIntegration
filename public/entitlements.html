@@ -20,25 +20,68 @@
       <div class="entitlement-list-panel">
         <div class="entitlements-subheading">
           <h2>Entitlements ({{ filteredEntitlements.length }})</h2>
-          <input v-model.trim="filter" class="entitlement-filter" type="search"
-            placeholder="Filter entitlements" aria-label="Filter entitlements across all attributes">
           <button type="button" class="button--constructive entitlement-create-button" @click="openCreateEntitlement" :disabled="loading || activating">Create entitlement</button>
         </div>
+        <details class="detail-collapsible search-filter" :class="{ 'filter-active': hasActiveFilters }">
+          <summary>
+            <span>Search and Filter</span>
+            <button v-if="hasActiveFilters" type="button" class="search-filter-reset"
+              @click.stop="resetEntitlementFilters" @keydown.stop>Reset</button>
+          </summary>
+          <div class="search-filter-controls">
+            <label>Search:
+              <input v-model.trim="filter" class="entitlement-filter" type="search"
+                :class="{ 'filter-active': filter }"
+                placeholder="Filter entitlements" aria-label="Filter entitlements across all attributes">
+            </label>
+            <div class="search-filter-options">
+              <div class="search-filter-dropdowns">
+                <label>Show key type:
+                  <select v-model="visibleEntitlementType" :class="{ 'filter-active': visibleEntitlementType }">
+                    <option value="">All</option>
+                    <option value="key-update">Key Update</option>
+                    <option value="product-key">Product Key</option>
+                  </select>
+                </label>
+                <label>Show status:
+                  <select v-model="visibleStatus" :class="{ 'filter-active': visibleStatus }">
+                    <option value="">All</option>
+                    <option v-for="status in entitlementStatuses" :key="status" :value="status" :class="statusTagClass(status)">{{ status }}</option>
+                  </select>
+                </label>
+              </div>
+              <div class="search-filter-dates">
+                <label>Created from (UTC):
+                  <input v-model="createdFrom" type="date" :class="{ 'filter-active': createdFrom }"
+                    :aria-invalid="invalidDateRange" :aria-describedby="invalidDateRange ? 'date-range-error' : null">
+                </label>
+                <label>Created to (UTC):
+                  <input v-model="createdTo" type="date" :class="{ 'filter-active': createdTo }"
+                    :aria-invalid="invalidDateRange" :aria-describedby="invalidDateRange ? 'date-range-error' : null">
+                </label>
+                <p v-if="invalidDateRange" id="date-range-error" class="form-error" role="alert">Start date must be on or before end date.</p>
+              </div>
+            </div>
+          </div>
+        </details>
         <div class="table-wrap entitlement-list">
           <table v-if="filteredEntitlements.length">
             <thead>
               <tr>
                 <th class="entitlement-type-header" aria-label="Entitlement type"></th>
-                <th>Type</th>
-                <th>Created Date</th>
-                <th>Customer name</th>
-                <th>Irricad Order Code (Ref ID 1)</th>
-                <th>Status</th>
+                <th v-for="column in entitlementSortColumns" :key="column.key" class="entitlement-sort-header"
+                    :aria-sort="sortColumn === column.key ? sortDirection : null"
+                    :title="'Sort ' + column.label + ' ' + (sortColumn === column.key && sortDirection === 'ascending' ? 'descending' : 'ascending')"
+                    @click="sortEntitlements(column.key)">
+                  <button type="button" class="entitlement-sort">
+                    {{ column.label }} <span v-if="sortColumn === column.key" aria-hidden="true">{{ sortDirection === 'ascending' ? '▲' : '▼' }}</span>
+                  </button>
+                </th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(entitlement, index) in filteredEntitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index"
+              <tr v-for="(entitlement, index) in sortedEntitlements" :key="(entitlement && (entitlement.id || entitlement.entitlementId)) || index"
                   class="entitlement-row" :class="{ selected: selectedEntitlement && String(selectedEntitlement.id) === String(entitlement.id) }"
                   role="button" tabindex="0"
                   :aria-label="'View entitlement ' + displayValue(entitlement.id) + ', ' + displayValue(typeLabel(entitlement.type))"
@@ -58,7 +101,7 @@
               </tr>
             </tbody>
           </table>
-          <p v-else-if="!loading && !error" class="entitlement-empty-list">{{ filter ? 'No matching entitlements.' : 'No entitlements found.' }}</p>
+          <p v-else-if="!loading && !error" class="entitlement-empty-list">{{ hasActiveFilters ? 'No matching entitlements.' : 'No entitlements found.' }}</p>
         </div>
       </div>
       <section class="entitlement-details" :class="selectedEntitlement ? typeMarkerClass(selectedEntitlement.type) : null" aria-live="polite">

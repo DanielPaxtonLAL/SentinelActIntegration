@@ -238,8 +238,9 @@ test('keeps the selected list type for the details outline after loading', async
   assert.equal(app.selectedEntitlement.type, 3);
   assert.match(html, /class="entitlement-details" :class="selectedEntitlement \? typeMarkerClass\(selectedEntitlement\.type\) : null"/);
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
-  assert.match(styles, /\.entitlement-details\.product-key \{ border: 2px solid var\(--entitlement-product-key-color\); \}/);
-  assert.match(styles, /\.entitlement-details\.key-update \{ border: 2px solid var\(--entitlement-key-update-color\); \}/);
+  assert.match(styles, /\.entitlement-details \{[^}]*border: 1px solid var\(--color-border\)/);
+  assert.match(styles, /\.entitlement-details\.product-key \{ border-color: var\(--entitlement-product-key-color\); \}/);
+  assert.match(styles, /\.entitlement-details\.key-update \{ border-color: var\(--entitlement-key-update-color\); \}/);
 });
 
 test('hides the base-product details table and footnote only for key updates', () => {
@@ -485,11 +486,190 @@ test('labels entitlement types and allows filtering by key update', () => {
   assert.equal(typeLabel(3), 'Key Update');
   assert.equal(typeLabel(' 3 '), 'Key Update');
   assert.equal(typeLabel(4), 4);
-  assert.match(html, /<th>Type<\/th>/);
+  assert.ok(definition.data().entitlementSortColumns.some((column) => column.key === 'type' && column.label === 'Type'));
   assert.match(html, /<td><template v-for="\(part, partIndex\) in highlightParts\(typeLabel\(entitlement\.type\)\)"/);
   const app = { filter: 'key update', entitlements: [{ id: '1', type: 3 }, { id: '2', type: 2 }], typeLabel };
   assert.equal(definition.computed.filteredEntitlements.call(app)[0].id, '1');
   assert.equal(definition.computed.filteredEntitlements.call(app).length, 1);
+});
+
+test('places the entitlement search in a collapsible section above the list', () => {
+  assert.match(html, /<details class="detail-collapsible search-filter"[^>]*>\s*<summary>\s*<span>Search and Filter<\/span>[\s\S]*?<\/summary>\s*<div class="search-filter-controls">\s*<label>Search:\s*<input v-model\.trim="filter" class="entitlement-filter" type="search"[^>]*>\s*<\/label>\s*<div class="search-filter-options">\s*<div class="search-filter-dropdowns">[\s\S]*?<\/details>\s*<div class="table-wrap entitlement-list">/);
+});
+
+test('reset button clears all filters without changing the sort', () => {
+  const app = { filter: 'Acme', visibleEntitlementType: 'key-update', visibleStatus: 'COMPLETED', createdFrom: '2026-01-01', createdTo: '2026-02-01', sortColumn: 'customer', sortDirection: 'descending' };
+  definition.methods.resetEntitlementFilters.call(app);
+  assert.deepEqual(app, { filter: '', visibleEntitlementType: '', visibleStatus: '', createdFrom: '', createdTo: '', sortColumn: 'customer', sortDirection: 'descending' });
+  assert.match(html, /<summary>\s*<span>Search and Filter<\/span>\s*<button v-if="hasActiveFilters" type="button" class="search-filter-reset"\s*@click\.stop="resetEntitlementFilters" @keydown\.stop>Reset<\/button>\s*<\/summary>/);
+});
+
+test('shows the selected entitlement type while combining it with search', () => {
+  const app = {
+    filter: '', visibleEntitlementType: '',
+    typeLabel: definition.methods.typeLabel, typeMarkerClass: definition.methods.typeMarkerClass,
+    entitlements: [
+      { id: 'a', type: 2, customer: 'Acme' },
+      { id: 'b', type: ' 3 ', customer: 'Acme' },
+      { id: 'c', type: 1, customer: 'Other' },
+    ],
+  };
+  const ids = () => Array.from(definition.computed.filteredEntitlements.call(app), (entry) => entry.id);
+  assert.equal(definition.data().visibleEntitlementType, '');
+  assert.deepEqual(ids(), ['a', 'b', 'c']);
+  app.visibleEntitlementType = 'product-key';
+  assert.deepEqual(ids(), ['a']);
+  app.visibleEntitlementType = 'key-update';
+  assert.deepEqual(ids(), ['b']);
+  app.filter = 'acme';
+  assert.deepEqual(ids(), ['b']);
+  app.filter = 'other';
+  assert.deepEqual(ids(), []);
+  app.filter = 'acme';
+  app.visibleEntitlementType = '';
+  assert.deepEqual(ids(), ['a', 'b']);
+  assert.match(html, /<label>Show key type:\s*<select v-model="visibleEntitlementType" :class="\{ 'filter-active': visibleEntitlementType \}">\s*<option value="">All<\/option>\s*<option value="key-update">Key Update<\/option>\s*<option value="product-key">Product Key<\/option>/);
+  assert.match(html, /hasActiveFilters \? 'No matching entitlements\.'/);
+});
+
+test('filters by inclusive UTC created dates along with the other filters', () => {
+  const app = {
+    filter: '', visibleEntitlementType: '', visibleStatus: '', createdFrom: '', createdTo: '',
+    ...definition.methods,
+    entitlements: [
+      { id: 'a', type: 2, state: 'DRAFT', customer: 'Acme', createDate: '2026-01-31T23:59:59Z' },
+      { id: 'b', type: 2, state: 'DRAFT', customer: 'Acme', createDate: '2026-02-01T10:00:00+13:00' },
+      { id: 'c', type: 2, state: 'DRAFT', customer: 'Acme', createDate: '2026-02-01T23:59:59Z' },
+      { id: 'd', type: 3, state: 'COMPLETED', customer: 'Other', createDate: '2026-02-02' },
+      { id: 'e', type: 2, state: 'DRAFT', customer: 'Acme', createDate: 'invalid' },
+      { id: 'f', type: 2, state: 'DRAFT', customer: 'Acme', createDate: '2026-02-30' },
+    ],
+  };
+  const ids = () => Array.from(definition.computed.filteredEntitlements.call(app), (entry) => entry.id);
+  assert.equal(definition.computed.hasActiveFilters.call(app), false);
+  assert.deepEqual(ids(), ['a', 'b', 'c', 'd', 'e', 'f']);
+  app.createdFrom = '2026-01-31';
+  app.createdTo = '2026-02-01';
+  assert.equal(definition.computed.hasActiveFilters.call(app), true);
+  assert.deepEqual(ids(), ['a', 'b', 'c']);
+  app.createdFrom = '';
+  assert.deepEqual(ids(), ['a', 'b', 'c']);
+  app.createdFrom = '2026-02-01';
+  app.createdTo = '';
+  assert.deepEqual(ids(), ['c', 'd']);
+  app.visibleEntitlementType = 'product-key';
+  app.visibleStatus = 'DRAFT';
+  app.filter = 'acme';
+  assert.deepEqual(ids(), ['c']);
+  app.createdFrom = '2026-02-03';
+  app.createdTo = '2026-02-01';
+  assert.equal(definition.computed.invalidDateRange.call(app), true);
+  assert.deepEqual(ids(), []);
+  assert.match(html, /Created from \(UTC\):\s*<input v-model="createdFrom" type="date" :class="\{ 'filter-active': createdFrom \}"/);
+  assert.match(html, /Created to \(UTC\):\s*<input v-model="createdTo" type="date" :class="\{ 'filter-active': createdTo \}"/);
+  assert.match(html, /v-if="invalidDateRange" id="date-range-error" class="form-error" role="alert"/);
+});
+
+test('filters by available status together with key type and search', () => {
+  const app = {
+    filter: '', visibleEntitlementType: '', visibleStatus: '',
+    typeLabel: definition.methods.typeLabel, typeMarkerClass: definition.methods.typeMarkerClass,
+    entitlements: [
+      { id: 'a', type: 2, state: 'DRAFT', customer: 'Acme' },
+      { id: 'b', type: 3, state: 'COMPLETED', customer: 'Acme' },
+      { id: 'c', type: 2, state: 'COMPLETED', customer: 'Other' },
+      { id: 'd', type: 2, state: 'NEW_STATE', customer: 'Acme' },
+      { id: 'e', type: 1, customer: 'Acme' },
+    ],
+  };
+  const ids = () => Array.from(definition.computed.filteredEntitlements.call(app), (entry) => entry.id);
+  assert.equal(definition.data().visibleStatus, '');
+  assert.deepEqual(Array.from(definition.computed.entitlementStatuses.call(app)), ['COMPLETED', 'DRAFT', 'NEW_STATE']);
+  app.visibleStatus = 'COMPLETED';
+  assert.deepEqual(ids(), ['b', 'c']);
+  app.visibleEntitlementType = 'product-key';
+  assert.deepEqual(ids(), ['c']);
+  app.filter = 'acme';
+  assert.deepEqual(ids(), []);
+  app.visibleEntitlementType = '';
+  assert.deepEqual(ids(), ['b']);
+  app.visibleStatus = '';
+  assert.deepEqual(ids(), ['a', 'b', 'd', 'e']);
+  app.visibleStatus = 'MISSING';
+  assert.ok(definition.computed.entitlementStatuses.call(app).includes('MISSING'));
+  assert.deepEqual(ids(), []);
+  assert.match(html, /<label>Show status:\s*<select v-model="visibleStatus" :class="\{ 'filter-active': visibleStatus \}">\s*<option value="">All<\/option>\s*<option v-for="status in entitlementStatuses" :key="status" :value="status" :class="statusTagClass\(status\)">\{\{ status \}\}<\/option>/);
+});
+
+test('highlights active search and filters with a cycling diagonal gradient', () => {
+  assert.match(html, /<input v-model\.trim="filter" class="entitlement-filter" type="search"\s*:class="\{ 'filter-active': filter \}"/);
+  assert.match(html, /<details class="detail-collapsible search-filter" :class="\{ 'filter-active': hasActiveFilters \}">/);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.search-filter\.filter-active \{\s*border: 1px solid transparent;/);
+  assert.match(styles, /linear-gradient\(to bottom right in hsl increasing hue, hsl\(var\(--active-filter-hue\) 100% 50%\), hsl\(calc\(var\(--active-filter-hue\) \+ 180deg\) 100% 50%\)\) border-box/);
+  assert.match(styles, /animation: active-filter-rainbow 3s linear infinite/);
+  assert.match(styles, /@keyframes active-filter-rainbow \{\s*from \{ --active-filter-hue: 0deg; \}\s*to \{ --active-filter-hue: 360deg; \}/);
+  assert.match(styles, /\.entitlements-page \.search-filter-controls :is\(input, select\)\.filter-active,\s*\.entitlements-page \.entitlement-list-panel \.search-filter\.filter-active \{/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{\s*\.entitlements-page \.search-filter-controls :is\(input, select\)\.filter-active,\s*\.entitlements-page \.entitlement-list-panel \.search-filter\.filter-active \{ animation: none; \}/);
+});
+
+test('colors filter options to match entitlement markers and status tags', () => {
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  for (const [value, color] of [['product-key', 'product-key'], ['key-update', 'key-update']]) {
+    assert.ok(styles.includes(`option[value="${value}"] { background: var(--entitlement-${color}-color); color: #000; }`));
+  }
+  for (const status of ['complete', 'draft', 'acknowledged', 'queued', 'produced', 'unknown']) {
+    assert.ok(styles.includes(`.status-tag.status-${status}, .entitlements-page .search-filter-controls option.status-${status} { background: var(--status-${status}-bg); color: var(--status-${status}-text); }`));
+  }
+  assert.equal(definition.methods.statusTagClass('COMPLETED'), 'status-complete');
+  assert.equal(definition.methods.statusTagClass('PRODUCT_KEY_GENERATED'), 'status-unknown');
+});
+
+test('sorts filtered entitlements by each data column and toggles direction', () => {
+  const entries = [
+    { id: 'a', type: 2, createDate: '2026-02-01T10:00:00+13:00', customer: 'Zebra', refId1: '10', state: 'QUEUED' },
+    { id: 'b', type: 3, createDate: '2026-01-31T20:00:00Z', customer: 'apple', refId1: '2', state: 'DRAFT' },
+    { id: 'c', type: null, createDate: null, customer: null, refId1: null, state: null },
+  ];
+  const app = {
+    filteredEntitlements: entries, sortColumn: '', sortDirection: 'ascending',
+    typeLabel: definition.methods.typeLabel,
+  };
+  const ids = () => Array.from(definition.computed.sortedEntitlements.call(app), (entry) => entry.id);
+  const sort = (column) => definition.methods.sortEntitlements.call(app, column);
+  assert.deepEqual(ids(), ['a', 'b', 'c']);
+  for (const column of ['type', 'createDate', 'customer', 'refId1', 'state']) {
+    sort(column);
+    assert.equal(app.sortDirection, 'ascending');
+    assert.deepEqual(ids(), ['b', 'a', 'c'], column);
+    sort(column);
+    assert.equal(app.sortDirection, 'descending');
+    assert.deepEqual(ids(), ['a', 'b', 'c'], column);
+    sort(column);
+    assert.equal(app.sortDirection, 'ascending');
+    assert.deepEqual(ids(), ['b', 'a', 'c'], column);
+  }
+  assert.deepEqual(entries.map((entry) => entry.id), ['a', 'b', 'c']);
+  app.filter = 'key update';
+  app.entitlements = entries;
+  app.filteredEntitlements = definition.computed.filteredEntitlements.call(app);
+  assert.deepEqual(ids(), ['b']);
+  assert.match(html, /<th v-for="column in entitlementSortColumns"[^>]*:aria-sort="sortColumn === column.key \? sortDirection : null"[^>]*:title="'Sort ' \+ column.label \+ ' ' \+ \(sortColumn === column.key && sortDirection === 'ascending' \? 'descending' : 'ascending'\)"[^>]*@click="sortEntitlements\(column.key\)">\s*<button type="button" class="entitlement-sort">/);
+  assert.match(html, /v-for="\(entitlement, index\) in sortedEntitlements"/);
+  assert.match(html, /<th>Actions<\/th>/);
+});
+
+test('keeps invalid dates last and equal sort values in their original order', () => {
+  const app = {
+    filteredEntitlements: [
+      { id: 'a', createDate: 'invalid' },
+      { id: 'b', createDate: '2026-01-01' },
+      { id: 'c', createDate: '2026-01-01' },
+      { id: 'd', createDate: '' },
+    ],
+    sortColumn: 'createDate', sortDirection: 'descending',
+  };
+  assert.deepEqual(Array.from(definition.computed.sortedEntitlements.call(app), (entry) => entry.id), ['b', 'c', 'a', 'd']);
 });
 
 test('marks entitlement types with an accessible thin color cell', () => {
@@ -516,7 +696,7 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
   assert.equal(formatLocalDate.call({ displayValue }, '2026-11-12T09:00:00'), expectedLocal);
   assert.equal(formatLocalDate.call({ displayValue }, '2026-11-12'), '12-11-2026');
   assert.equal(formatLocalDate.call({ displayValue }, null), '—');
-  assert.match(html, /<th>Created Date<\/th>/);
+  assert.ok(definition.data().entitlementSortColumns.some((column) => column.key === 'createDate' && column.label === 'Created Date'));
   assert.match(html, /:title="entitlement\.createDate \? 'UTC, DD-MM-YYYY' : null"[^>]*>[\s\S]*?highlightParts\(formatUtcDate\(entitlement\.createDate\)\)/);
   assert.match(html, /Created Date<\/div>\s*<div class="detail-value" role="cell" :title="selectedEntitlement\.createDate \? 'UTC, DD-MM-YYYY' : null">\{\{ formatUtcDate\(selectedEntitlement\.createDate\) \}\}/);
   assert.match(html, /Start Date<\/div>\s*<div class="detail-value" role="cell" :title="selectedEntitlement\.startDate \? 'Local time, DD-MM-YYYY' : null">\{\{ formatLocalDate\(selectedEntitlement\.startDate\) \}\}/);
@@ -534,7 +714,7 @@ test('shows entitlement dates in local time with date-only values unchanged', ()
 });
 
 test('shows customer, serial number, and expiry date in order in entitlement details', () => {
-  assert.match(html, /<th>Irricad Order Code \(Ref ID 1\)<\/th>/);
+  assert.ok(definition.data().entitlementSortColumns.some((column) => column.key === 'refId1' && column.label === 'Irricad Order Code (Ref ID 1)'));
   const details = html.match(/<div class="entitlement-detail-fields"[^>]*>([\s\S]*?)<\/div>\s*<div v-if="!isKeyUpdate \|\| canProduce" class="detail-footer"/)[1];
   const labels = [...details.matchAll(/<div class="detail-label" role="rowheader"[^>]*>(.*?)<\/div>/g)].map((match) => match[1]);
   assert.doesNotMatch(details, /<input type="checkbox"/);

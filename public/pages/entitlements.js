@@ -45,9 +45,28 @@ createApp({
       customerError: '',
       notice: '',
       filter: '',
+      visibleEntitlementType: '',
+      visibleStatus: '',
+      createdFrom: '',
+      createdTo: '',
+      sortColumn: '',
+      sortDirection: 'ascending',
+      entitlementSortColumns: [
+        { key: 'type', label: 'Type' },
+        { key: 'createDate', label: 'Created Date' },
+        { key: 'customer', label: 'Customer name' },
+        { key: 'refId1', label: 'Irricad Order Code (Ref ID 1)' },
+        { key: 'state', label: 'Status' },
+      ],
     };
   },
   computed: {
+    hasActiveFilters() {
+      return Boolean(this.filter || this.visibleEntitlementType || this.visibleStatus || this.createdFrom || this.createdTo);
+    },
+    invalidDateRange() {
+      return Boolean(this.createdFrom && this.createdTo && this.createdFrom > this.createdTo);
+    },
     isKeyUpdate() {
       return this.typeMarkerClass(this.selectedEntitlement?.type) === 'key-update';
     },
@@ -146,10 +165,27 @@ createApp({
       if (!/^[0-9a-f]{4}$/i.test(versionHex)) return 'Invalid version data';
       return 'v' + ((parseInt(versionHex, 16) ^ 0xBEAD) / 1000);
     },
+    entitlementStatuses() {
+      return [...new Set([
+        ...this.entitlements.map((entitlement) => String(entitlement.state ?? '').trim()),
+        this.visibleStatus,
+      ])].filter(Boolean).sort((a, b) => a.localeCompare(b));
+    },
     filteredEntitlements() {
       const query = this.filter.toLocaleLowerCase();
-      if (!query) return this.entitlements;
+      if (!query && !this.visibleEntitlementType && !this.visibleStatus && !this.createdFrom && !this.createdTo) return this.entitlements;
       return this.entitlements.filter((entitlement) => {
+        if (this.visibleEntitlementType && this.typeMarkerClass(entitlement.type) !== this.visibleEntitlementType) return false;
+        if (this.visibleStatus && String(entitlement.state ?? '').trim() !== this.visibleStatus) return false;
+        if (this.createdFrom || this.createdTo) {
+          const date = /^(\d{2})-(\d{2})-(\d{4})$/.exec(this.formatUtcDate(entitlement.createDate));
+          if (!date) return false;
+          const isoDate = `${date[3]}-${date[2]}-${date[1]}`;
+          const timestamp = Date.parse(isoDate);
+          if (Number.isNaN(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== isoDate) return false;
+          if ((this.createdFrom && isoDate < this.createdFrom) || (this.createdTo && isoDate > this.createdTo)) return false;
+        }
+        if (!query) return true;
         const values = [];
         const collectValues = (value) => {
           if (value === null || value === undefined) return;
@@ -164,8 +200,45 @@ createApp({
         return values.some((value) => value.toLocaleLowerCase().includes(query));
       });
     },
+    sortedEntitlements() {
+      if (!this.sortColumn) return this.filteredEntitlements;
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+      const valueFor = (entitlement) => {
+        const value = this.sortColumn === 'type'
+          ? this.typeLabel(entitlement.type)
+          : entitlement[this.sortColumn];
+        if (value === null || value === undefined || value === '') return null;
+        if (this.sortColumn === 'createDate') {
+          const timestamp = Date.parse(value);
+          return Number.isNaN(timestamp) ? null : timestamp;
+        }
+        return String(value);
+      };
+      const direction = this.sortDirection === 'ascending' ? 1 : -1;
+      return [...this.filteredEntitlements].sort((a, b) => {
+        const first = valueFor(a);
+        const second = valueFor(b);
+        if (first === null) return second === null ? 0 : 1;
+        if (second === null) return -1;
+        return direction * (this.sortColumn === 'createDate'
+          ? first - second
+          : collator.compare(first, second));
+      });
+    },
   },
   methods: {
+    resetEntitlementFilters() {
+      this.filter = '';
+      this.visibleEntitlementType = '';
+      this.visibleStatus = '';
+      this.createdFrom = '';
+      this.createdTo = '';
+    },
+    sortEntitlements(column) {
+      this.sortDirection = this.sortColumn === column && this.sortDirection === 'ascending'
+        ? 'descending' : 'ascending';
+      this.sortColumn = column;
+    },
     protectionKeyIds(key) {
       return [...new Set((key.activationReferences || [])
         .map((reference) => reference.protectionKeyId)
