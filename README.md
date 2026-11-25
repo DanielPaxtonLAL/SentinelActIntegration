@@ -18,6 +18,7 @@ When serials are first requested after EMS login, the app scans existing base-pr
 The **Product Keys** tab scans entitlement product keys and retrieves activation details for activation IDs returned by EMS. Keys without a returned activation ID are also listed; they may not be activated.
 Use **Download V2CP** on the Product Keys tab to build and automatically download a package from that key's existing V2Cs in ascending update-counter order. It may contain updates already applied and does not check the current key state. Package creation fails if history has warnings, missing licenses, or counters that do not form a complete sequence starting at zero. This history-based package is constructed locally, not returned by the EMS pending-update service.
 Completed entitlement details also show their product keys and available protection key IDs, with a V2CP download for each protection key.
+Entitlement search and filter selections, including search text, are saved in the browser's local storage and remain after logout. Use Reset to clear them.
 If the saved C2V is invalid XML, the server logs its format, size, validation position and structural clues, without logging its contents.
 
 ## Security

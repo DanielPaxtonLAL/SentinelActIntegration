@@ -198,6 +198,7 @@ test('produce confirms, reloads list and selected details on success and blocks 
 
 test('displays the serial counter warning after a draft was saved', () => {
   const app = {
+    loadFilterPreferences() {},
     loadEntitlements() {},
     loadCustomers() {},
   };
@@ -502,6 +503,66 @@ test('reset button clears all filters without changing the sort', () => {
   definition.methods.resetEntitlementFilters.call(app);
   assert.deepEqual(app, { filter: '', visibleEntitlementType: '', visibleStatus: '', createdFrom: '', createdTo: '', sortColumn: 'customer', sortDirection: 'descending' });
   assert.match(html, /<summary>\s*<span>Search and Filter<\/span>\s*<button v-if="hasActiveFilters" type="button" class="search-filter-reset"\s*@click\.stop="resetEntitlementFilters" @keydown\.stop>Reset<\/button>\s*<\/summary>/);
+});
+
+test('persists and restores entitlement filters, including resets', () => {
+  const previousStorage = pageWindow.localStorage;
+  const storage = new Map();
+  pageWindow.localStorage = {
+    getItem: (key) => storage.has(key) ? storage.get(key) : null,
+    setItem: (key, value) => storage.set(key, value),
+  };
+  try {
+    const app = {
+      filter: 'Acme', visibleEntitlementType: 'key-update', visibleStatus: 'COMPLETED',
+      createdFrom: '2026-01-01', createdTo: '2026-02-01',
+      saveFilterPreferences: definition.methods.saveFilterPreferences,
+    };
+    definition.watch.filterPreferences.call(app, definition.computed.filterPreferences.call(app));
+    const restored = {
+      ...definition.data(),
+      loadFilterPreferences: definition.methods.loadFilterPreferences,
+      loadEntitlements() { assert.equal(this.filter, 'Acme'); },
+      loadCustomers() {},
+    };
+    definition.mounted.call(restored);
+    for (const field of ['filter', 'visibleEntitlementType', 'visibleStatus', 'createdFrom', 'createdTo']) {
+      assert.equal(restored[field], app[field]);
+    }
+    assert.equal(restored.filterStorageError, '');
+    assert.ok(definition.computed.entitlementStatuses.call(restored).includes('COMPLETED'));
+
+    definition.methods.resetEntitlementFilters.call(app);
+    definition.watch.filterPreferences.call(app, definition.computed.filterPreferences.call(app));
+    definition.methods.loadFilterPreferences.call(restored);
+    assert.equal(definition.computed.hasActiveFilters.call(restored), false);
+  } finally {
+    pageWindow.localStorage = previousStorage;
+  }
+});
+
+test('reports invalid saved filters and unavailable browser storage', () => {
+  const previousStorage = pageWindow.localStorage;
+  const app = { ...definition.data() };
+  try {
+    for (const value of ['not json', JSON.stringify({ filter: 'x', visibleEntitlementType: 'other', visibleStatus: '', createdFrom: '', createdTo: '' }), JSON.stringify({ filter: 'x', visibleEntitlementType: '', visibleStatus: '', createdFrom: '2026-02-30', createdTo: '' })]) {
+      pageWindow.localStorage = { getItem: () => value };
+      definition.methods.loadFilterPreferences.call(app);
+      assert.match(app.filterStorageError, /Unable to load saved filters/);
+      assert.equal(app.filter, '');
+    }
+    pageWindow.localStorage = {
+      getItem() { throw new Error('Storage disabled'); },
+      setItem() { throw new Error('Storage disabled'); },
+    };
+    definition.methods.loadFilterPreferences.call(app);
+    assert.match(app.filterStorageError, /Unable to load saved filters: Storage disabled/);
+    definition.methods.saveFilterPreferences.call(app, definition.computed.filterPreferences.call(app));
+    assert.match(app.filterStorageError, /Unable to save filters in this browser: Storage disabled/);
+    assert.match(html, /v-if="filterStorageError" class="form-error" role="alert"/);
+  } finally {
+    pageWindow.localStorage = previousStorage;
+  }
 });
 
 test('shows the selected entitlement type while combining it with search', () => {

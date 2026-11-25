@@ -1,4 +1,5 @@
 const { createApp } = Vue;
+const ENTITLEMENT_FILTERS_STORAGE_KEY = 'entitlement-filters:v1';
 createApp({
   data() {
     return {
@@ -45,6 +46,7 @@ createApp({
       customerError: '',
       notice: '',
       filter: '',
+      filterStorageError: '',
       visibleEntitlementType: '',
       visibleStatus: '',
       createdFrom: '',
@@ -61,6 +63,15 @@ createApp({
     };
   },
   computed: {
+    filterPreferences() {
+      return {
+        filter: this.filter,
+        visibleEntitlementType: this.visibleEntitlementType,
+        visibleStatus: this.visibleStatus,
+        createdFrom: this.createdFrom,
+        createdTo: this.createdTo,
+      };
+    },
     hasActiveFilters() {
       return Boolean(this.filter || this.visibleEntitlementType || this.visibleStatus || this.createdFrom || this.createdTo);
     },
@@ -226,7 +237,48 @@ createApp({
       });
     },
   },
+  watch: {
+    filterPreferences(preferences) {
+      this.saveFilterPreferences(preferences);
+    },
+  },
   methods: {
+    loadFilterPreferences() {
+      try {
+        const stored = window.localStorage.getItem(ENTITLEMENT_FILTERS_STORAGE_KEY);
+        if (stored === null) return;
+        const preferences = JSON.parse(stored);
+        const validDate = (value) => {
+          if (value === '') return true;
+          if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+          const timestamp = Date.parse(value);
+          return !Number.isNaN(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+        };
+        if (!preferences || typeof preferences !== 'object' ||
+            typeof preferences.filter !== 'string' ||
+            !['', 'product-key', 'key-update'].includes(preferences.visibleEntitlementType) ||
+            typeof preferences.visibleStatus !== 'string' ||
+            !validDate(preferences.createdFrom) || !validDate(preferences.createdTo)) {
+          throw new Error('Saved filters are invalid.');
+        }
+        this.filter = preferences.filter;
+        this.visibleEntitlementType = preferences.visibleEntitlementType;
+        this.visibleStatus = preferences.visibleStatus;
+        this.createdFrom = preferences.createdFrom;
+        this.createdTo = preferences.createdTo;
+        this.filterStorageError = '';
+      } catch (err) {
+        this.filterStorageError = 'Unable to load saved filters: ' + err.message;
+      }
+    },
+    saveFilterPreferences(preferences) {
+      try {
+        window.localStorage.setItem(ENTITLEMENT_FILTERS_STORAGE_KEY, JSON.stringify(preferences));
+        this.filterStorageError = '';
+      } catch (err) {
+        this.filterStorageError = 'Unable to save filters in this browser: ' + err.message;
+      }
+    },
     resetEntitlementFilters() {
       this.filter = '';
       this.visibleEntitlementType = '';
@@ -666,6 +718,7 @@ createApp({
     },
   },
   mounted() {
+    this.loadFilterPreferences();
     const params = new URLSearchParams(window.location.search);
     if (params.has('created')) {
       const serialWarning = params.get('serialWarning');

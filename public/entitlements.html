@@ -22,6 +22,7 @@
           <h2>Entitlements ({{ filteredEntitlements.length }})</h2>
           <button type="button" class="button--constructive entitlement-create-button" @click="openCreateEntitlement" :disabled="loading || activating">Create entitlement</button>
         </div>
+        <p v-if="filterStorageError" class="form-error" role="alert">{{ filterStorageError }}</p>
         <details class="detail-collapsible search-filter" :class="{ 'filter-active': hasActiveFilters }">
           <summary>
             <span>Search and Filter</span>
