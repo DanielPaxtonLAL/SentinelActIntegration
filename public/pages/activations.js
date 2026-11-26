@@ -5,6 +5,7 @@ createApp({
     return {
       activations: [], keys: [], selectedKey: null, filter: '', loading: false, error: '',
       updates: [], originalEntitlement: null, originalError: '', updatesLoading: false, updatesError: '', counterWarning: '', selectionRequest: 0,
+      featureProductIds: null, counterHistory: null,
     };
   },
   computed: {
@@ -39,6 +40,80 @@ createApp({
     },
     timelineEntries() {
       return this.originalEntitlement ? [...this.sortedUpdates, this.originalEntitlement] : this.sortedUpdates;
+    },
+    expectedFeatures() {
+      const features = ['standalone', 'link', 'pivot'];
+      const all = (value, reason) => Object.fromEntries(features.map((name) => [name, { value, reason }]));
+      if (this.updatesLoading) return all('Loading…', '');
+      if (this.updatesError || this.originalError || !this.originalEntitlement) {
+        return all('Unavailable', this.updatesError || this.originalError || 'The original entitlement is unavailable.');
+      }
+      const history = this.counterHistory;
+      if (!history || history.warnings.length) {
+        return all('Unavailable', this.counterWarning || 'A complete activation counter history is required.');
+      }
+      const entries = [this.originalEntitlement, ...this.updates];
+      const byId = new Map(entries.map((entry) => [String(entry.id), entry]));
+      if (byId.size !== entries.length || entries.some((entry) =>
+        !entry.products.length || entry.products.some((product) => !/^[1-9]\d*$/.test(String(product.productId))))) {
+        return all('Unavailable', 'Entitlement products are missing or ambiguous.');
+      }
+      const byAid = new Map();
+      for (const activation of history.activations) {
+        if (activation.counterError || typeof activation.updateCounter !== 'string' ||
+            !/^\d+$/.test(activation.updateCounter) || !byId.has(String(activation.entitlementId))) {
+          return all('Unavailable', 'Activation counters or their entitlements are missing or ambiguous.');
+        }
+        const record = { entitlementId: String(activation.entitlementId), counter: BigInt(activation.updateCounter) };
+        const previous = byAid.get(activation.aid);
+        if (previous && (previous.entitlementId !== record.entitlementId || previous.counter !== record.counter)) {
+          return all('Unavailable', 'Activation history contains conflicting records.');
+        }
+        byAid.set(activation.aid, record);
+      }
+      const ordered = [...byAid.values()].sort((a, b) => a.counter < b.counter ? -1 : a.counter > b.counter ? 1 : 0);
+      if (ordered.length !== entries.length || ordered.some((entry, index) => entry.counter !== BigInt(index)) ||
+          ordered[0]?.entitlementId !== String(this.originalEntitlement.id) ||
+          new Set(ordered.map((entry) => entry.entitlementId)).size !== entries.length) {
+        return all('Unavailable', 'Activation counters must uniquely cover the original and every update in sequence.');
+      }
+      const configured = this.featureProductIds || {};
+      const knownIds = features.flatMap((name) => {
+        const ids = configured[name];
+        return ids ? [ids.add, ids.remove].filter((id) => typeof id === 'string' && /^[1-9]\d*$/.test(id)) : [];
+      });
+      if (new Set(knownIds).size !== knownIds.length) {
+        return all('Unavailable', 'Feature product IDs are ambiguous.');
+      }
+      const result = Object.fromEntries(features.map((name) => {
+        const ids = configured[name];
+        if (!ids || !/^[1-9]\d*$/.test(ids.add) || (this.updates.length && !/^[1-9]\d*$/.test(ids.remove))) {
+          return [name, { value: 'Unavailable', reason: 'Add and remove product IDs are not configured for this environment.' }];
+        }
+        if (ids.remove && this.originalEntitlement.products.some((product) => String(product.productId) === ids.remove)) {
+          return [name, { value: 'Unavailable', reason: 'The original entitlement contains a removal for this feature.' }];
+        }
+        const present = this.originalEntitlement.products.some((product) => String(product.productId) === ids.add);
+        return [name, { value: present ? 'Yes' : 'No', reason: '' }];
+      }));
+      for (const item of ordered.slice(1)) {
+        const products = byId.get(item.entitlementId).products.map((product) => String(product.productId));
+        if (products.some((id) => !knownIds.includes(id))) {
+          return all('Unavailable', 'An update contains unsupported product modifications.');
+        }
+        for (const name of features) {
+          const ids = configured[name];
+          if (result[name].reason) continue;
+          if (products.includes(ids.add) && products.includes(ids.remove)) {
+            result[name] = { value: 'Unavailable', reason: 'An update contains conflicting product modifications for this feature.' };
+          } else if (products.includes(ids.add)) {
+            result[name].value = 'Yes';
+          } else if (products.includes(ids.remove)) {
+            result[name].value = 'No';
+          }
+        }
+      }
+      return result;
     },
   },
   methods: {
@@ -91,6 +166,8 @@ createApp({
       this.originalError = '';
       this.updatesError = '';
       this.counterWarning = '';
+      this.featureProductIds = null;
+      this.counterHistory = null;
       this.updatesLoading = false;
       if (!key.protectionKeyId) return;
       this.updatesLoading = true;
@@ -110,7 +187,8 @@ createApp({
         this.originalEntitlement = data.original;
         this.originalError = data.originalError;
         this.updates = data.updates;
-        if (data.updates.length) {
+        this.featureProductIds = data.featureProductIds || null;
+        if (data.updates.length || (data.original && this.featureProductIds)) {
           try {
             const counterResponse = await fetch(`/api/protection-keys/${encodeURIComponent(key.protectionKeyId)}/update-counters`, { cache: 'no-store' });
             const history = await counterResponse.json();
@@ -121,6 +199,7 @@ createApp({
               throw new Error('The server returned invalid counter history.');
             }
             if (request !== this.selectionRequest) return;
+            this.counterHistory = history;
             if (history.warnings.length) {
               this.counterWarning = 'Counter history is incomplete; updates are ordered by creation date. ' + history.warnings.join(' ');
             } else {
@@ -173,6 +252,8 @@ createApp({
       this.updatesLoading = false;
       this.updatesError = '';
       this.counterWarning = '';
+      this.featureProductIds = null;
+      this.counterHistory = null;
       try {
         const response = await fetch('/api/activations', { cache: 'no-store' });
         const data = await response.json();

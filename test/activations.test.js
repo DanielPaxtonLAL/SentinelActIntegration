@@ -7,6 +7,12 @@ const AdmZip = require('adm-zip');
 const { XMLParser } = require('fast-xml-parser');
 const { buildHistoryV2cp } = require('../src/v2cp-package');
 
+const featureProductIds = {
+  standalone: { add: '25', remove: '29' },
+  link: { add: '24', remove: '28' },
+  pivot: { add: '22', remove: '27' },
+};
+
 function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
   return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
 }
@@ -138,7 +144,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
-    if (name === './entitlement-form-data') return { loadFormData: () => ({}) };
+    if (name === './entitlement-form-data') return { loadFormData: () => ({ pivotProductIds: featureProductIds.pivot, featureProductIds }) };
     if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
@@ -207,6 +213,9 @@ test('timeline includes the original product-key entitlement without changing th
   assert.equal(res.body.original.products[0].productName, 'Base');
   assert.equal(res.body.originalError, '');
   assert.equal(res.body.updates[0].id, '20');
+  assert.equal(res.body.pivotProductIds.add, '22');
+  assert.equal(res.body.pivotProductIds.remove, '27');
+  assert.deepEqual(res.body.featureProductIds, featureProductIds);
   const missing = await activationsRoute({ associatedIds: ['20'] }).keyEntitlements('12345', true);
   assert.equal(missing.res.body.original, null);
   assert.match(missing.res.body.originalError, /did not return/);
@@ -426,6 +435,153 @@ function definitionForKeys(fetchImpl = async () => {}) {
 function timelineResponse(updates, original = { id: '10', type: 2, products: [] }) {
   return { original, originalError: original ? '' : 'Original unavailable', updates };
 }
+
+test('reconstructs Pivot from the original and the last counter-ordered update', async () => {
+  const updates = [
+    { id: '20', type: 3, products: [{ productId: '27' }], createDate: '2026-03-01' },
+    { id: '21', type: 3, products: [{ productId: '22' }], createDate: '2026-01-01' },
+    { id: '22', type: 3, products: [{ productId: '27' }], createDate: '2026-02-01' },
+  ];
+  const original = { id: '10', type: 2, products: [{ productId: '1' }, { productId: '22' }] };
+  const activations = [
+    { entitlementId: '10', aid: 'base', updateCounter: '0' },
+    { entitlementId: '20', aid: 'remove', updateCounter: '1' },
+    { entitlementId: '21', aid: 'add', updateCounter: '2' },
+    { entitlementId: '22', aid: 'last', updateCounter: '3' },
+  ];
+  const definition = definitionForKeys(async (url) => ({
+    ok: true,
+    json: async () => url.endsWith('/update-counters')
+      ? { activations, warnings: [] }
+      : { ...timelineResponse(updates, original), featureProductIds },
+  }));
+  const app = definition.data();
+  await definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'No');
+  activations[2].updateCounter = '3';
+  activations[3].updateCounter = '2';
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'Yes');
+  app.updates = [];
+  app.counterHistory = { activations: [activations[0]], warnings: [] };
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'Yes');
+  app.originalEntitlement = { ...original, products: [{ productId: '1' }] };
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'No');
+});
+
+test('does not guess Pivot when history or product effects are uncertain', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    originalEntitlement: { id: '10', products: [{ productId: '1' }] },
+    updates: [{ id: '20', products: [{ productId: '22' }] }],
+    featureProductIds: { pivot: { add: '22', remove: '27' } },
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'update', updateCounter: '1' },
+    ] },
+  };
+  const check = () => definition.computed.expectedFeatures.call(app).pivot;
+  assert.equal(check().value, 'Yes');
+  app.counterHistory.activations[1].updateCounter = '2';
+  assert.match(check().reason, /sequence/);
+  app.counterHistory.activations[1].updateCounter = '0';
+  assert.match(check().reason, /sequence/);
+  app.counterHistory.activations[1].updateCounter = null;
+  assert.match(check().reason, /missing or ambiguous/);
+  app.counterHistory.activations[1].updateCounter = '1';
+  app.counterHistory.warnings = ['missing activation'];
+  assert.equal(check().value, 'Unavailable');
+  app.counterHistory.warnings = [];
+  app.updates[0].products.push({ productId: '27' });
+  assert.match(check().reason, /conflicting/);
+  app.updates[0].products = [{ productId: '24' }];
+  assert.match(check().reason, /unsupported/);
+  app.updates[0].products = [{ productId: '22' }];
+  app.featureProductIds.pivot.remove = '';
+  assert.match(check().reason, /not configured/);
+  app.featureProductIds.pivot.remove = '27';
+  app.originalEntitlement.products.push({ productId: '27' });
+  assert.match(check().reason, /original entitlement/);
+});
+
+test('discards stale counter history when a different key is selected', async () => {
+  let resolveFirstHistory;
+  const definition = definitionForKeys(async (url) => {
+    if (url.includes('/123/') && url.endsWith('/update-counters')) {
+      return new Promise((resolve) => { resolveFirstHistory = resolve; });
+    }
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [{ entitlementId: '10', aid: 'second', updateCounter: '0' }],
+    }) };
+    return { ok: true, json: async () => ({
+      ...timelineResponse([], { id: '10', type: 2, products: [{ productId: '1' }] }),
+      featureProductIds,
+    }) };
+  });
+  const app = definition.data();
+  const first = definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await definition.methods.selectKey.call(app, { protectionKeyId: '456' });
+  resolveFirstHistory({ ok: true, json: async () => ({
+    warnings: [], activations: [{ entitlementId: '10', aid: 'first', updateCounter: '0' }],
+  }) });
+  await first;
+  assert.equal(app.counterHistory.activations[0].aid, 'second');
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'No');
+});
+
+test('reconstructs independent features through mixed updates in counter order', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    featureProductIds,
+    originalEntitlement: { id: '10', products: [{ productId: '1' }, { productId: '25' }, { productId: '22' }] },
+    updates: [
+      { id: '20', products: [{ productId: '29' }, { productId: '24' }] },
+      { id: '21', products: [{ productId: '25' }, { productId: '27' }] },
+      { id: '22', products: [{ productId: '28' }] },
+    ],
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'first', updateCounter: '1' },
+      { entitlementId: '21', aid: 'second', updateCounter: '2' },
+      { entitlementId: '22', aid: 'third', updateCounter: '3' },
+    ] },
+  };
+  const check = () => definition.computed.expectedFeatures.call(app);
+  assert.deepEqual(['standalone', 'link', 'pivot'].map((name) => check()[name].value), ['Yes', 'No', 'No']);
+  app.counterHistory.activations[1].updateCounter = '3';
+  app.counterHistory.activations[3].updateCounter = '1';
+  assert.deepEqual(['standalone', 'link', 'pivot'].map((name) => check()[name].value), ['No', 'Yes', 'No']);
+  app.updates[0].products.push({ productId: '25' });
+  assert.match(check().standalone.reason, /conflicting/);
+  assert.equal(check().link.value, 'Yes');
+  app.updates[0].products.push({ productId: '999' });
+  assert.match(check().link.reason, /unsupported/);
+});
+
+test('reports missing and ambiguous feature configuration without guessing', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    featureProductIds: {
+      standalone: { add: '25', remove: '' },
+      link: { add: '24', remove: '28' },
+      pivot: { add: '22', remove: '27' },
+    },
+    originalEntitlement: { id: '10', products: [{ productId: '1' }, { productId: '25' }] },
+    updates: [{ id: '20', products: [{ productId: '24' }] }],
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'update', updateCounter: '1' },
+    ] },
+  };
+  const check = () => definition.computed.expectedFeatures.call(app);
+  assert.match(check().standalone.reason, /not configured/);
+  assert.equal(check().link.value, 'Yes');
+  app.featureProductIds.standalone.remove = '28';
+  assert.match(check().link.reason, /ambiguous/);
+});
 
 test('selected key shows updates and ignores stale responses and missing protection IDs', async () => {
   let resolveFirst;

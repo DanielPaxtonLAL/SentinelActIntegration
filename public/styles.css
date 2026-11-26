@@ -448,10 +448,10 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-details.key-update { border-color: var(--entitlement-key-update-color); }
 .entitlements-page .entitlement-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .entitlements-page .entitlement-details h3 { margin: 1.5rem 0 .6rem; }
-.entitlements-page .entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }
-.entitlements-page .entitlement-detail-fields .detail-row { display: table-row; }
-.entitlements-page .entitlement-detail-fields .detail-row > div { display: table-cell; padding: .5rem .75rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow-wrap: anywhere; }
-.entitlements-page .entitlement-detail-fields .detail-label { width: 1%; white-space: nowrap; color: var(--color-text-muted); }
+.entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }
+.entitlement-detail-fields .detail-row { display: table-row; }
+.entitlement-detail-fields .detail-row > div { display: table-cell; padding: .5rem .75rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow-wrap: anywhere; }
+.entitlement-detail-fields .detail-label { width: 1%; white-space: nowrap; color: var(--color-text-muted); }
 .entitlements-page .detail-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .5rem; }
 .entitlements-page .detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
 .entitlements-page .detail-footnote { margin: 0; font-size: .75rem; color: var(--color-text-muted); }

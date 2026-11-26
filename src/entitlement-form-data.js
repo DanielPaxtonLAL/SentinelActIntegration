@@ -71,6 +71,17 @@ function parseFormDataForMode(json, isTestMode) {
   if (!accessProducts.length) throw new Error('entitlement form data: "product-options" needs at least one option');
   const optionalOptions = optionsOf(json['optional-products'], 'optional-products', isTestMode);
   const optionalProducts = requireIds(optionalOptions, 'optional-products');
+  const featureProductIds = Object.fromEntries([
+    ['standalone', accessOptions, json['product-options']],
+    ['link', accessOptions, json['product-options']],
+    ['pivot', optionalOptions, json['optional-products']],
+  ].map(([key, options, group]) => {
+    const option = options.find((entry) => entry.key === key);
+    return [key, option ? {
+      add: option.id,
+      remove: (group[key][isTestMode ? 'remove-test' : 'remove-production'] ?? '').trim(),
+    } : null];
+  }));
 
   const versionOptions = optionsOf(json.version, 'version', isTestMode);
   const defaults = versionOptions.filter((option) => !option.id);
@@ -105,6 +116,8 @@ function parseFormDataForMode(json, isTestMode) {
     lease,
     leaseExpiryRange: { minMonths: range['min-months'], maxMonths: range['max-months'] },
     productAliases,
+    pivotProductIds: featureProductIds.pivot,
+    featureProductIds,
   };
 }
 

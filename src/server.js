@@ -510,7 +510,10 @@ app.get('/api/protection-keys/:id/entitlements', async (req, res) => {
     const originalError = mixedTypes || originals.length > 1
       ? 'EMS returned ambiguous product-key entitlements for this protection key.'
       : originals.length === 0 ? 'EMS did not return the original product-key entitlement for this protection key.' : '';
-    res.json({ original: originalError ? null : originals[0], originalError, updates });
+    res.json({
+      original: originalError ? null : originals[0], originalError, updates,
+      pivotProductIds: formData.pivotProductIds, featureProductIds: formData.featureProductIds,
+    });
   } catch (err) {
     console.error(err.message);
     res.status(err.status === 401 ? 401 : 502).json({ error: err.message });

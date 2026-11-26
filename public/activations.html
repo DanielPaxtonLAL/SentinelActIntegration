@@ -53,6 +53,21 @@
               {{ selectedKey.historyPackage?.loading ? 'Building…' : 'Download V2CP' }}
             </button>
             <p v-if="selectedKey.historyPackage?.error" class="form-error" role="alert">{{ selectedKey.historyPackage.error }}</p>
+            <details class="detail-collapsible" open>
+              <summary>Expected key state</summary>
+              <div>
+                <p>Reconstructed from the original entitlement and generated updates using EMS activation counters. This does not confirm they were applied to the key. Only Standalone, Link and Pivot are reconstructed.</p>
+                <div class="entitlement-detail-fields" role="table" aria-label="Expected key state">
+                  <div v-for="feature in [{ key: 'standalone', label: 'Standalone Irricad' }, { key: 'link', label: 'Link Irricad' }, { key: 'pivot', label: 'Pivot Irricad' }]" :key="feature.key" class="detail-row" role="row">
+                    <div class="detail-label" role="rowheader">{{ feature.label }}</div>
+                    <div class="detail-value" role="cell">
+                      {{ expectedFeatures[feature.key].value }}
+                      <p v-if="expectedFeatures[feature.key].reason" class="form-error" role="status">{{ expectedFeatures[feature.key].reason }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
             <details class="detail-collapsible">
               <summary>Timeline</summary>
               <div>
