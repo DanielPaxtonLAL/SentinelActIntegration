@@ -185,7 +185,7 @@
                   </button>
                   <input type="file" accept=".c2v" hidden :aria-label="'Choose C2V for product key ' + key.productKeyId"
                     @change="activateProductKey(key, $event)">
-                  <p v-if="activationUncertainKeys.includes(key.productKeyId)" class="form-error" role="alert">Activation may have succeeded. Check the Product Keys page for the license before retrying.</p>
+                  <p v-if="activationUncertainKeys.includes(key.productKeyId)" class="form-error" role="alert">Activation may have succeeded. Check the Protection Keys page for the license before retrying.</p>
                   <div class="entitlement-detail-fields" role="table" aria-label="Product key details">
                     <div v-for="field in productKeyFields" :key="field.name" class="detail-row" role="row">
                       <div class="detail-label" role="rowheader">{{ field.label }}</div>

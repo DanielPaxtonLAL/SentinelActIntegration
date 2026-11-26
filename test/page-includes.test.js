@@ -30,11 +30,11 @@ test('shared head, disclaimer and nav are included into pages with the right cur
   assert.doesNotMatch(entitlements, /<!-- include:/);
   assert.match(entitlements, /<link rel="stylesheet" href="\/styles.css">\s*<script src="\/theme.js"><\/script>/);
   assert.match(entitlements, /class="dev-disclaimer">! WARNING: This is the Production EMS !<\/div>/);
-  assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/activations.html">Product Keys<\/a>\s*<a href="\/">Customers<\/a>/);
+  assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/activations.html">Protection Keys<\/a>\s*<a href="\/">Customers<\/a>/);
   const activations = render('activations.html', '/activations.html');
-  assert.match(activations, /<a href="\/activations.html" aria-current="page">Product Keys<\/a>/);
+  assert.match(activations, /<a href="\/activations.html" aria-current="page">Protection Keys<\/a>/);
   assert.match(activations, /Key Details/);
-  assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Product Keys<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
+  assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Protection Keys<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
   for (const [file, route] of [['login.html', '/login.html'], ['entitlements.html', '/entitlements.html'], ['404.html', '/404.html']]) {
     assert.match(render(file, route, true), /! WARNING: This is the Test EMS !/);
     assert.match(render(file, route, false), /! WARNING: This is the Production EMS !/);

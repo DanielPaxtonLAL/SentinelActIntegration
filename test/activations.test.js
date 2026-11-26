@@ -11,12 +11,13 @@ function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
   return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
 }
 
-function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false } = {}) {
+function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false, invalidUpdateProducts = false, additionalOriginal = false } = {}) {
   let handler;
   let pendingUpdatesHandler;
   let historyHandler;
   let historyPackageHandler;
   let keyEntitlementsHandler;
+  let countersHandler;
   const calls = [];
   class EmsClient {
     constructor() {
@@ -60,9 +61,15 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
       calls.push(['details', id]);
       if (updateDetailsError) throw updateDetailsError;
       if (invalidUpdateDetails) return { id, lineItemTypes: [] };
-      return id === '10'
-        ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED' }
-        : { id, lineItemTypes: ['ProtectionKey_Update'], entState: 'DRAFT', refId1: '00123' };
+      return id === '10' || (id === '11' && additionalOriginal)
+        ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED', createDate: '2026-01-01', products: [{ productId: '1', productName: 'Base' }] }
+        : {
+          id, lineItemTypes: ['ProtectionKey_Update'], entState: 'DRAFT', refId1: '00123',
+          products: invalidUpdateProducts ? null : [
+            { productId: '24', productName: 'ADD Link', memorySegments: [{ text: 'not included' }] },
+            { productId: '27', productName: 'REMOVE Pivot' },
+          ],
+        };
     }
     async getProtectionKeyActivationCandidates(id) {
       calls.push(['history-keys', id]);
@@ -110,6 +117,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     get(route, ...handlers) {
       if (route === '/api/activations') handler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/activations') historyHandler = handlers.at(-1);
+      if (route === '/api/protection-keys/:id/update-counters') countersHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/entitlements') keyEntitlementsHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/v2cp') historyPackageHandler = handlers.at(-1);
     },
@@ -139,20 +147,21 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     process: { argv: ['node', 'server.js'], env: { IS_TEST_MODE: 'false', PRODUCTION_EMS_URL: 'https://ems.example', ACT_URL: 'https://act.example' } },
     console: logger,
   });
-  const invoke = async (handlerToCall, params = {}) => {
+  const invoke = async (handlerToCall, params = {}, query = {}) => {
     const res = {
       statusCode: 200,
       set() { return this; },
       status(code) { this.statusCode = code; return this; },
       json(data) { this.body = data; return this; },
     };
-    await handlerToCall({ params, ems: new EmsClient() }, res);
+    await handlerToCall({ params, query, ems: new EmsClient() }, res);
     return { res, calls };
   };
   return {
     load: () => invoke(handler),
     history: (id) => invoke(historyHandler, { id }),
-    keyEntitlements: (id) => invoke(keyEntitlementsHandler, { id }),
+    counters: (id) => invoke(countersHandler, { id }),
+    keyEntitlements: (id, includeOriginal = false) => invoke(keyEntitlementsHandler, { id }, includeOriginal ? { includeOriginal: '1' } : {}),
     historyPackage: (id) => invoke(historyPackageHandler, { id }),
     pendingUpdates: (aid) => invoke(pendingUpdatesHandler, { aid }),
   };
@@ -163,6 +172,9 @@ test('lists only update entitlements associated with the requested protection ke
   assert.equal(res.statusCode, 200);
   assert.deepEqual(Array.from(res.body, (entry) => [entry.id, entry.type, entry.state, entry.refId1]),
     [['20', 3, 'DRAFT', '00123']]);
+  assert.deepEqual(Array.from(res.body[0].products, (product) => [product.productId, product.productName]),
+    [['24', 'ADD Link'], ['27', 'REMOVE Pivot']]);
+  assert.equal(res.body[0].products[0].memorySegments, undefined);
   assert.deepEqual(calls, [['entitlements', '12345'], ['details', '10'], ['details', '20']]);
   const invalid = await activationsRoute().keyEntitlements('bad/id');
   assert.equal(invalid.res.statusCode, 400);
@@ -176,6 +188,27 @@ test('lists only update entitlements associated with the requested protection ke
   const malformed = await activationsRoute({ invalidUpdateDetails: true, logger: { error() {} } }).keyEntitlements('12345');
   assert.equal(malformed.res.statusCode, 502);
   assert.match(malformed.res.body.error, /line item types/);
+  const missingProducts = await activationsRoute({ invalidUpdateProducts: true, logger: { error() {} } }).keyEntitlements('12345');
+  assert.equal(missingProducts.res.statusCode, 502);
+  assert.match(missingProducts.res.body.error, /product list/);
+});
+
+test('timeline includes the original product-key entitlement without changing the update-only response', async () => {
+  const route = activationsRoute();
+  const { res } = await route.keyEntitlements('12345', true);
+  assert.equal(res.body.original.id, '10');
+  assert.equal(res.body.original.type, 2);
+  assert.equal(res.body.original.products[0].productName, 'Base');
+  assert.equal(res.body.originalError, '');
+  assert.equal(res.body.updates[0].id, '20');
+  const missing = await activationsRoute({ associatedIds: ['20'] }).keyEntitlements('12345', true);
+  assert.equal(missing.res.body.original, null);
+  assert.match(missing.res.body.originalError, /did not return/);
+  assert.equal(missing.res.body.updates.length, 1);
+  const ambiguous = await activationsRoute({ associatedIds: ['10', '11', '20'], additionalOriginal: true }).keyEntitlements('12345', true);
+  assert.equal(ambiguous.res.body.original, null);
+  assert.match(ambiguous.res.body.originalError, /ambiguous/);
+  assert.equal(ambiguous.res.body.updates.length, 1);
 });
 
 test('lists activations and keys without IDs regardless of entitlement counts', async () => {
@@ -217,6 +250,17 @@ test('history discovers update licenses, filters other keys and reports missing 
     ['history-other', 'history-unknown', 'history-conflict'].includes(call[1])), false);
   assert.equal(calls.some((call) => call[0] === 'counter' && call[2] === 'history-other'), false);
   assert.equal((await route.history('invalid/key')).res.statusCode, 400);
+});
+
+test('counter endpoint returns scoped history without V2C data', async () => {
+  const { res } = await activationsRoute().counters('12345');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(Array.from(res.body.activations, (item) => [item.entitlementId, item.aid, item.updateCounter]), [
+    ['10', 'history-base', '4'], ['20', 'history-update', null],
+  ]);
+  assert.equal(res.body.activations[0].activationString, undefined);
+  assert.ok(res.body.warnings.length);
+  assert.equal((await activationsRoute().counters('bad/id')).res.statusCode, 400);
 });
 
 test('fetches V2CP using the C2V saved with the activation', async () => {
@@ -266,7 +310,12 @@ test('activations page loads keys without IDs and disables V2CP without a protec
   assert.equal(app.activations[0].aid, null);
   assert.match(html, /class="keys-layout"[\s\S]*class="activation-list"[\s\S]*class="key-details"/);
   assert.match(html, /v-for="key in filteredKeys"[\s\S]*@click="selectKey\(key\)"/);
-  assert.match(html, /v-for="update in sortedUpdates"/);
+  assert.match(html, /v-for="\(entry, index\) in timelineEntries"/);
+  assert.match(html, /<details class="detail-collapsible">\s*<summary>Timeline<\/summary>[\s\S]*class="timeline-entries">[\s\S]*<li v-for="\(entry, index\) in timelineEntries"/);
+  assert.match(html, /v-if="updateTimestamp\(entry\.createDate\) !== null" class="timeline-date"[\s\S]*updateCreatedDate\(entry\.createDate\)/);
+  assert.match(html, /<span class="timeline-dot" aria-hidden="true"><\/span>/);
+  assert.match(html, /<li v-for="\(entry, index\) in timelineEntries"[\s\S]*<details class="detail-collapsible">[\s\S]*<summary>[\s\S]*v-for="\(product, index\) in entry\.products"/);
+  assert.match(html, /No products listed for this entitlement/);
   assert.doesNotMatch(html, /<th>Product key<\/th>/);
   assert.doesNotMatch(html, /<th>License<\/th>|<th>Activation history<\/th>|<th>Activation ID \(AID\)<\/th>/);
   assert.match(html, /No protection key ID available/);
@@ -365,13 +414,18 @@ function definitionForKeys(fetchImpl = async () => {}) {
   return definition;
 }
 
+function timelineResponse(updates, original = { id: '10', type: 2, products: [] }) {
+  return { original, originalError: original ? '' : 'Original unavailable', updates };
+}
+
 test('selected key shows updates and ignores stale responses and missing protection IDs', async () => {
   let resolveFirst;
   const calls = [];
   const definition = definitionForKeys(async (url) => {
     calls.push(url);
     if (url.includes('/123/')) return new Promise((resolve) => { resolveFirst = resolve; });
-    if (url.includes('/456/')) return { ok: true, json: async () => [{ id: '20', type: 3, state: 'DRAFT' }] };
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({ activations: [], warnings: [] }) };
+    if (url.includes('/456/')) return { ok: true, json: async () => timelineResponse([{ id: '20', type: 3, state: 'DRAFT', products: [] }]) };
     return { ok: false, json: async () => ({ error: 'EMS unavailable' }) };
   });
   const app = definition.data();
@@ -379,32 +433,81 @@ test('selected key shows updates and ignores stale responses and missing protect
   await definition.methods.selectKey.call(app, { protectionKeyId: '456' });
   assert.equal(app.updates[0].id, '20');
   assert.equal(app.updatesLoading, false);
-  resolveFirst({ ok: true, json: async () => [{ id: '30', type: 3 }] });
+  resolveFirst({ ok: true, json: async () => timelineResponse([{ id: '30', type: 3, products: [] }]) });
   await first;
   assert.equal(app.updates[0].id, '20');
+  assert.equal(app.originalEntitlement.id, '10');
   await definition.methods.selectKey.call(app, { protectionKeyId: '789' });
   assert.match(app.updatesError, /EMS unavailable/);
   assert.equal(app.updatesLoading, false);
   await definition.methods.selectKey.call(app, { protectionKeyId: '' });
   assert.equal(app.updates.length, 0);
+  assert.equal(app.originalEntitlement, null);
   assert.equal(app.updatesError, '');
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
+});
+
+test('matches unambiguous counters to updates and reports unavailable history', async () => {
+  let mode = 'ok';
+  const updates = [
+    { id: '20', type: 3, products: [] }, { id: '21', type: 3, products: [] },
+    { id: '22', type: 3, products: [] },
+  ];
+  const definition = definitionForKeys(async (url) => {
+    if (url.endsWith('/entitlements?includeOriginal=1')) return { ok: true, json: async () => timelineResponse(updates) };
+    if (mode === 'error') return { ok: false, json: async () => ({ error: 'EMS unavailable' }) };
+    return { ok: true, json: async () => ({
+      warnings: mode === 'warnings' ? ['missing activation'] : [],
+      activations: [
+        { entitlementId: '20', aid: 'a', updateCounter: '12', counterError: null },
+        { entitlementId: '21', aid: 'b', updateCounter: '4', counterError: null },
+        { entitlementId: '21', aid: 'c', updateCounter: '5', counterError: null },
+        { entitlementId: '22', aid: 'd', updateCounter: null, counterError: 'missing' },
+      ],
+    }) };
+  });
+  const app = definition.data();
+  const key = { protectionKeyId: '123' };
+  await definition.methods.selectKey.call(app, key);
+  assert.deepEqual(Array.from(app.updates, (update) => update.updateCounter), ['12', null, null]);
+  assert.match(app.updates[1].counterIssue, /ambiguous/);
+  assert.match(app.updates[2].counterIssue, /lookup failed: missing/);
+  mode = 'warnings';
+  await definition.methods.selectKey.call(app, key);
+  assert.match(app.counterWarning, /missing activation/);
+  assert.equal(app.updates[0].updateCounter, undefined);
+  mode = 'error';
+  await definition.methods.selectKey.call(app, key);
+  assert.match(app.counterWarning, /EMS unavailable/);
+  assert.equal(app.updates.length, 3);
+  assert.equal(app.updatesLoading, false);
 });
 
 test('key update lookup supports empty results and retry after malformed data', async () => {
   let valid = false;
   const definition = definitionForKeys(async () => ({
-    ok: true, json: async () => valid ? [] : [{ id: '20', type: 2 }],
+    ok: true, json: async () => timelineResponse(valid ? [] : [{ id: '20', type: 2 }]),
   }));
   const app = definition.data();
   const key = { protectionKeyId: '123' };
   await definition.methods.selectKey.call(app, key);
-  assert.match(app.updatesError, /invalid key updates/);
+  assert.match(app.updatesError, /invalid key timeline data/);
   valid = true;
   await definition.methods.selectKey.call(app, key);
   assert.equal(app.updatesError, '');
   assert.equal(app.updates.length, 0);
+  assert.equal(app.originalEntitlement.id, '10');
   assert.equal(app.updatesLoading, false);
+});
+
+test('places the original entitlement after the sorted updates', () => {
+  const definition = definitionForKeys();
+  const original = { id: '10', type: 2, createDate: '2024-01-01' };
+  const updates = [{ id: '20', type: 3 }, { id: '30', type: 3 }];
+  const entries = definition.computed.timelineEntries.call({ originalEntitlement: original, sortedUpdates: updates });
+  assert.deepEqual(Array.from(entries, (entry) => entry.id), ['20', '30', '10']);
+  const withoutOriginal = definition.computed.timelineEntries.call({ originalEntitlement: null, sortedUpdates: updates });
+  assert.deepEqual(Array.from(withoutOriginal, (entry) => entry.id), ['20', '30']);
 });
 
 test('orders updates newest first by creation instant, with invalid or missing dates last', () => {
@@ -425,6 +528,20 @@ test('orders updates newest first by creation instant, with invalid or missing d
   assert.equal(definition.methods.updateCreatedDate.call(app, '2026-02-01T10:00:00+13:00'), '31-01-2026 21:00:00');
   assert.equal(definition.methods.updateCreatedDate.call(app, '2026-02-30'), 'Unavailable');
   assert.deepEqual(app.updates.map((update) => update.id), ['1', '2', '3', '4', '5', '6']);
+});
+
+test('orders by descending update counter before falling back to creation date', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updateTimestamp: definition.methods.updateTimestamp,
+    updates: [
+      { id: '1', updateCounter: '2', createDate: '2026-03-01' },
+      { id: '2', updateCounter: '100000000000000000000', createDate: '2026-01-01' },
+      { id: '3', createDate: '2026-05-01' },
+      { id: '4', createDate: '2026-04-01' },
+    ],
+  };
+  assert.deepEqual(Array.from(definition.computed.sortedUpdates.call(app), (update) => update.id), ['2', '1', '3', '4']);
 });
 
 test('builds a V2CP from key history in counter order with numbered V2Cs', async () => {

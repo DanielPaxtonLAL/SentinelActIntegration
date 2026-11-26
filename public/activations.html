@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <!-- include: head -->
-  <title>EMS Product Keys</title>
+  <title>EMS Protection Keys</title>
 </head>
 <body>
   <main id="app" class="activations-page" v-cloak>
     <!-- include: disclaimer -->
     <header class="app-header">
-      <h1>Product Keys</h1>
+      <h1>Protection Keys</h1>
       <div class="header-actions">
         <div :class="{ error: Boolean(error) }" role="status" aria-live="polite">{{ status }}</div>
         <button type="button" class="button--view" @click="loadActivations" :disabled="loading">Reload</button>
@@ -53,18 +53,48 @@
               {{ selectedKey.historyPackage?.loading ? 'Building…' : 'Download V2CP' }}
             </button>
             <p v-if="selectedKey.historyPackage?.error" class="form-error" role="alert">{{ selectedKey.historyPackage.error }}</p>
-            <h3>Protection key updates</h3>
-            <p v-if="updatesLoading" role="status">Loading key updates…</p>
-            <p v-else-if="updatesError" class="form-error" role="alert">{{ updatesError }}
-              <button type="button" @click="selectKey(selectedKey)">Retry</button>
-            </p>
-            <p v-else-if="!updates.length">No associated key updates found.</p>
-            <ul v-else>
-              <li v-for="update in sortedUpdates" :key="update.id">
-                Entitlement {{ update.id }} — {{ displayValue(update.state) }}<span v-if="update.refId1"> — {{ update.refId1 }}</span>
-                <div>Created (UTC): {{ updateCreatedDate(update.createDate) }}</div>
-              </li>
-            </ul>
+            <details class="detail-collapsible">
+              <summary>Timeline</summary>
+              <div>
+                <h3>Entitlement history</h3>
+                <p v-if="updatesLoading" role="status">Loading timeline…</p>
+                <p v-else-if="updatesError" class="form-error" role="alert">{{ updatesError }}
+                  <button type="button" @click="selectKey(selectedKey)">Retry</button>
+                </p>
+                <template v-else>
+                  <p v-if="originalError" class="form-error" role="alert">{{ originalError }}
+                    <button type="button" @click="selectKey(selectedKey)">Retry</button>
+                  </p>
+                  <p v-if="counterWarning" class="form-error" role="alert">{{ counterWarning }}
+                    <button type="button" @click="selectKey(selectedKey)">Retry</button>
+                  </p>
+                  <p>Creation dates are shown in UTC. Updates without a counter are listed last by creation date.</p>
+                  <ol v-if="timelineEntries.length" class="timeline-entries">
+                    <li v-for="(entry, index) in timelineEntries" :key="entry.type + ':' + entry.id" class="timeline-entry"
+                      :class="{ 'timeline-product-key': entry.type === 2, 'timeline-to-product-key': entry.type === 3 && index === timelineEntries.length - 2 && originalEntitlement }">
+                      <span v-if="updateTimestamp(entry.createDate) !== null" class="timeline-date"
+                        :aria-label="'Created (UTC): ' + updateCreatedDate(entry.createDate)">{{ updateCreatedDate(entry.createDate) }}</span>
+                      <span class="timeline-dot" aria-hidden="true"></span>
+                      <details class="detail-collapsible">
+                        <summary>{{ entry.type === 2 ? 'Product key entitlement' : 'Key update entitlement' }} {{ entry.id }} — {{ displayValue(entry.state) }}<span v-if="entry.refId1"> — {{ entry.refId1 }}</span></summary>
+                        <p v-if="entry.type === 3">Update counter: {{ entry.updateCounter ?? 'Unavailable' }}</p>
+                        <p v-if="entry.counterIssue" class="form-error" role="alert">{{ entry.counterIssue }}
+                          <button type="button" @click="selectKey(selectedKey)">Retry</button>
+                        </p>
+                        <p>Created (UTC): {{ updateCreatedDate(entry.createDate) }}</p>
+                        <p v-if="!entry.products.length">No products listed for this entitlement.</p>
+                        <ul v-else>
+                          <li v-for="(product, index) in entry.products" :key="index">
+                            {{ displayValue(product.productName) }} (ID: {{ displayValue(product.productId) }})
+                          </li>
+                        </ul>
+                      </details>
+                    </li>
+                  </ol>
+                  <p v-if="!updates.length">No associated key updates found.</p>
+                </template>
+              </div>
+            </details>
           </template>
           <p v-else>No protection key ID available. Key updates and V2CP are unavailable.</p>
         </template>
