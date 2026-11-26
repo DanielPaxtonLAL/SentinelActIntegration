@@ -40,7 +40,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     async getProductKeysForActivations(id) {
       calls.push(['keys', id]);
       return id === '1' ? [
-        { productKeyId: 'key-001', entitlementId: id, customerName: 'Acme', totalEntitled: '2', available: '0', activationIds: ['aid-001', 'aid-002'] },
+        { productKeyId: 'key-001', entitlementId: id, customerName: 'Acme', serialNumber: '06001', serialError: '', totalEntitled: '2', available: '0', activationIds: ['aid-001', 'aid-002'] },
         { productKeyId: 'key-006', entitlementId: id, customerName: 'Acme', totalEntitled: '1', available: '0', activationIds: ['aid-001'] },
       ] : id === '2' ? [
         { productKeyId: 'key-002', entitlementId: id, totalEntitled: '1', available: '0', activationIds: ['aid-003'] },
@@ -68,7 +68,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
       if (updateDetailsError) throw updateDetailsError;
       if (invalidUpdateDetails) return { id, lineItemTypes: [] };
       return id === '10' || (id === '11' && additionalOriginal)
-        ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED', createDate: '2026-01-01', products: [{ productId: '1', productName: 'Base' }] }
+        ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED', createDate: '2026-01-01', products: [{ productId: '1', productName: 'Base', memorySegments: [{ name: 'Serial Number', text: '31373731', saot: true }] }] }
         : {
           id, lineItemTypes: ['ProtectionKey_Update'], entState: 'DRAFT', refId1: '00123',
           ...updateDescription,
@@ -144,7 +144,10 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     if (name === 'fs') return { existsSync: () => false, watch() {} };
     if (name === './ems-client') return { EmsClient };
     if (name === './act-client') return { ActClient: class {} };
-    if (name === './entitlement-form-data') return { loadFormData: () => ({ pivotProductIds: featureProductIds.pivot, featureProductIds }) };
+    if (name === './entitlement-form-data') return { loadFormData: () => ({
+      pivotProductIds: featureProductIds.pivot, featureProductIds, baseProductId: '1',
+      versionProducts: [{ id: '21' }], lease: { id: '34' },
+    }) };
     if (name.startsWith('.')) return require(path.resolve(root, 'src', name));
     return require(name);
   };
@@ -211,6 +214,10 @@ test('timeline includes the original product-key entitlement without changing th
   assert.equal(res.body.original.id, '10');
   assert.equal(res.body.original.type, 2);
   assert.equal(res.body.original.products[0].productName, 'Base');
+  assert.equal(res.body.original.products[0].memorySegments[0].text, '31373731');
+  assert.equal(res.body.baseProductId, '1');
+  assert.equal(res.body.versionProductIds[0], '21');
+  assert.equal(res.body.leaseProductId, '34');
   assert.equal(res.body.originalError, '');
   assert.equal(res.body.updates[0].id, '20');
   assert.equal(res.body.pivotProductIds.add, '22');
@@ -240,6 +247,8 @@ test('lists activations and keys without IDs regardless of entitlement counts', 
     [null, 'key-005', 'Other customer'],
   ]);
   assert.equal(res.body.activations[4].activationString, null);
+  assert.equal(res.body.activations[0].serialNumber, '06001');
+  assert.equal(res.body.activations[0].serialError, '');
   assert.deepEqual(calls, [
     ['keys', '1'],
     ['keys', '2'],
@@ -320,10 +329,16 @@ test('activations page loads keys without IDs and disables V2CP without a protec
   const app = definition.data();
   app.groupKeys = definition.methods.groupKeys;
   app.selectKey = definition.methods.selectKey;
+  app.loadCurrentCustomers = definition.methods.loadCurrentCustomers;
   await definition.methods.loadActivations.call(app);
   assert.equal(app.activations[0].productKeyId, 'key-1');
   assert.equal(app.activations[0].aid, null);
   assert.match(html, /class="keys-layout"[\s\S]*class="activation-list"[\s\S]*class="key-details"/);
+  assert.match(html, /<h2>\{\{ selectedKey\.currentCustomer\.value \}\} - \{\{ displayValue\(selectedKey\.protectionKeyId\) \}\} - \{\{ selectedKey\.serialNumber \|\| 'Unavailable' \}\} - Details<\/h2>/);
+  assert.match(html, /<template v-if="selectedKey\.protectionKeyId">\s*<div class="entitlement-detail-fields" role="table" aria-label="Expected key state">/);
+  assert.doesNotMatch(html, /<summary>Expected key state<\/summary>|<p>Customer:|<p>Product key:|<p>Protection key ID:/);
+  assert.match(html, /<div class="detail-footer">\s*<p class="detail-footnote">\* Derived from base product memory and version modification writes\.<\/p>/);
+  assert.doesNotMatch(html, /This does not confirm they were applied to the key/);
   assert.match(html, /v-for="key in filteredKeys"[\s\S]*@click="selectKey\(key\)"/);
   assert.match(html, /v-for="\(entry, index\) in timelineEntries"/);
   assert.match(html, /<details class="detail-collapsible">\s*<summary>Timeline<\/summary>[\s\S]*class="timeline-entries">[\s\S]*<li v-for="\(entry, index\) in timelineEntries"/);
@@ -338,6 +353,12 @@ test('activations page loads keys without IDs and disables V2CP without a protec
   assert.doesNotMatch(html, /<th>License<\/th>|<th>Activation history<\/th>|<th>Activation ID \(AID\)<\/th>/);
   assert.match(html, /No protection key ID available/);
   assert.doesNotMatch(html, /missingActivationIds/);
+});
+
+test('key details use the same desktop scroll panel as entitlement details', () => {
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /@media \(min-width: 641px\)\s*\{\s*\.entitlements-page \.entitlement-details,\s*\.activations-page \.key-details\s*\{\s*max-height: calc\(100vh - 11rem\);\s*overflow-y: auto;/);
+  assert.match(styles, /\.entitlements-page \.detail-footnote,\s*\.activations-page \.detail-footnote\s*\{\s*margin: 0;\s*font-size: \.75rem;/);
 });
 
 test('downloads V2CP for the chosen protection key and surfaces errors', async () => {
@@ -407,19 +428,38 @@ test('downloads V2CP for the chosen protection key and surfaces errors', async (
 
 test('groups by protection key, preserves unactivated product keys, and filters all identifiers', () => {
   const keys = definitionForKeys().methods.groupKeys([
-    { protectionKeyId: '123', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-a' },
-    { protectionKeyId: '123', productKeyId: 'product-b', customerName: 'Acme', aid: 'aid-b' },
-    { protectionKeyId: '456', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-c' },
-    { productKeyId: 'product-c', customerName: 'Other' },
+    { protectionKeyId: '123', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-a', serialNumber: '06001' },
+    { protectionKeyId: '123', productKeyId: 'product-b', customerName: 'Acme', aid: 'aid-b', serialNumber: '06001' },
+    { protectionKeyId: '456', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-c', serialNumber: '06001' },
+    { productKeyId: 'product-c', customerName: 'Other', serialError: 'Missing serial memory.' },
   ]);
   assert.equal(keys.length, 3);
   assert.deepEqual(Array.from(keys[0].productKeyIds), ['product-a', 'product-b']);
   assert.deepEqual(Array.from(keys[0].activationIds), ['aid-a', 'aid-b']);
   assert.equal(keys[2].protectionKeyId, '');
+  assert.equal(keys[0].serialNumber, '06001');
+  assert.match(keys[2].serialError, /Missing serial/);
   const app = { keys, filter: 'aid-b' };
   assert.equal(definitionForKeys().computed.filteredKeys.call(app)[0].groupId, 'protection:123');
   app.filter = 'product-c';
   assert.equal(definitionForKeys().computed.filteredKeys.call(app)[0].groupId, 'product:product-c');
+  app.filter = '06001';
+  assert.equal(definitionForKeys().computed.filteredKeys.call(app).length, 2);
+  const conflicting = definitionForKeys().methods.groupKeys([
+    { protectionKeyId: '123', productKeyId: 'product-a', serialNumber: '06001' },
+    { protectionKeyId: '123', productKeyId: 'product-b', serialNumber: '06002' },
+  ]);
+  assert.equal(conflicting[0].serialNumber, null);
+  assert.match(conflicting[0].serialError, /Conflicting/);
+  const missing = definitionForKeys().methods.groupKeys([
+    { protectionKeyId: '123', productKeyId: 'product-a', serialNumber: '06001' },
+    { protectionKeyId: '123', productKeyId: 'product-b', serialError: 'Missing serial memory.' },
+  ]);
+  assert.equal(missing[0].serialNumber, null);
+  assert.match(missing[0].serialError, /Missing serial/);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.match(html, /<th>Serial Number<\/th>/);
+  assert.match(html, /key\.serialNumber \|\| 'Unavailable'/);
 });
 
 function definitionForKeys(fetchImpl = async () => {}) {
@@ -427,6 +467,7 @@ function definitionForKeys(fetchImpl = async () => {}) {
   const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
   vm.runInNewContext(script, {
     fetch: (...args) => fetchImpl(...args),
+    EntitlementValues: require('../public/entitlement-values'),
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   return definition;
@@ -435,6 +476,289 @@ function definitionForKeys(fetchImpl = async () => {}) {
 function timelineResponse(updates, original = { id: '10', type: 2, products: [] }) {
   return { original, originalError: original ? '' : 'Original unavailable', updates };
 }
+
+test('reconstructs serial and expiry from base memory and applies version modifications', async () => {
+  const base = { productId: '1', memorySegments: [
+    { name: 'Serial Number', saot: true, text: '30344432' },
+    { name: 'Expiry Date', text: '00000000' },
+    { name: 'Version', offset: '0x0000', size: '4', text: '45423544' },
+  ] };
+  const definition = definitionForKeys(async (url) => {
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [
+        { entitlementId: '10', aid: 'base', updateCounter: '0' },
+        { entitlementId: '20', aid: 'update', updateCounter: '1' },
+      ],
+    }) };
+    if (url === '/api/catalog/products/21/read-only-memory') return { ok: true, json: async () => [{
+      kind: 'product', segments: [{ offset: '0', size: '4', saot: false, content: '45373735' }],
+    }] };
+    return { ok: true, json: async () => ({
+      ...timelineResponse([{ id: '20', type: 3, products: [{ productId: '21' }, { productId: '27' }] }],
+        { id: '10', type: 2, customer: 'Original', products: [base, { productId: '25' }, { productId: '22' }] }),
+      featureProductIds, baseProductId: '1', versionProductIds: ['21'], leaseProductId: '34',
+    }) };
+  });
+  const app = definition.data();
+  await definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+  const values = definition.computed.expectedMemory.call(app);
+  assert.equal(values.serial.value, '01234');
+  assert.equal(values.expiry.value, '0000');
+  assert.equal(values.version.value, 'v23');
+  assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'No');
+  assert.equal(definition.methods.formatMemoryDate('2024-02-29'), '29-02-2024');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.match(html, /Serial Number\*[\s\S]*expectedMemory\.serial\.value/);
+  assert.match(html, /Lease Expiry Date\*[\s\S]*expectedMemory\.expiry\.value/);
+  assert.match(html, /Irricad Version\*[\s\S]*expectedMemory\.version\.value/);
+});
+
+test('uses the last base memory and reports uncertain memory writes', () => {
+  const definition = definitionForKeys();
+  const base = (serial, expiry, version) => ({ productId: '1', memorySegments: [
+    { name: 'Serial Number', saot: true, text: serial },
+    { name: 'Expiry Date', text: expiry },
+    { name: 'Version', offset: '0', size: '4', text: version },
+  ] });
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    featureProductIds, memoryConfig: { baseProductId: '1', versionProductIds: ['21'], leaseProductId: '34' },
+    versionProductMemory: { 21: { files: [{ kind: 'product', segments: [
+      { offset: '0', size: '4', saot: false, content: '45373735' },
+    ] }] } },
+    originalEntitlement: { id: '10', type: 2, products: [base('30344432', '30303030', '45423544')] },
+    updates: [
+      { id: '20', type: 3, products: [{ productId: '21' }] },
+      { id: '21', type: 3, products: [base('31373731', '35383544', '45423544')] },
+    ],
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'first', updateCounter: '1' },
+      { entitlementId: '21', aid: 'second', updateCounter: '2' },
+    ] },
+  };
+  const check = () => definition.computed.expectedMemory.call(app);
+  assert.equal(check().serial.value, '06001');
+  assert.equal(check().expiry.value, '2024-02-29');
+  assert.equal(check().version.value, 'v22');
+  app.counterHistory.activations[1].updateCounter = '2';
+  app.counterHistory.activations[2].updateCounter = '1';
+  assert.equal(check().version.value, 'v23');
+  app.versionProductMemory[21] = { error: 'EMS unavailable' };
+  assert.match(check().version.reason, /EMS unavailable/);
+  assert.equal(check().serial.value, '06001');
+  app.versionProductMemory[21] = { files: [{ kind: 'product', segments: [
+    { offset: '0', size: '2', saot: false, content: '4537' },
+  ] }] };
+  assert.match(check().version.reason, /complete fixed Version write/);
+  app.updates[0].products = [{ productId: '999' }];
+  assert.match(check().serial.reason, /unsupported/);
+  app.updates[0].products = [{ productId: '34' }];
+  assert.match(check().expiry.reason, /lease update/);
+  app.updates[0].products = [];
+  assert.match(check().serial.reason, /products are missing/);
+  app.memoryConfig.leaseProductId = '21';
+  assert.match(check().serial.reason, /configuration is invalid or ambiguous/);
+  app.memoryConfig.leaseProductId = '34';
+  app.counterHistory.activations[1].updateCounter = null;
+  assert.match(check().serial.reason, /missing or ambiguous/);
+});
+
+test('ignores a version memory response after selecting another key', async () => {
+  let releaseMemory;
+  let memoryRequested;
+  const requested = new Promise((resolve) => { memoryRequested = resolve; });
+  const delayedMemory = new Promise((resolve) => { releaseMemory = resolve; });
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/catalog/products/21/read-only-memory') {
+      memoryRequested();
+      return delayedMemory;
+    }
+    const first = url.includes('/111/');
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [{ entitlementId: first ? '10' : '11', aid: 'base', updateCounter: '0' }],
+    }) };
+    return { ok: true, json: async () => ({
+      ...timelineResponse([], { id: first ? '10' : '11', type: 2, customer: 'Customer',
+        products: [{ productId: '1' }, ...(first ? [{ productId: '21' }] : [])] }),
+      featureProductIds, baseProductId: '1', versionProductIds: ['21'], leaseProductId: '34',
+    }) };
+  });
+  const app = definition.data();
+  const first = definition.methods.selectKey.call(app, { protectionKeyId: '111' });
+  await requested;
+  await definition.methods.selectKey.call(app, { protectionKeyId: '222' });
+  releaseMemory({ ok: true, json: async () => [{ kind: 'product', segments: [] }] });
+  await first;
+  assert.equal(app.selectedKey.protectionKeyId, '222');
+  assert.equal(app.originalEntitlement.id, '11');
+  assert.equal(Object.keys(app.versionProductMemory).length, 0);
+  assert.equal(app.updatesLoading, false);
+});
+
+test('shows the customer of the latest update by counter, or the original with no updates', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    originalEntitlement: { id: '10', customer: 'Original', products: [] },
+    updates: [
+      { id: '20', customer: 'First update', products: [{ productId: '999' }], createDate: '2026-03-01' },
+      { id: '21', customer: 'Latest update', products: [], createDate: '2026-01-01' },
+    ],
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'first', updateCounter: '1' },
+      { entitlementId: '21', aid: 'last', updateCounter: '2' },
+    ] },
+  };
+  const check = () => definition.computed.expectedCustomer.call(app);
+  assert.equal(check().value, 'Latest update');
+  app.counterHistory.activations[2].updateCounter = '1';
+  assert.match(check().reason, /sequence/);
+  app.counterHistory.activations[2].updateCounter = null;
+  assert.match(check().reason, /missing or ambiguous/);
+  app.updates = [];
+  app.counterHistory.activations = [app.counterHistory.activations[0]];
+  assert.equal(check().value, 'Original');
+  app.originalEntitlement.customer = '';
+  assert.match(check().reason, /customer is unavailable/);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.match(html, /role="rowheader">Customer<\/div>[\s\S]*expectedCustomer\.value/);
+});
+
+test('key list loads the latest counter-ordered customer and reports incomplete history', async () => {
+  let customerCalls = 0;
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/customers') {
+      customerCalls++;
+      return { ok: true, json: async () => [{ customerId: '5', name: 'Latest customer' }] };
+    }
+    const key = /protection-keys\/(\d+)\//.exec(url)[1];
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: key === '333' ? ['missing activation'] : [],
+      activations: key === '222' ? [{ entitlementId: '10', aid: 'base', updateCounter: '0' }] : [
+        { entitlementId: '10', aid: 'base', updateCounter: '0' },
+        { entitlementId: '20', aid: 'first', updateCounter: '1' },
+        { entitlementId: '21', aid: 'latest', updateCounter: '2' },
+      ],
+    }) };
+    return { ok: true, json: async () => ({
+      ...timelineResponse(key === '222' ? [] : [
+        { id: '20', type: 3, customer: 'Older update', products: [], createDate: '2026-03-01' },
+        { id: '21', type: 3, customerId: '5', products: [], createDate: '2026-01-01' },
+      ], { id: '10', type: 2, customer: 'Original customer', products: [] }),
+    }) };
+  });
+  const app = definition.data();
+  app.listRequest = 1;
+  const keys = definition.methods.groupKeys([
+    { protectionKeyId: '111', productKeyId: 'a', customerName: 'Original customer' },
+    { protectionKeyId: '222', productKeyId: 'b', customerName: 'Original customer' },
+    { protectionKeyId: '333', productKeyId: 'c', customerName: 'Original customer' },
+    { productKeyId: 'd', customerName: 'Unactivated customer' },
+  ]);
+  await definition.methods.loadCurrentCustomers.call(app, keys, 1);
+  assert.equal(keys[0].currentCustomer.value, 'Latest customer');
+  assert.equal(keys[1].currentCustomer.value, 'Original customer');
+  assert.equal(keys[2].currentCustomer.value, 'Unavailable');
+  assert.match(keys[2].currentCustomer.reason, /counter history/i);
+  assert.equal(keys[3].currentCustomer.value, 'Unactivated customer');
+  assert.equal(customerCalls, 1);
+  const filtered = definition.computed.filteredKeys.call({ keys, filter: 'latest customer' });
+  assert.equal(filtered[0].groupId, 'protection:111');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.match(html, /<th>Current customer<\/th>/);
+  assert.match(html, /key\.currentCustomer\.value/);
+});
+
+test('key list customer lookup failures and stale reloads are handled explicitly', async () => {
+  let releaseCustomer;
+  let requested;
+  const customerRequested = new Promise((resolve) => { requested = resolve; });
+  let mode = 'error';
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/customers') {
+      if (mode === 'error') return { ok: false, json: async () => ({ error: 'EMS unavailable' }) };
+      requested();
+      return new Promise((resolve) => { releaseCustomer = resolve; });
+    }
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [{ entitlementId: '10', aid: 'base', updateCounter: '0' }],
+    }) };
+    return { ok: true, json: async () => timelineResponse([],
+      { id: '10', type: 2, customerId: '5', products: [] }) };
+  });
+  const app = definition.data();
+  app.listRequest = 1;
+  const keys = definition.methods.groupKeys([{ protectionKeyId: '111', productKeyId: 'a' }]);
+  await definition.methods.loadCurrentCustomers.call(app, keys, 1);
+  assert.equal(keys[0].currentCustomer.value, 'Unavailable');
+  assert.match(keys[0].currentCustomer.reason, /EMS unavailable/);
+  mode = 'delayed';
+  const stale = definition.methods.loadCurrentCustomers.call(app, keys, 1);
+  await customerRequested;
+  app.listRequest = 2;
+  releaseCustomer({ ok: true, json: async () => [{ customerId: '5', name: 'Stale customer' }] });
+  await stale;
+  assert.equal(keys[0].currentCustomer.value, 'Unavailable');
+});
+
+test('resolves the latest entitlement customer ID and surfaces lookup failures', async () => {
+  let mode = 'ok';
+  const calls = [];
+  const definition = definitionForKeys(async (url) => {
+    calls.push(url);
+    if (url === '/api/customers') {
+      if (mode === 'error') return { ok: false, json: async () => ({ error: 'EMS unavailable' }) };
+      return { ok: true, json: async () => mode === 'missing' ? [] : [{ customerId: '5', name: 'Latest customer' }] };
+    }
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [
+        { entitlementId: '10', aid: 'base', updateCounter: '0' },
+        { entitlementId: '20', aid: 'update', updateCounter: '1' },
+      ],
+    }) };
+    return { ok: true, json: async () => ({
+      ...timelineResponse([{ id: '20', type: 3, customerId: 5, products: [{ productId: '27' }] }],
+        { id: '10', type: 2, customer: 'Original', products: [{ productId: '1' }] }),
+      featureProductIds,
+    }) };
+  });
+  const app = definition.data();
+  for (mode of ['ok', 'missing', 'error']) {
+    await definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+    const result = definition.computed.expectedCustomer.call(app);
+    if (mode === 'ok') assert.equal(result.value, 'Latest customer');
+    else {
+      assert.equal(result.value, 'Unavailable');
+      assert.match(result.reason, mode === 'missing' ? /not found/ : /EMS unavailable/);
+    }
+    assert.equal(definition.computed.expectedFeatures.call(app).pivot.value, 'No');
+  }
+  assert.equal(calls.filter((url) => url === '/api/customers').length, 3);
+});
+
+test('ignores a customer lookup for a previously selected key', async () => {
+  let resolveFirstCustomer;
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/customers') return new Promise((resolve) => { resolveFirstCustomer = resolve; });
+    if (url.endsWith('/update-counters')) return { ok: true, json: async () => ({
+      warnings: [], activations: [{ entitlementId: '10', aid: 'base', updateCounter: '0' }],
+    }) };
+    const original = url.includes('/123/')
+      ? { id: '10', type: 2, customerId: '5', products: [{ productId: '1' }] }
+      : { id: '10', type: 2, customer: 'Second customer', products: [{ productId: '1' }] };
+    return { ok: true, json: async () => ({ ...timelineResponse([], original), featureProductIds }) };
+  });
+  const app = definition.data();
+  const first = definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+  await new Promise((resolve) => setImmediate(resolve));
+  await definition.methods.selectKey.call(app, { protectionKeyId: '456' });
+  resolveFirstCustomer({ ok: true, json: async () => [{ customerId: '5', name: 'First customer' }] });
+  await first;
+  assert.equal(definition.computed.expectedCustomer.call(app).value, 'Second customer');
+  assert.equal(app.customerLookup, null);
+});
 
 test('reconstructs Pivot from the original and the last counter-ordered update', async () => {
   const updates = [
@@ -558,6 +882,43 @@ test('reconstructs independent features through mixed updates in counter order',
   assert.equal(check().link.value, 'Yes');
   app.updates[0].products.push({ productId: '999' });
   assert.match(check().link.reason, /unsupported/);
+});
+
+test('reconstructs lease presence from the original and updates without a removal', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updatesLoading: false, updatesError: '', originalError: '', counterWarning: '',
+    featureProductIds, memoryConfig: { baseProductId: '1', versionProductIds: ['21'], leaseProductId: '34' },
+    originalEntitlement: { id: '10', products: [{ productId: '1' }, { productId: '22' }] },
+    updates: [
+      { id: '20', products: [{ productId: '27' }] },
+      { id: '21', products: [{ productId: '21' }] },
+    ],
+    counterHistory: { warnings: [], activations: [
+      { entitlementId: '10', aid: 'base', updateCounter: '0' },
+      { entitlementId: '20', aid: 'first', updateCounter: '1' },
+      { entitlementId: '21', aid: 'second', updateCounter: '2' },
+    ] },
+  };
+  const check = () => definition.computed.expectedFeatures.call(app);
+  assert.equal(check().lease.value, 'No');
+  app.originalEntitlement.products.push({ productId: '34' });
+  assert.equal(check().lease.value, 'Yes');
+  app.originalEntitlement.products.pop();
+  app.updates[0].products.push({ productId: '1' }, { productId: '34' });
+  assert.equal(check().lease.value, 'Yes');
+  assert.equal(check().pivot.value, 'No');
+  app.updates[1].products.push({ productId: '999' });
+  assert.match(check().lease.reason, /unsupported/);
+  app.updates[1].products.pop();
+  app.updates[0].products.pop();
+  app.memoryConfig.leaseProductId = '';
+  assert.match(check().lease.reason, /not configured/);
+  app.memoryConfig.leaseProductId = '34';
+  app.counterHistory.activations[1].updateCounter = null;
+  assert.match(check().lease.reason, /missing or ambiguous/);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.match(html, /key: 'lease', label: 'Lease Irricad'/);
 });
 
 test('reports missing and ambiguous feature configuration without guessing', () => {

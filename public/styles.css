@@ -452,9 +452,9 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlement-detail-fields .detail-row { display: table-row; }
 .entitlement-detail-fields .detail-row > div { display: table-cell; padding: .5rem .75rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow-wrap: anywhere; }
 .entitlement-detail-fields .detail-label { width: 1%; white-space: nowrap; color: var(--color-text-muted); }
-.entitlements-page .detail-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .5rem; }
+.entitlements-page .detail-footer, .activations-page .detail-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .5rem; }
 .entitlements-page .detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
-.entitlements-page .detail-footnote { margin: 0; font-size: .75rem; color: var(--color-text-muted); }
+.entitlements-page .detail-footnote, .activations-page .detail-footnote { margin: 0; font-size: .75rem; color: var(--color-text-muted); }
 .entitlements-page .create-entitlement-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
 .entitlements-page .create-entitlement-toolbar h2 { margin: 0; font-size: 1.1rem; }
 .entitlements-page .entitlement-form { display: grid; gap: 1rem; padding: 1.25rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); }
@@ -694,7 +694,8 @@ td { overflow-wrap: anywhere; }
 .entitlements-page .search-filter-controls option[value="product-key"] { background: var(--entitlement-product-key-color); color: #000; }
 .entitlements-page .search-filter-controls option[value="key-update"] { background: var(--entitlement-key-update-color); color: #000; }
 @media (min-width: 641px) {
-  .entitlements-page .entitlement-details { max-height: calc(100vh - 11rem); overflow-y: auto; }
+  .entitlements-page .entitlement-details,
+  .activations-page .key-details { max-height: calc(100vh - 11rem); overflow-y: auto; }
 }
 .entitlements-page .danger-zone { border-color: var(--color-error); }
 .entitlements-page .danger-zone > summary { background: var(--color-error); color: var(--button-text-on-color); }

@@ -1,5 +1,6 @@
 const { XMLParser, XMLBuilder, XMLValidator } = require('fast-xml-parser');
 const { buildEntitlementXml } = require('./entitlement-xml');
+const { decodeSerialNumber } = require('../public/entitlement-values');
 
 /** Collect activation IDs from EMS responses whose nesting varies by endpoint. */
 function findActivationIds(value, ids = new Set()) {
@@ -514,7 +515,7 @@ class EmsClient {
   }
 
   /** Parse an entitlement and merge its saved segment values with product metadata. */
-  async getEntitlementDetails(id, { includeCustomer = true } = {}) {
+  async getEntitlementDetails(id, { includeCustomer = true, includeProductKeyIds = false } = {}) {
     const xml = await this.getEntitlement(id);
     const parsed = new XMLParser({
       ignoreAttributes: false, attributeNamePrefix: '',
@@ -541,6 +542,7 @@ class EmsClient {
       );
       return productList.filter((product) => product && typeof product === 'object').map((product) => ({
         lineItemType: item?.lineItemType,
+        ...(includeProductKeyIds ? { productKeyIds: asList(item?.productKeyId) } : {}),
         productId: product.productId,
         productName: product.product?.productName ?? product.productName,
         memorySegments: asList(product.product?.memorySegment)
@@ -549,8 +551,8 @@ class EmsClient {
             const entitlementSegment = entitlementMemorySegments.find((memorySegment) =>
               String(memorySegment.prdMemorySegmentId ?? memorySegment.productMemorySegmentId ?? '') === String(segment.id)
             );
-            const text = entitlementSegment?.data ?? entitlementSegment?.text ??
-              entitlementSegment?.content ?? segment.text ?? segment.content;
+            const savedText = entitlementSegment?.data ?? entitlementSegment?.text ?? entitlementSegment?.content;
+            const text = savedText ?? segment.text ?? segment.content;
             return {
               id: String(segment.id),
               name: segment.name,
@@ -586,9 +588,27 @@ class EmsClient {
   }
 
   /** Find existing product keys regardless of entitlement state for activation discovery. */
-  async getProductKeysForActivations(id) {
-    const entitlement = await this.getEntitlementDetails(id, { includeCustomer: false });
-    return this._getEntitlementProductKeys(id, entitlement, true);
+  async getProductKeysForActivations(id, { baseProductId } = {}) {
+    const entitlement = await this.getEntitlementDetails(id, {
+      includeCustomer: false, ...(baseProductId ? { includeProductKeyIds: true } : {}),
+    });
+    const keys = await this._getEntitlementProductKeys(id, entitlement, true);
+    if (!baseProductId) return keys;
+    const items = Array.isArray(entitlement.entitlementItem) ? entitlement.entitlementItem : [entitlement.entitlementItem];
+    return keys.map((key) => {
+      const matchingItems = items.filter((item) => item?.lineItemType === 'Product_Key' &&
+        (Array.isArray(item.productKeyId) ? item.productKeyId : [item.productKeyId]).includes(key.productKeyId));
+      const bases = (entitlement.products || []).filter((product) =>
+        product.lineItemType === 'Product_Key' && String(product.productId) === String(baseProductId) &&
+        Array.isArray(product.productKeyIds) && product.productKeyIds.includes(key.productKeyId));
+      if (matchingItems.length !== 1 || bases.length !== 1 || !Array.isArray(bases[0].memorySegments)) {
+        return { ...key, serialNumber: null, serialError: 'Original base product memory is missing or ambiguous.' };
+      }
+      const serial = decodeSerialNumber(bases[0].memorySegments);
+      return serial === 'Unavailable'
+        ? { ...key, serialNumber: null, serialError: 'Original Serial Number memory is missing or invalid.' }
+        : { ...key, serialNumber: serial, serialError: '' };
+    });
   }
 
   async _getEntitlementProductKeys(id, entitlement, existingOnly, includeUpdates = false) {

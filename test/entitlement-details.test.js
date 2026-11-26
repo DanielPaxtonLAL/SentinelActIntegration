@@ -29,6 +29,7 @@ vm.runInNewContext(v2cpDownloadScript + '\n' + script, {
   window: pageWindow,
   document: pageDocument,
   URLSearchParams,
+  EntitlementValues: require('../public/entitlement-values'),
   Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
 });
 

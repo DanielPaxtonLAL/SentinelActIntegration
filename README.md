@@ -35,7 +35,7 @@ Run:
 ```
  The "next-serial-number-customer-id" values select the customer whose Ref ID 1 stores the next number as JSON, for example, `{"NextSerial": "06003"}`.
  After EMS and Act! authentication, login checks all entitlement pages and sets this value to one above the highest serial number, with a minimum of 06001. Login fails if the check cannot be completed.
- The Protection Keys page reconstructs the expected Standalone, Link and Pivot states using their configured add/remove IDs and EMS activation counters. It does not confirm that updates have been applied; incomplete or unsupported history is shown as unavailable.
+ The Protection Keys list shows each key's serial number from its original product-key entitlement and the customer of its latest update (or the original customer if there are no updates); missing or conflicting data is reported as unavailable. The details reconstruct expected Standalone, Link, Pivot, Lease, serial, expiry and version values using EMS activation counters, base memory and current version-product definitions. Lease remains present once added because no lease removal modification is configured. This does not confirm that updates have been applied; incomplete or unsupported history is shown as unavailable.
 
 #### 5. Lastly, run with:
 ```powershell

@@ -103,6 +103,39 @@ test('discovers existing product keys across entitlement states without changing
   assert.deepEqual(await client.getProductKeysForActivations('123'), []);
 });
 
+test('associates original serial memory with each product key line item', async () => {
+  const client = createClient();
+  const item = (key, serial) => `<entitlementItem><lineItemType>Product_Key</lineItemType><productKeyId>${key}</productKeyId>
+    <memorySegments><segment><prdMemorySegmentId>91</prdMemorySegmentId><data>${serial}</data></segment></memorySegments>
+    <itemProduct><productId>60</productId><product><memorySegment><id>91</id><name>Serial Number</name>
+    <saot>true</saot><text>30303030</text></memorySegment></product></itemProduct></entitlementItem>`;
+  let xml = `<entitlement>${item('key-001', '31373731')}${item('key-002', '31373732')}</entitlement>`;
+  client.getEntitlementDetails = EmsClient.prototype.getEntitlementDetails;
+  client.getEntitlement = async () => xml;
+  client._fetch = async (url) => ({
+    ok: true, text: async () => url.includes('key-002') ? responseXml.replace('key-001', 'key-002') : responseXml,
+  });
+  let keys = await client.getProductKeysForActivations('123', { baseProductId: '60' });
+  assert.deepEqual(keys.map((key) => key.serialNumber), ['06001', '06002']);
+  xml = `<entitlement>${item('key-001', '31373731')}${item('key-001', '31373732')}</entitlement>`;
+  keys = await client.getProductKeysForActivations('123', { baseProductId: '60' });
+  assert.equal(keys[0].serialNumber, null);
+  assert.match(keys[0].serialError, /ambiguous/);
+  xml = `<entitlement>${item('key-001', 'not-hex')}</entitlement>`;
+  keys = await client.getProductKeysForActivations('123', { baseProductId: '60' });
+  assert.equal(keys[0].serialNumber, null);
+  assert.match(keys[0].serialError, /missing or invalid/);
+  xml = `<entitlement>${item('key-001', '31373731')
+    .replace(/<memorySegments>[\s\S]*?<\/memorySegments>/, '')
+    .replace('<text>30303030</text>', '<text>31373731</text>')}</entitlement>`;
+  keys = await client.getProductKeysForActivations('123', { baseProductId: '60' });
+  const details = await client.getEntitlementDetails('123', { includeCustomer: false });
+  const { decodeSerialNumber } = require('../public/entitlement-values');
+  assert.equal(keys[0].serialNumber, decodeSerialNumber(details.products[0].memorySegments));
+  assert.equal(keys[0].serialNumber, '06001');
+  assert.equal(keys[0].serialError, '');
+});
+
 test('discovers update product keys for history and reports missing update keys', async () => {
   const client = createClient();
   client.getEntitlementDetails = async () => ({ entitlementItem: [

@@ -336,7 +336,7 @@ app.get('/api/activations', async (req, res) => {
       const batch = await Promise.all(entitlements.slice(index, index + 10).map(async (entitlement) => ({
         entitlement,
         productKeys: await withSession(ems, () => ems.getProductKeysForActivations(
-          entitlement.id ?? entitlement.entitlementId
+          entitlement.id ?? entitlement.entitlementId, { baseProductId: formData.baseProductId }
         )),
       })));
       keys.push(...batch.flatMap(({ entitlement, productKeys }) => productKeys.map((key) => ({
@@ -368,6 +368,8 @@ app.get('/api/activations', async (req, res) => {
       productKeyId: key.productKeyId,
       entitlementId: key.entitlementId,
       customerName: key.customerName ?? entitlement.customerName ?? entitlement.customer,
+      serialNumber: key.serialNumber,
+      serialError: key.serialError,
     }));
     res.json({ activations });
   } catch (err) {
@@ -511,7 +513,9 @@ app.get('/api/protection-keys/:id/entitlements', async (req, res) => {
             description: entitlement.description || entitlement.descr || '',
             customer: entitlement.customer,
             customerId: entitlement.customerId,
-            products: entitlement.products.map(({ productId, productName }) => ({ productId, productName })),
+            products: entitlement.products.map(({ productId, productName, memorySegments }) => ({
+              productId, productName, ...(includeOriginal ? { memorySegments } : {}),
+            })),
           };
           if (isUpdate) updates.push({ ...entry, type: 3 });
           if (includeOriginal && isOriginal && !isUpdate) originals.push({ ...entry, type: 2 });
@@ -525,6 +529,8 @@ app.get('/api/protection-keys/:id/entitlements', async (req, res) => {
     res.json({
       original: originalError ? null : originals[0], originalError, updates,
       pivotProductIds: formData.pivotProductIds, featureProductIds: formData.featureProductIds,
+      baseProductId: formData.baseProductId, versionProductIds: formData.versionProducts.map((product) => product.id),
+      leaseProductId: formData.lease.id,
     });
   } catch (err) {
     console.error(err.message);

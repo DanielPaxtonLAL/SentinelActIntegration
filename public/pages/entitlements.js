@@ -115,46 +115,14 @@ createApp({
       return base?.memorySegments || [];
     },
     selectedSerialNumber() {
-      const segments = this.baseMemorySegments.filter((segment) =>
-        segment.saot && typeof segment.name === 'string' &&
-        segment.name.trim().toLowerCase() === 'serial number'
-      );
-      if (segments.length !== 1) return 'Unavailable';
-      const text = String(segments[0].text ?? '').trim();
-      if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return 'Unavailable';
-      const digits = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
-      if (!/^[0-9a-f]+$/i.test(digits)) return 'Unavailable';
-      return BigInt(`0x${digits}`).toString().padStart(5, '0');
+      return EntitlementValues.decodeSerialNumber(this.baseMemorySegments);
     },
     selectedExpiryDate() {
       const hasLeaseProduct = (this.selectedEntitlement?.products || []).some((product) =>
         String(product.productId) === String(this.selectedEntitlement.leaseProductId)
       );
       if (!hasLeaseProduct) return 'N/A (Not Lease)';
-      const segments = this.baseMemorySegments.filter((segment) =>
-        typeof segment.name === 'string' &&
-        segment.name.trim().toLowerCase() === 'expiry date'
-      );
-      if (segments.length !== 1) return 'Unavailable';
-      const text = String(segments[0].text ?? '').trim();
-      if (!/^(?:[0-9a-f]{2})+$/i.test(text)) return 'Unavailable';
-      const candidates = [];
-      const decoded = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
-      if (/^[0-9a-f]{4}$/i.test(decoded)) candidates.push(parseInt(decoded, 16));
-      const raw = parseInt(text, 16);
-      if (text.length <= 8 && raw <= 0xFFFF) candidates.push(raw);
-      for (const value of candidates) {
-        const year = (value >> 9) + 1980;
-        const month = (value >> 5) & 0xF;
-        const day = value & 0x1F;
-        const date = new Date(Date.UTC(year, month - 1, day));
-        if (value && month >= 1 && month <= 12 && day >= 1 &&
-            date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 &&
-            date.getUTCDate() === day) {
-          return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        }
-      }
-      return 'Unavailable';
+      return EntitlementValues.decodeExpiryDate(this.baseMemorySegments);
     },
     selectedProductAttributes() {
       const products = this.selectedEntitlement?.products || [];
@@ -166,16 +134,7 @@ createApp({
     },
     decodedVersion() {
       if (this.versionError) return this.versionError;
-      const segments = this.baseMemorySegments.filter((segment) =>
-        typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'version'
-      );
-      if (!segments.length) return 'Unavailable';
-      if (segments.length !== 1) return 'Invalid version data';
-      const text = String((this.versionMemory ? this.versionMemory.content : segments[0].text) ?? '').trim();
-      if (!/^[0-9a-f]{8}$/i.test(text)) return 'Invalid version data';
-      const versionHex = text.match(/../g).map((pair) => String.fromCharCode(parseInt(pair, 16))).join('');
-      if (!/^[0-9a-f]{4}$/i.test(versionHex)) return 'Invalid version data';
-      return 'v' + ((parseInt(versionHex, 16) ^ 0xBEAD) / 1000);
+      return EntitlementValues.decodeVersion(this.baseMemorySegments, this.versionMemory);
     },
     entitlementStatuses() {
       return [...new Set([
@@ -552,40 +511,11 @@ createApp({
       if (!selected.length) return;
       if (selected.length !== 1) throw new Error('multiple version products are selected');
       const base = entitlement.products.find((product) => String(product.productId) === String(entitlement.baseProductId));
-      const versions = (base?.memorySegments || []).filter((segment) =>
-        typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'version'
-      );
-      if (versions.length !== 1) throw new Error('the base Version segment is missing or ambiguous');
-      const offset = (value) => {
-        const text = String(value ?? '').trim();
-        return /^(?:0x[0-9a-f]+|\d+)$/i.test(text) ? Number(text) : NaN;
-      };
-      const baseOffset = offset(versions[0].offset);
-      const baseSize = Number(versions[0].size);
-      if (!Number.isSafeInteger(baseOffset) || !Number.isSafeInteger(baseSize) || baseSize !== 4) {
-        throw new Error('the base Version segment has invalid memory metadata');
-      }
+      EntitlementValues.versionSegmentRange(base?.memorySegments || []);
       const response = await fetch(`/api/catalog/products/${encodeURIComponent(selected[0].productId)}/read-only-memory`);
       const files = await response.json();
       if (!response.ok) throw new Error(files.error || response.statusText);
-      if (!Array.isArray(files)) throw new Error('invalid version product memory');
-      const writes = files.filter((file) => file.kind === 'product').flatMap((file) => {
-        if (!Array.isArray(file.segments)) throw new Error('invalid version product memory segments');
-        return file.segments;
-      });
-      const overlaps = writes.filter((segment) => {
-        const start = offset(segment.offset);
-        const size = Number(segment.size);
-        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(size) || size <= 0) {
-          throw new Error('invalid version product memory metadata');
-        }
-        return start < baseOffset + baseSize && baseOffset < start + size;
-      });
-      if (overlaps.length !== 1 || offset(overlaps[0].offset) !== baseOffset ||
-          Number(overlaps[0].size) !== baseSize || overlaps[0].saot !== false) {
-        throw new Error('the version product does not contain one complete fixed Version write');
-      }
-      return overlaps[0];
+      return EntitlementValues.versionWrite(base?.memorySegments || [], files);
     },
     async loadCustomers() {
       this.customersLoading = true;
