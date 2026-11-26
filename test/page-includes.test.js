@@ -33,7 +33,7 @@ test('shared head, disclaimer and nav are included into pages with the right cur
   assert.match(entitlements, /<a href="\/entitlements.html" aria-current="page">Entitlements<\/a>\s*<a href="\/activations.html">Product Keys<\/a>\s*<a href="\/">Customers<\/a>/);
   const activations = render('activations.html', '/activations.html');
   assert.match(activations, /<a href="\/activations.html" aria-current="page">Product Keys<\/a>/);
-  assert.match(activations, /Product keys and activations/);
+  assert.match(activations, /Key Details/);
   assert.match(render('index.html', '/'), /<a href="\/entitlements.html">Entitlements<\/a>\s*<a href="\/activations.html">Product Keys<\/a>\s*<a href="\/" aria-current="page">Customers<\/a>/);
   for (const [file, route] of [['login.html', '/login.html'], ['entitlements.html', '/entitlements.html'], ['404.html', '/404.html']]) {
     assert.match(render(file, route, true), /! WARNING: This is the Test EMS !/);

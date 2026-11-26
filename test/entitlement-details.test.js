@@ -356,6 +356,56 @@ test('completed entitlement downloads a V2CP and discards results after selectio
   assert.match(app.historyPackages['12345'].error, /incomplete history/);
 });
 
+test('loads associated updates on demand and ignores results from a previous selection', async () => {
+  const app = definition.data();
+  app.detailRequest = 1;
+  fetchMemory = async (url) => {
+    assert.equal(url, '/api/protection-keys/12345/entitlements');
+    return { ok: true, json: async () => [{ id: '20', type: 3, state: 'DRAFT' }] };
+  };
+  await definition.methods.loadKeyUpdates.call(app, '12345');
+  assert.equal(app.keyUpdates['12345'].updates[0].id, '20');
+  assert.equal(app.keyUpdates['12345'].loading, false);
+  fetchMemory = async () => ({ ok: false, json: async () => ({ error: 'EMS unavailable' }) });
+  await definition.methods.loadKeyUpdates.call(app, '12345');
+  assert.match(app.keyUpdates['12345'].error, /EMS unavailable/);
+  fetchMemory = async () => {
+    app.detailRequest++;
+    app.keyUpdates = {};
+    return { ok: true, json: async () => [{ id: '20', type: 3 }] };
+  };
+  await definition.methods.loadKeyUpdates.call(app, '12345');
+  assert.equal(app.keyUpdates['12345'], undefined);
+  assert.match(html, /Protection key updates/);
+  assert.match(html, /@click="openEntitlementDetails\(update\)"/);
+  assert.match(html, /v-for="\(entitlement, index\) in sortedEntitlements"/);
+});
+
+test('key update completion and errors publish reactive state changes', async () => {
+  const app = definition.data();
+  const writes = [];
+  app.keyUpdates = new Proxy({}, {
+    set(target, property, value) {
+      writes.push({ loading: value.loading, error: value.error, count: value.updates.length });
+      target[property] = value;
+      return true;
+    },
+  });
+  fetchMemory = async () => ({ ok: true, json: async () => [{ id: '20', type: 3 }] });
+  await definition.methods.loadKeyUpdates.call(app, '12345');
+  assert.deepEqual(writes, [
+    { loading: true, error: '', count: 0 },
+    { loading: false, error: '', count: 1 },
+  ]);
+  writes.length = 0;
+  fetchMemory = async () => ({ ok: false, json: async () => ({ error: 'EMS unavailable' }) });
+  await definition.methods.loadKeyUpdates.call(app, '12345');
+  assert.deepEqual(writes, [
+    { loading: true, error: '', count: 0 },
+    { loading: false, error: 'Failed to load key updates: EMS unavailable', count: 0 },
+  ]);
+});
+
 test('product key link downloads the exact key with a safe customer filename', () => {
   const { productKeyDownloadUrl, productKeyFilename } = definition.methods;
   const key = { productKeyId: '0001-ab&cd', customerName: 'Example / Co' };

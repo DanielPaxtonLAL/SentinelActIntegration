@@ -10,12 +10,20 @@ function productIdFor(option, name, isTestMode) {
   if (!option || typeof option !== 'object' || Array.isArray(option)) {
     throw new Error(`entitlement form data: "${name}" must contain test and production product IDs`);
   }
-  for (const key of [TEST_PRODUCT_ID, PRODUCTION_PRODUCT_ID]) {
+  const usesAddRemove = ['add-test', 'remove-test', 'add-production', 'remove-production']
+    .some((key) => Object.hasOwn(option, key));
+  const keys = usesAddRemove
+    ? ['add-test', 'remove-test', 'add-production', 'remove-production']
+    : [TEST_PRODUCT_ID, PRODUCTION_PRODUCT_ID];
+  for (const key of keys) {
     if (typeof option[key] !== 'string' || (option[key].trim() !== '' && !isProductId(option[key].trim()))) {
       throw new Error(`entitlement form data: "${name}.${key}" must be an empty string or a positive product ID`);
     }
   }
-  return option[isTestMode ? TEST_PRODUCT_ID : PRODUCTION_PRODUCT_ID].trim();
+  const selectedKey = usesAddRemove
+    ? (isTestMode ? 'add-test' : 'add-production')
+    : (isTestMode ? TEST_PRODUCT_ID : PRODUCTION_PRODUCT_ID);
+  return option[selectedKey].trim();
 }
 
 // Keys starting with "_" are comments. Everything else in a group is an option.

@@ -16,35 +16,59 @@
       </div>
     </header>
     <!-- include: nav -->
-    <section class="activation-list">
-      <div class="activation-list-tools">
-        <h2>Product keys and activations ({{ filteredActivations.length }})</h2>
-        <input v-model.trim="filter" type="search" placeholder="Filter activations"
-          aria-label="Filter activations by customer, product key, Activation ID, or protection key">
+    <section class="keys-layout">
+      <div class="activation-list">
+        <div class="activation-list-tools">
+          <h2>Keys ({{ filteredKeys.length }})</h2>
+          <input v-model.trim="filter" type="search" placeholder="Filter keys"
+            aria-label="Filter keys by customer, product key, Activation ID, or protection key">
+        </div>
+        <p v-if="error" class="form-error" role="alert">{{ error }}</p>
+        <p v-if="!error && loading" role="status">Loading activations…</p>
+        <p v-else-if="!error && !filteredKeys.length">{{ filter ? 'No matching records.' : 'No product keys or activations found.' }}</p>
+        <div v-else-if="!error && !loading" class="table-wrap key-list">
+          <table>
+            <thead><tr><th>Customer</th><th>Protection key ID</th></tr></thead>
+            <tbody>
+              <tr v-for="key in filteredKeys" :key="key.groupId" class="key-row"
+                :class="{ selected: selectedKey && selectedKey.groupId === key.groupId }"
+                role="button" tabindex="0" :aria-pressed="Boolean(selectedKey && selectedKey.groupId === key.groupId)"
+                :aria-label="'View key ' + displayValue(key.protectionKeyId || key.productKeyIds.join(', '))"
+                @click="selectKey(key)" @keydown.enter.prevent="selectKey(key)" @keydown.space.prevent="selectKey(key)">
+                <td>{{ displayValue(key.customerNames.join(', ')) }}</td>
+                <td>{{ displayValue(key.protectionKeyId) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-      <p v-if="error" class="form-error" role="alert">{{ error }}</p>
-      <p v-if="!error && loading" role="status">Loading activations…</p>
-      <p v-else-if="!error && !filteredActivations.length">{{ filter ? 'No matching records.' : 'No product keys or activations found.' }}</p>
-      <div v-else-if="!error && !loading" class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Customer</th><th>Product key</th><th>Protection key ID</th><th>V2CP</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="activation in filteredActivations" :key="activation.productKeyId + ':' + (activation.aid || '')">
-              <td>{{ displayValue(activation.customerName) }}</td>
-              <td>{{ displayValue(activation.productKeyId) }}</td>
-              <td>{{ displayValue(activation.protectionKeyId) }}</td>
-              <td>
-                <button type="button" :disabled="!activation.protectionKeyId || activation.historyPackage?.loading" @click="fetchHistoryPackage(activation)">
-                  {{ activation.historyPackage?.loading ? 'Building…' : 'Download V2CP' }}
-                </button>
-                <span v-if="!activation.protectionKeyId">No protection key ID available</span>
-                <p v-if="activation.historyPackage?.error" class="form-error" role="alert">{{ activation.historyPackage.error }}</p>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="key-details" aria-live="polite">
+        <template v-if="selectedKey">
+          <h2>Key Details</h2>
+          <p>Customer: {{ displayValue(selectedKey.customerNames.join(', ')) }}</p>
+          <p>Product key: {{ displayValue(selectedKey.productKeyIds.join(', ')) }}</p>
+          <p>Protection key ID: {{ displayValue(selectedKey.protectionKeyId) }}</p>
+          <template v-if="selectedKey.protectionKeyId">
+            <button type="button" :disabled="selectedKey.historyPackage?.loading" @click="fetchHistoryPackage(selectedKey)">
+              {{ selectedKey.historyPackage?.loading ? 'Building…' : 'Download V2CP' }}
+            </button>
+            <p v-if="selectedKey.historyPackage?.error" class="form-error" role="alert">{{ selectedKey.historyPackage.error }}</p>
+            <h3>Protection key updates</h3>
+            <p v-if="updatesLoading" role="status">Loading key updates…</p>
+            <p v-else-if="updatesError" class="form-error" role="alert">{{ updatesError }}
+              <button type="button" @click="selectKey(selectedKey)">Retry</button>
+            </p>
+            <p v-else-if="!updates.length">No associated key updates found.</p>
+            <ul v-else>
+              <li v-for="update in sortedUpdates" :key="update.id">
+                Entitlement {{ update.id }} — {{ displayValue(update.state) }}<span v-if="update.refId1"> — {{ update.refId1 }}</span>
+                <div>Created (UTC): {{ updateCreatedDate(update.createDate) }}</div>
+              </li>
+            </ul>
+          </template>
+          <p v-else>No protection key ID available. Key updates and V2CP are unavailable.</p>
+        </template>
+        <p v-else>Select a key to view its details.</p>
       </div>
     </section>
   </main>

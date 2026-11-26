@@ -94,3 +94,17 @@ test('requires valid IDs for both servers and an explicit mode', () => {
   assert.throws(() => parseFormData(required, true), /lease/);
   assert.throws(() => parseFormData(valid()), /test mode must be a boolean/);
 });
+
+test('accepts add/remove product IDs while validating both environments', () => {
+  const data = valid();
+  data['product-options'].a = {
+    label: 'A', 'add-test': '2', 'remove-test': '', 'add-production': '12', 'remove-production': '29',
+  };
+  assert.equal(parseFormData(data, true).accessProducts[0].id, '2');
+  assert.equal(parseFormData(data, false).accessProducts[0].id, '12');
+  data['product-options'].a['remove-test'] = 'invalid';
+  assert.throws(() => parseFormData(data, false), /remove-test/);
+  data['product-options'].a['remove-test'] = '';
+  delete data['product-options'].a['remove-production'];
+  assert.throws(() => parseFormData(data, true), /remove-production/);
+});

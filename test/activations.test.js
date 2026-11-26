@@ -11,11 +11,12 @@ function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
   return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
 }
 
-function activationsRoute({ c2vError, logger = console, validHistory = false } = {}) {
+function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false } = {}) {
   let handler;
   let pendingUpdatesHandler;
   let historyHandler;
   let historyPackageHandler;
+  let keyEntitlementsHandler;
   const calls = [];
   class EmsClient {
     constructor() {
@@ -51,8 +52,17 @@ function activationsRoute({ c2vError, logger = console, validHistory = false } =
     }
     async getProtectionKeyEntitlements(id) {
       calls.push(['entitlements', id]);
+      if (associatedIds) return associatedIds;
       if (validHistory) return ['10'];
       return ['10', '20'];
+    }
+    async getEntitlementDetails(id) {
+      calls.push(['details', id]);
+      if (updateDetailsError) throw updateDetailsError;
+      if (invalidUpdateDetails) return { id, lineItemTypes: [] };
+      return id === '10'
+        ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED' }
+        : { id, lineItemTypes: ['ProtectionKey_Update'], entState: 'DRAFT', refId1: '00123' };
     }
     async getProtectionKeyActivationCandidates(id) {
       calls.push(['history-keys', id]);
@@ -100,6 +110,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false } =
     get(route, ...handlers) {
       if (route === '/api/activations') handler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/activations') historyHandler = handlers.at(-1);
+      if (route === '/api/protection-keys/:id/entitlements') keyEntitlementsHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/v2cp') historyPackageHandler = handlers.at(-1);
     },
     post(route, ...handlers) {
@@ -141,10 +152,31 @@ function activationsRoute({ c2vError, logger = console, validHistory = false } =
   return {
     load: () => invoke(handler),
     history: (id) => invoke(historyHandler, { id }),
+    keyEntitlements: (id) => invoke(keyEntitlementsHandler, { id }),
     historyPackage: (id) => invoke(historyPackageHandler, { id }),
     pendingUpdates: (aid) => invoke(pendingUpdatesHandler, { aid }),
   };
 }
+
+test('lists only update entitlements associated with the requested protection key', async () => {
+  const { res, calls } = await activationsRoute().keyEntitlements('12345');
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(Array.from(res.body, (entry) => [entry.id, entry.type, entry.state, entry.refId1]),
+    [['20', 3, 'DRAFT', '00123']]);
+  assert.deepEqual(calls, [['entitlements', '12345'], ['details', '10'], ['details', '20']]);
+  const invalid = await activationsRoute().keyEntitlements('bad/id');
+  assert.equal(invalid.res.statusCode, 400);
+  assert.equal(invalid.calls.length, 0);
+  const failure = await activationsRoute({ updateDetailsError: new Error('lookup failed'), logger: { error() {} } }).keyEntitlements('12345');
+  assert.equal(failure.res.statusCode, 502);
+  assert.match(failure.res.body.error, /lookup failed/);
+  const empty = await activationsRoute({ associatedIds: [] }).keyEntitlements('12345');
+  assert.equal(empty.res.statusCode, 200);
+  assert.equal(empty.res.body.length, 0);
+  const malformed = await activationsRoute({ invalidUpdateDetails: true, logger: { error() {} } }).keyEntitlements('12345');
+  assert.equal(malformed.res.statusCode, 502);
+  assert.match(malformed.res.body.error, /line item types/);
+});
 
 test('lists activations and keys without IDs regardless of entitlement counts', async () => {
   const route = activationsRoute();
@@ -227,9 +259,15 @@ test('activations page loads keys without IDs and disables V2CP without a protec
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   const app = definition.data();
+  app.groupKeys = definition.methods.groupKeys;
+  app.selectKey = definition.methods.selectKey;
   await definition.methods.loadActivations.call(app);
   assert.equal(app.activations[0].productKeyId, 'key-1');
   assert.equal(app.activations[0].aid, null);
+  assert.match(html, /class="keys-layout"[\s\S]*class="activation-list"[\s\S]*class="key-details"/);
+  assert.match(html, /v-for="key in filteredKeys"[\s\S]*@click="selectKey\(key\)"/);
+  assert.match(html, /v-for="update in sortedUpdates"/);
+  assert.doesNotMatch(html, /<th>Product key<\/th>/);
   assert.doesNotMatch(html, /<th>License<\/th>|<th>Activation history<\/th>|<th>Activation ID \(AID\)<\/th>/);
   assert.match(html, /No protection key ID available/);
   assert.doesNotMatch(html, /missingActivationIds/);
@@ -281,8 +319,8 @@ test('downloads V2CP for the chosen protection key and surfaces errors', async (
   assert.equal(removed, 1);
   assert.equal(first.historyPackage.loading, false);
   assert.equal(other.historyPackage, undefined);
-  assert.match(html, /@click="fetchHistoryPackage\(activation\)"/);
-  assert.match(html, /:disabled="!activation\.protectionKeyId \|\| activation\.historyPackage\?\.loading"/);
+  assert.match(html, /@click="fetchHistoryPackage\(selectedKey\)"/);
+  assert.match(html, /v-if="selectedKey\.protectionKeyId"[\s\S]*?:disabled="selectedKey\.historyPackage\?\.loading"/);
   assert.match(html, /Download V2CP/);
   assert.doesNotMatch(html, /historyPackage\?\.package/);
   assert.equal(calls, 1);
@@ -298,6 +336,95 @@ test('downloads V2CP for the chosen protection key and surfaces errors', async (
   await definition.methods.fetchHistoryPackage.call(definition.methods, first);
   assert.match(first.historyPackage.error, /Download failed/);
   assert.equal(removed, 2);
+});
+
+test('groups by protection key, preserves unactivated product keys, and filters all identifiers', () => {
+  const keys = definitionForKeys().methods.groupKeys([
+    { protectionKeyId: '123', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-a' },
+    { protectionKeyId: '123', productKeyId: 'product-b', customerName: 'Acme', aid: 'aid-b' },
+    { protectionKeyId: '456', productKeyId: 'product-a', customerName: 'Acme', aid: 'aid-c' },
+    { productKeyId: 'product-c', customerName: 'Other' },
+  ]);
+  assert.equal(keys.length, 3);
+  assert.deepEqual(Array.from(keys[0].productKeyIds), ['product-a', 'product-b']);
+  assert.deepEqual(Array.from(keys[0].activationIds), ['aid-a', 'aid-b']);
+  assert.equal(keys[2].protectionKeyId, '');
+  const app = { keys, filter: 'aid-b' };
+  assert.equal(definitionForKeys().computed.filteredKeys.call(app)[0].groupId, 'protection:123');
+  app.filter = 'product-c';
+  assert.equal(definitionForKeys().computed.filteredKeys.call(app)[0].groupId, 'product:product-c');
+});
+
+function definitionForKeys(fetchImpl = async () => {}) {
+  let definition;
+  const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
+  vm.runInNewContext(script, {
+    fetch: (...args) => fetchImpl(...args),
+    Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
+  });
+  return definition;
+}
+
+test('selected key shows updates and ignores stale responses and missing protection IDs', async () => {
+  let resolveFirst;
+  const calls = [];
+  const definition = definitionForKeys(async (url) => {
+    calls.push(url);
+    if (url.includes('/123/')) return new Promise((resolve) => { resolveFirst = resolve; });
+    if (url.includes('/456/')) return { ok: true, json: async () => [{ id: '20', type: 3, state: 'DRAFT' }] };
+    return { ok: false, json: async () => ({ error: 'EMS unavailable' }) };
+  });
+  const app = definition.data();
+  const first = definition.methods.selectKey.call(app, { protectionKeyId: '123' });
+  await definition.methods.selectKey.call(app, { protectionKeyId: '456' });
+  assert.equal(app.updates[0].id, '20');
+  assert.equal(app.updatesLoading, false);
+  resolveFirst({ ok: true, json: async () => [{ id: '30', type: 3 }] });
+  await first;
+  assert.equal(app.updates[0].id, '20');
+  await definition.methods.selectKey.call(app, { protectionKeyId: '789' });
+  assert.match(app.updatesError, /EMS unavailable/);
+  assert.equal(app.updatesLoading, false);
+  await definition.methods.selectKey.call(app, { protectionKeyId: '' });
+  assert.equal(app.updates.length, 0);
+  assert.equal(app.updatesError, '');
+  assert.equal(calls.length, 3);
+});
+
+test('key update lookup supports empty results and retry after malformed data', async () => {
+  let valid = false;
+  const definition = definitionForKeys(async () => ({
+    ok: true, json: async () => valid ? [] : [{ id: '20', type: 2 }],
+  }));
+  const app = definition.data();
+  const key = { protectionKeyId: '123' };
+  await definition.methods.selectKey.call(app, key);
+  assert.match(app.updatesError, /invalid key updates/);
+  valid = true;
+  await definition.methods.selectKey.call(app, key);
+  assert.equal(app.updatesError, '');
+  assert.equal(app.updates.length, 0);
+  assert.equal(app.updatesLoading, false);
+});
+
+test('orders updates newest first by creation instant, with invalid or missing dates last', () => {
+  const definition = definitionForKeys();
+  const app = {
+    updateTimestamp: definition.methods.updateTimestamp,
+    updates: [
+      { id: '1', createDate: '2026-01-01' },
+      { id: '2', createDate: '2026-02-01T10:00:00+13:00' },
+      { id: '3', createDate: '2026-01-31T23:00:00Z' },
+      { id: '4', createDate: '2026-02-30' },
+      { id: '5' },
+      { id: '6', createDate: '2026-01-31T23:00:00Z' },
+    ],
+  };
+  assert.deepEqual(Array.from(definition.computed.sortedUpdates.call(app), (update) => update.id),
+    ['3', '6', '2', '1', '4', '5']);
+  assert.equal(definition.methods.updateCreatedDate.call(app, '2026-02-01T10:00:00+13:00'), '31-01-2026 21:00:00');
+  assert.equal(definition.methods.updateCreatedDate.call(app, '2026-02-30'), 'Unavailable');
+  assert.deepEqual(app.updates.map((update) => update.id), ['1', '2', '3', '4', '5', '6']);
 });
 
 test('builds a V2CP from key history in counter order with numbered V2Cs', async () => {

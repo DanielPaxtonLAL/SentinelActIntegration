@@ -603,12 +603,22 @@ td { overflow-wrap: anywhere; }
   .custom-entities-page table { display: block; overflow-x: auto; }
 }
 .entitlements-page .entitlement-form .product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
-.activations-page .activation-list { padding: 1rem; }
+.activations-page .keys-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(20rem, 1fr); gap: 1rem; align-items: start; padding: 1rem; }
+.activations-page .activation-list { min-width: 0; }
 .activations-page .activation-list-tools { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; }
 .activations-page .activation-list-tools h2 { margin: 0; font-size: 1.1rem; }
 .activations-page .activation-list-tools input { width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
 .activations-page .table-wrap { overflow-x: auto; }
+.activations-page .key-list { max-height: calc(100vh - 14rem); overflow: auto; }
+.activations-page .key-list table { width: 100%; }
+.activations-page .key-list th { position: sticky; top: 0; z-index: 1; }
+.activations-page .key-row { cursor: pointer; }
+.activations-page .key-row:hover, .activations-page .key-row:focus { background: var(--color-selected-bg); outline: 2px solid var(--color-selected-outline); outline-offset: -2px; }
+.activations-page .key-row.selected { background: var(--color-selected-strong-bg); font-weight: 600; }
+.activations-page .key-details { min-width: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); overflow-wrap: anywhere; }
+.activations-page .key-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .activations-page td code { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .activations-page .keys-layout { grid-template-columns: minmax(0, 1fr); } .activations-page .activation-list-tools { flex-wrap: wrap; } }
 @media (max-width: 700px) { .entitlements-page .entitlement-form .product-grid { grid-template-columns: 1fr; } }
 .entitlements-page .entitlement-form textarea { resize: none; }
 .entitlements-page .entitlement-list-panel .entitlements-subheading { justify-content: flex-start; }

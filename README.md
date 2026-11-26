@@ -1,34 +1,82 @@
 # Sentinel-EMS - ACT-CRM - Integration
-
+~~Copilot stop adding stuff here~~
 ## Running
-1. Install Node.js 20 or later: `winget install --id OpenJS.NodeJS.LTS --exact`. In a **new terminal**, verify the installation with `node -v` and `npm -v`.
+### Setup
+#### 1. Install Node.js 20 or later:
 
-2. Install the project packages with `npm run install`.
+```powershell
+winget install --id OpenJS.NodeJS.LTS --exact
+```
 
-3. Copy `.env.example` to `.env`. Fill out the fields as required. You may not need to configure the test EMS routes; it's fine to leave them blank. **NOTE**: `PRODUCTION_EMS_INSECURE=1` means we are ignoring the outdated Sentinel-EMS certificate for HTTPS; `0` means we are not expecting a certificate for HTTP. `<mode>_EMS_USER_TYPE` can remain `ISV`. The API version is `v90`.
+Verify the installation in a **new terminal**:
+```powershell
+node -v
+npm -v
+```
+#### 2. Install the project packages using Node Package Manager (npm).
+```powershell
+npm run install
+```
 
-4. Optionally, you may need to adjust `entitlement-form-data.json`. Run `.\config-helper-scripts\get-ems-products.ps1 https://your-ems-host:8080` to get `product_id` values from the EMS. Enter them manually in the JSON file. The `next-serial-number-customer-id` values select the customer whose Ref ID 1 stores the next number as JSON, for example `{"NextSerial":"06003"}`.
+#### 3. Copy the example dotenv to a dotenv file. 
+```powershell
+Copy-Item .\.env.example .\.env
+```
+Fill out the fields as required. You may not need to configure the test EMS routes; it's fine to leave them blank. 
 
-To inspect the raw EMS response for a product key, run `python .\config-helper-scripts\get-ems-product-key.py` and enter the key ID. The script uses the configured EMS mode and prompts for credentials if needed; use `--test` or `--production` to select a mode explicitly. Its output can contain customer and product-key details.
+**NOTES**: **"[mode]_EMS_INSECURE=1"** means we are ignoring the outdated Sentinel-EMS certificate for HTTPS; **"[mode]_EMS_INSECURE=0"** means we are not expecting a certificate for HTTP. **"[mode]_EMS_USER_TYPE"** can remain **"ISV"** (**I**ndependent **S**oftware **V**endor). The API version is **"v90"**.
 
-When serials are first requested after EMS login, the app scans existing base-product entitlements and sets the counter to the highest valid serial number plus one, starting at 06001. Out-of-range values are skipped. New drafts use that number and advance the counter, so gaps are not reused. Serial numbers are padded to five digits.
+#### 4. Optionally, you may need to adjust `.\entitlement-form-data.json`. 
+ To get "product_id" values from the EMS, run the following, then enter them manually in the JSON file.
 
-5. Lastly, run `npm run dev -- --test` or `npm run dev -- --production`. The output will provide links to access the application.
+Run: 
+```powershell
+.\config-helper-scripts\get-ems-products.ps1 https://your-ems-host:8080
+```
+ The "next-serial-number-customer-id" values select the customer whose Ref ID 1 stores the next number as JSON, for example, `{"NextSerial": "06003"}`.
 
-The **Product Keys** tab scans entitlement product keys and retrieves activation details for activation IDs returned by EMS. Keys without a returned activation ID are also listed; they may not be activated.
-Use **Download V2CP** on the Product Keys tab to build and automatically download a package from that key's existing V2Cs in ascending update-counter order. It may contain updates already applied and does not check the current key state. Package creation fails if history has warnings, missing licenses, or counters that do not form a complete sequence starting at zero. This history-based package is constructed locally, not returned by the EMS pending-update service.
-Completed entitlement details also show their product keys and available protection key IDs, with a V2CP download for each protection key.
-Entitlement search and filter selections, including search text, are saved in the browser's local storage and remain after logout. Use Reset to clear them.
-If the saved C2V is invalid XML, the server logs its format, size, validation position and structural clues, without logging its contents.
+#### 5. Lastly, run with:
+```powershell
+npm run dev -- --test
+``` 
+or
+ ```powershell
+npm run dev -- --production
+```
+The output will provide links to access the application.
+
+### Optional
+Debugging Python files exist in **".\config-helper-scripts"**. If you want to run them, you will need a Python 3+ interpreter.
+
+```powershell
+winget install --id Python.Python.3.14 --exact --override "/quiet InstallAllUsers=0 PrependPath=1"
+```
+
+In a new terminal, verify the installation:
+```powershell
+python --version
+```
 
 ## Security
+### HTTP(S) **INSECURE, UNVERIFIED**
 This integration passes authentication along to Sentinel-EMS and ACT!, so communicating with them over HTTP is **INSECURE**.
 
 Sentinel-EMS doesn't have an up-to-date certificate, so the security mode ignores the certificate.
 
+### Credentials
 This root directory should contain no secrets. The ACT! saved password is encrypted with the EMS credentials and stored in the browser's local storage. Inspect this with `inspect|storage|local-storage`.
 
 Sentinel-EMS provides a session cookie, which is stored in your browser's cookies.
 
-`New-NetFirewallRule -DisplayName "Sentinel Integration" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -Profile Domain -RemoteAddress LocalSubnet` will allow other devices to connect to this 
+### Exposing to LAN 
+``` powershell
+New-NetFirewallRule -DisplayName "Sentinel Integration" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 3000 -Profile Domain -RemoteAddress LocalSubnet
+```
+This will allow other devices to connect to the application.
 
+## Test Suite
+After installing the project packages, run the test suite from the project directory:
+
+```powershell
+npm test
+```

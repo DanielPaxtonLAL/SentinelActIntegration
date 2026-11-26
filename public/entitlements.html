@@ -225,6 +225,26 @@
                       {{ historyPackages[id]?.loading ? 'Building…' : 'Download V2CP' }}
                     </button>
                     <p v-if="historyPackages[id]?.error" class="form-error" role="alert">{{ historyPackages[id].error }}</p>
+                    <details v-if="typeMarkerClass(selectedEntitlement.type) === 'product-key'" class="detail-collapsible"
+                      @toggle="$event.target.open && !keyUpdates[id] && loadKeyUpdates(id)">
+                      <summary>Protection key updates</summary>
+                      <p v-if="keyUpdates[id]?.loading" role="status">Loading key updates…</p>
+                      <p v-else-if="keyUpdates[id]?.error" class="form-error" role="alert">
+                        {{ keyUpdates[id].error }} <button type="button" @click="loadKeyUpdates(id)">Retry</button>
+                      </p>
+                      <template v-else-if="keyUpdates[id]">
+                        <p v-if="!keyUpdates[id].updates.length">No associated key updates found.</p>
+                        <ul v-else>
+                          <li v-for="update in keyUpdates[id].updates" :key="update.id">
+                            <button type="button" class="button--view" @click="openEntitlementDetails(update)">
+                              Entitlement {{ update.id }} — {{ displayValue(update.state) }}
+                            </button>
+                            <span v-if="update.createDate">Created {{ formatUtcDate(update.createDate) }} (UTC)</span>
+                            <span v-if="update.refId1"> — {{ update.refId1 }}</span>
+                          </li>
+                        </ul>
+                      </template>
+                    </details>
                   </div>
                 </div>
               </template>

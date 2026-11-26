@@ -12,6 +12,7 @@ createApp({
       productKeyLoading: false,
       productKeyError: '',
       historyPackages: {},
+      keyUpdates: {},
       activating: false,
       activationError: '',
       activationUncertainKeys: [],
@@ -311,6 +312,24 @@ createApp({
         state.loading = false;
       }
     },
+    async loadKeyUpdates(id) {
+      if (this.keyUpdates[id]?.loading) return;
+      this.keyUpdates[id] = { loading: true, error: '', updates: [] };
+      const request = this.detailRequest;
+      try {
+        const response = await fetch(`/api/protection-keys/${encodeURIComponent(id)}/entitlements`, { cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || response.statusText);
+        if (!Array.isArray(data) || data.some((update) =>
+          !update || !/^[1-9]\d*$/.test(String(update.id)) || String(update.type) !== '3'
+        )) throw new Error('The server returned invalid key updates.');
+        if (request === this.detailRequest) this.keyUpdates[id] = { loading: false, error: '', updates: data };
+      } catch (err) {
+        if (request === this.detailRequest) {
+          this.keyUpdates[id] = { loading: false, error: 'Failed to load key updates: ' + err.message, updates: [] };
+        }
+      }
+    },
     licenseDownloadUrl(license) {
       return 'data:application/xml;charset=utf-8,' + encodeURIComponent(license);
     },
@@ -368,6 +387,7 @@ createApp({
       this.productKeyError = '';
       this.productKeyLoading = false;
       this.historyPackages = {};
+      this.keyUpdates = {};
       this.activationError = '';
       this.activationDownloads = [];
       this.reopenError = '';

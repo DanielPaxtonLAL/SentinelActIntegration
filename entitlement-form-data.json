@@ -1,9 +1,11 @@
 {
-    "_comment": "EMS product IDs and form labels. Keys starting with _ are comments. IS_TEST_MODE in .env selects the test or production IDs.",
+    "_comment": "EMS product IDs and form labels. Keys starting with _ are comments. The form uses add IDs for the selected EMS mode; leave unavailable add/remove IDs blank.",
 
     "base-product-id": {
-        "test-ems-server-product-id": "6047",
-        "production-ems-server-product-id": "1"
+        "add-test": "6047",
+        "remove-test": "",
+        "add-production": "1",
+        "remove-production": "26"
     },
 
     "next-serial-number-customer-id": {
@@ -22,13 +24,18 @@
         "_comment": "The form enforces at least one of these.",
         "standalone": {
             "label": "Standalone Irricad",
-            "test-ems-server-product-id": "6048",
-            "production-ems-server-product-id": "25"
+            "_comment": "Standalone product add/remove IDs.",
+            "add-test": "6048",
+            "remove-test": "",
+            "add-production": "25",
+            "remove-production": "29"
         },
         "link": {
             "label": "Link Irricad",
-            "test-ems-server-product-id": "6049",
-            "production-ems-server-product-id": "24"
+            "add-test": "6049",
+            "remove-test": "",
+            "add-production": "24",
+            "remove-production": "28"
         }
     },
 
@@ -36,8 +43,10 @@
         "_comment": "Any or none of these can be selected.",
         "pivot": {
             "label": "Pivot Irricad",
-            "test-ems-server-product-id": "6051",
-            "production-ems-server-product-id": "22"
+            "add-test": "6051",
+            "remove-test": "",
+            "add-production": "22",
+            "remove-production": "27"
         }
     },
 
@@ -45,13 +54,17 @@
         "_comment": "Only one can be selected. An option with an empty product ID is the default and adds no product.",
         "v22": {
             "label": "Version 22",
-            "test-ems-server-product-id": "",
-            "production-ems-server-product-id": ""
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "",
+            "remove-production": ""
         },
         "v23": {
             "label": "Version 23",
-            "test-ems-server-product-id": "6052",
-            "production-ems-server-product-id": "21"
+            "add-test": "6052",
+            "remove-test": "",
+            "add-production": "21",
+            "remove-production": ""
         }
     },
 
@@ -59,8 +72,60 @@
         "_comment": "Selecting this shows the lease expiry date and writes the base product Expiry Date segment.",
         "lease": {
             "label": "Lease",
-            "test-ems-server-product-id": "6050",
-            "production-ems-server-product-id": "34"
+            "add-test": "6050",
+            "remove-test": "",
+            "add-production": "34",
+            "remove-production": ""
+        }
+    },
+
+    "network-products": {
+        "_comment": "Production network products; not currently offered by the entitlement form.",
+        "base": {
+            "label": "Network Base IRRICAD",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "36",
+            "remove-production": ""
+        },
+        "standalone": {
+            "label": "Network Standalone",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "37",
+            "remove-production": ""
+        },
+        "link": {
+            "label": "Network Link",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "38",
+            "remove-production": ""
+        },
+        "lease": {
+            "label": "Network Lease",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "39",
+            "remove-production": ""
+        },
+        "pivot": {
+            "label": "Network Pivot",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "40",
+            "remove-production": ""
+        }
+    },
+
+    "other-products": {
+        "_comment": "Other production products not currently offered by the entitlement form.",
+        "version-7": {
+            "label": "Version 7",
+            "add-test": "",
+            "remove-test": "",
+            "add-production": "20",
+            "remove-production": ""
         }
     }
 }
