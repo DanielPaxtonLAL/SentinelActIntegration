@@ -54,7 +54,7 @@ function createRoute(enforcements, clock = new Date(2026, 10, 10, 12), baseMemor
   class EmsClient {
     constructor() { this.authenticated = true; this.cookies = new Map(); }
     async listCustomers() { return [{ customerId: '5' }]; }
-    async listEntitlements() { return entitlements; }
+    async listEntitlementsForActivations() { return entitlements; }
     async getNextProductKeySerial() { events.push('get'); if (serialOptions.getError) throw new Error('serial read failed'); return nextSerial; }
     async setNextProductKeySerial(value) { events.push(`set:${value}`); if (serialOptions.setError && value !== 6001) throw new Error('serial write failed'); if (serialOptions.beforeSet) await serialOptions.beforeSet(value); nextSerial = value; }
     async getProductSummary(id) {

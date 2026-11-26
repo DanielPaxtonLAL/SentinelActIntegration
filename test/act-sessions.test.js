@@ -67,6 +67,8 @@ test('EMS users and their Act credentials are isolated', async () => {
   let expireAct = false;
   let expireEms = false;
   let emsCalls = 0;
+  let failSerialCheck = false;
+  const serialWrites = [];
   class ActClient {
     constructor({ baseUrl }) { assert.equal(baseUrl, 'https://act.example'); }
     async authenticate(username, password) {
@@ -85,8 +87,16 @@ test('EMS users and their Act credentials are isolated', async () => {
       if (this.password === 'bad') { const error = new Error('Rejected'); error.status = 302; throw error; }
       this.authenticated = true;
     }
-    async listEntitlements() { return []; }
-    async setNextProductKeySerial() {}
+    async listEntitlementsForActivations() {
+      if (failSerialCheck) throw new Error('incomplete entitlement list');
+      return [{ id: '1', state: 'DRAFT' }, { id: '2', state: 'COMPLETED' }];
+    }
+    async getEntitlementDetails(id) {
+      return { id, products: [{ productId: '60', memorySegments: [
+        { name: 'Serial Number', saot: true, text: id === '1' ? '31373731' : '31373738' },
+      ] }] };
+    }
+    async setNextProductKeySerial(value) { serialWrites.push([this.username, value]); }
     async listCustomers() {
       emsCalls++;
       if (expireEms) { const error = new Error('EMS session expired'); error.status = 401; throw error; }
@@ -136,6 +146,7 @@ test('EMS users and their Act credentials are isolated', async () => {
   const credentials = (username, password, actUsername, actPassword) => ({ username, password, actUsername, actPassword });
   await routes.get('POST /api/login')({ headers: {}, body: credentials('alice', 'x', 'act-alice', 'act-pass-a') }, alice);
   await routes.get('POST /api/login')({ headers: {}, body: credentials('bob', 'x', 'act-bob', 'act-pass-b') }, bob);
+  assert.deepEqual(serialWrites, [['alice', 6009], ['bob', 6009]]);
   assert.equal(sessionStore.get(request(alice)).ems.password, undefined);
   assert.equal(sessionStore.get(request(alice)).act.password, undefined);
   const listAlice = res(), listBob = res();
@@ -155,6 +166,14 @@ test('EMS users and their Act credentials are isolated', async () => {
   await invokeProtected('GET /api/act/companies', request(alice), companies);
   assert.deepEqual(companies.body, ['act-alice']);
   assert.deepEqual(actCredentials, [['act-alice', 'act-pass-a'], ['act-bob', 'act-pass-b'], ['act-alice', 'bad']]);
+  failSerialCheck = true;
+  const failedSerialLogin = res();
+  await routes.get('POST /api/login')({ ...request(alice), body: credentials('alice', 'x', 'act-alice', 'act-pass-a') }, failedSerialLogin);
+  assert.equal(failedSerialLogin.statusCode, 502);
+  assert.match(failedSerialLogin.body.error, /verify the next serial number/);
+  assert.equal(sessionStore.get(request(alice)).ems.username, 'alice');
+  assert.equal(serialWrites.length, 2);
+  failSerialCheck = false;
   expireAct = true;
   const expired = res();
   await invokeProtected('GET /api/act/companies', request(alice), expired);
@@ -233,11 +252,13 @@ test('extracted customer and custom entity scripts mount their pages', () => {
 test('real HTTP login protects pages and API requests', async () => {
   const express = require('express');
   let server;
-  let releaseEms, releaseAct, notifyEms, notifyAct;
+  let releaseEms, releaseAct, releaseSerial, notifyEms, notifyAct, notifySerial;
   const emsStarted = new Promise((resolve) => { notifyEms = resolve; });
   const actStarted = new Promise((resolve) => { notifyAct = resolve; });
+  const serialStarted = new Promise((resolve) => { notifySerial = resolve; });
   const emsGate = new Promise((resolve) => { releaseEms = resolve; });
   const actGate = new Promise((resolve) => { releaseAct = resolve; });
+  const serialGate = new Promise((resolve) => { releaseSerial = resolve; });
   const watchers = new Map();
   const createApp = () => {
     const app = express();
@@ -253,7 +274,10 @@ test('real HTTP login protects pages and API requests', async () => {
       if (this.username === 'phase-user') { notifyEms(); await emsGate; }
       this.authenticated = true;
     }
-    async listEntitlements() { return []; }
+    async listEntitlementsForActivations() {
+      if (this.username === 'phase-user') { notifySerial(); await serialGate; }
+      return [];
+    }
     async setNextProductKeySerial() {}
     async listCustomers() { return [this.username]; }
   }
@@ -356,6 +380,9 @@ test('real HTTP login protects pages and API requests', async () => {
     await actStarted;
     assert.deepEqual(await progress(), { phase: 'act' });
     releaseAct();
+    await serialStarted;
+    assert.deepEqual(await progress(), { phase: 'serial' });
+    releaseSerial();
     assert.equal((await phaseLogin).status, 200);
     assert.deepEqual(await progress(), { phase: 'waiting' });
   } finally {

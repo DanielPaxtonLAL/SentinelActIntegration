@@ -65,7 +65,7 @@ test('the server uses matching connection settings and product IDs for each mode
     class EmsClient {
       constructor(options) { clientOptions = options; }
       async authenticate() { this.authenticated = true; }
-      async listEntitlements() { return []; }
+      async listEntitlementsForActivations() { return []; }
       async setNextProductKeySerial(value) { initializedSerial = value; }
     }
     class ActClient { async authenticate() {} }
@@ -117,6 +117,6 @@ test('the server uses matching connection settings and product IDs for each mode
     assert.equal(clientOptions.apiVersion, expected.apiVersion);
     assert.equal(clientOptions.userType, expected.userType);
     assert.equal(clientOptions.nextSerialNumberCustomerId, expected.emsMode === 'test' ? '2' : '1');
-    assert.equal(initializedSerial, undefined);
+    assert.equal(initializedSerial, 6001);
   }
 });

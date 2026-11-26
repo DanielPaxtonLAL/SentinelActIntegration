@@ -117,9 +117,10 @@ form.addEventListener('submit', async (event) => {
         });
         if (!progress.ok) throw new Error(`HTTP ${progress.status}`);
         const { phase } = await progress.json();
-        if (!['waiting', 'ems', 'act'].includes(phase)) throw new Error('Invalid login progress response');
+        if (!['waiting', 'ems', 'act', 'serial'].includes(phase)) throw new Error('Invalid login progress response');
         if (active && phase === 'ems') status.textContent = 'Signing in to EMS';
         if (active && phase === 'act') status.textContent = 'Signing in to Act!';
+        if (active && phase === 'serial') status.textContent = 'Checking the next serial number';
       } catch (err) {
         if (active) {
           status.textContent = 'Signing in to EMS and Act! (progress unavailable)';

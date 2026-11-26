@@ -175,6 +175,15 @@ const sessions = createActSessions(() => ({
       error.status = err.status;
       throw error;
     }
+    reportProgress('serial');
+    try {
+      await ensureNextProductKeySerialInitialized(this.ems);
+    } catch (err) {
+      console.error(`Next serial number check failed: ${err.message}`);
+      const error = new Error('Unable to verify the next serial number in EMS. Check the entitlement data and customer reference, then try again.');
+      error.service = 'serial';
+      throw error;
+    }
   },
 }));
 
@@ -220,6 +229,9 @@ app.post('/api/login', express.json(), async (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
+    if (err.service === 'serial') {
+      return res.status(502).json({ error: err.message });
+    }
     const invalidCredentials = [200, 302, 401, 403].includes(err.status);
     const service = err.service || 'Authentication';
     console.error(`${service} login failed:`, invalidCredentials ? 'credentials rejected' : 'service unavailable');

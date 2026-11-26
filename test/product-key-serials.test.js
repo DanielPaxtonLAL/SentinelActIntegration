@@ -30,7 +30,7 @@ test('startup seeds the next serial above the highest existing serial, leaving g
   const { initializeNextProductKeySerial } = coordinator();
   const events = [];
   const ems = {
-    async listEntitlements() { events.push('list'); return [{ id: '1' }, { id: '2' }, { id: '3' }]; },
+    async listEntitlementsForActivations() { events.push('list'); return [{ id: '1' }, { id: '2' }, { id: '3' }]; },
     async getEntitlementDetails(id) {
       events.push(`detail:${id}`);
       const serial = { 1: '31373731', 2: '31373738', 3: '31373733' }[id];
@@ -52,7 +52,7 @@ test('startup ignores out-of-range serials while choosing the highest valid seri
   const { initializeNextProductKeySerial } = coordinator();
   let stored;
   const ems = {
-    async listEntitlements() { return [{ id: '1' }, { id: '2' }, { id: '3' }]; },
+    async listEntitlementsForActivations() { return [{ id: '1' }, { id: '2' }, { id: '3' }]; },
     async getEntitlementDetails(id) {
       return {
         id,
@@ -76,7 +76,7 @@ test('startup starts at 06001 when no valid serial exceeds 06000', async () => {
   const { initializeNextProductKeySerial } = coordinator();
   let stored;
   const ems = {
-    async listEntitlements() { return [{ id: '1' }]; },
+    async listEntitlementsForActivations() { return [{ id: '1' }]; },
     async getEntitlementDetails(id) {
       return {
         id,
@@ -96,7 +96,7 @@ test('startup stores the exhausted sentinel after serial 65,535', async () => {
   const { initializeNextProductKeySerial } = coordinator();
   let stored;
   const ems = {
-    async listEntitlements() { return [{ id: '1' }]; },
+    async listEntitlementsForActivations() { return [{ id: '1' }]; },
     async getEntitlementDetails(id) {
       return {
         id,
@@ -110,6 +110,18 @@ test('startup stores the exhausted sentinel after serial 65,535', async () => {
   };
   assert.equal(await initializeNextProductKeySerial(ems), 65536);
   assert.equal(stored, 65536);
+});
+
+test('does not overwrite the counter when entitlement memory cannot be checked', async () => {
+  const { initializeNextProductKeySerial } = coordinator();
+  let written = false;
+  const ems = {
+    async listEntitlementsForActivations() { return [{ id: '1' }]; },
+    async getEntitlementDetails() { return { id: '1', products: [{ productId: '60', memorySegments: [] }] }; },
+    async setNextProductKeySerial() { written = true; },
+  };
+  await assert.rejects(() => initializeNextProductKeySerial(ems), /Serial Number segment/);
+  assert.equal(written, false);
 });
 
 test('counter advances only when the saved serial matches and recovers after failure', async () => {

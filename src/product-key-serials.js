@@ -74,7 +74,7 @@ function createProductKeySerials({ baseProductId, withSession }) {
 
   /** Scan base-product memory, optionally excluding the draft currently being edited. */
   async function getUsedProductKeySerialNumbers(ems, excludedEntitlementId) {
-    const entitlements = await withSession(ems, () => ems.listEntitlements());
+    const entitlements = await withSession(ems, () => ems.listEntitlementsForActivations());
     const entitlementIds = entitlements.map((entitlement) =>
       String(entitlement.id ?? entitlement.entitlementId ?? '')
     );
@@ -91,11 +91,20 @@ function createProductKeySerials({ baseProductId, withSession }) {
         withSession(ems, () => ems.getEntitlementDetails(id, { includeCustomer: false }))
       ));
       for (const details of batch) {
-        for (const product of details.products || []) {
+        if (!Array.isArray(details.products)) {
+          throw new Error(`EMS returned an invalid product list in entitlement ${details.id}.`);
+        }
+        for (const product of details.products) {
           if (String(product.productId) !== String(baseProductId)) continue;
-          for (const segment of product.memorySegments || []) {
-            if (!segment.saot || typeof segment.name !== 'string' ||
-                segment.name.trim().toLowerCase() !== 'serial number') continue;
+          if (!Array.isArray(product.memorySegments)) {
+            throw new Error(`EMS returned invalid base product memory in entitlement ${details.id}.`);
+          }
+          const segments = product.memorySegments.filter((segment) => segment.saot &&
+            typeof segment.name === 'string' && segment.name.trim().toLowerCase() === 'serial number');
+          if (segments.length !== 1) {
+            throw new Error(`EMS did not return one Serial Number segment in entitlement ${details.id}.`);
+          }
+          for (const segment of segments) {
             const text = String(segment.text ?? '').trim();
             if (!text) continue;
             if (!/^(?:[0-9a-f]{2})+$/i.test(text)) {
