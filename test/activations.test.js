@@ -11,7 +11,7 @@ function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
   return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
 }
 
-function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false, invalidUpdateProducts = false, additionalOriginal = false } = {}) {
+function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false, invalidUpdateProducts = false, additionalOriginal = false, updateDescription = { description: 'Added Link\nRemoved Pivot' } } = {}) {
   let handler;
   let pendingUpdatesHandler;
   let historyHandler;
@@ -65,6 +65,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
         ? { id, lineItemTypes: ['Product_Key'], entState: 'COMPLETED', createDate: '2026-01-01', products: [{ productId: '1', productName: 'Base' }] }
         : {
           id, lineItemTypes: ['ProtectionKey_Update'], entState: 'DRAFT', refId1: '00123',
+          ...updateDescription,
           products: invalidUpdateProducts ? null : [
             { productId: '24', productName: 'ADD Link', memorySegments: [{ text: 'not included' }] },
             { productId: '27', productName: 'REMOVE Pivot' },
@@ -175,6 +176,7 @@ test('lists only update entitlements associated with the requested protection ke
   assert.deepEqual(Array.from(res.body[0].products, (product) => [product.productId, product.productName]),
     [['24', 'ADD Link'], ['27', 'REMOVE Pivot']]);
   assert.equal(res.body[0].products[0].memorySegments, undefined);
+  assert.equal(res.body[0].description, 'Added Link\nRemoved Pivot');
   assert.deepEqual(calls, [['entitlements', '12345'], ['details', '10'], ['details', '20']]);
   const invalid = await activationsRoute().keyEntitlements('bad/id');
   assert.equal(invalid.res.statusCode, 400);
@@ -191,6 +193,10 @@ test('lists only update entitlements associated with the requested protection ke
   const missingProducts = await activationsRoute({ invalidUpdateProducts: true, logger: { error() {} } }).keyEntitlements('12345');
   assert.equal(missingProducts.res.statusCode, 502);
   assert.match(missingProducts.res.body.error, /product list/);
+  const legacyDescription = await activationsRoute({ updateDescription: { descr: 'Legacy description' } }).keyEntitlements('12345');
+  assert.equal(legacyDescription.res.body[0].description, 'Legacy description');
+  const noDescription = await activationsRoute({ updateDescription: {} }).keyEntitlements('12345');
+  assert.equal(noDescription.res.body[0].description, '');
 });
 
 test('timeline includes the original product-key entitlement without changing the update-only response', async () => {
@@ -316,6 +322,9 @@ test('activations page loads keys without IDs and disables V2CP without a protec
   assert.match(html, /<span class="timeline-dot" aria-hidden="true"><\/span>/);
   assert.match(html, /<li v-for="\(entry, index\) in timelineEntries"[\s\S]*<details class="detail-collapsible">[\s\S]*<summary>[\s\S]*v-for="\(product, index\) in entry\.products"/);
   assert.match(html, /No products listed for this entitlement/);
+  assert.match(html, /Update \{\{ entry\.updateCounter \?\? 'Unavailable' \}\} — \{\{ displayValue\(entry\.description\) \}\}/);
+  assert.match(html, /Entitlement ID: \{\{ entry\.id \}\}[\s\S]*Status: \{\{ displayValue\(entry\.state\) \}\}/);
+  assert.match(html, /v-if="entry\.type === 3" class="timeline-description">Description: \{\{ displayValue\(entry\.description\) \}\}/);
   assert.doesNotMatch(html, /<th>Product key<\/th>/);
   assert.doesNotMatch(html, /<th>License<\/th>|<th>Activation history<\/th>|<th>Activation ID \(AID\)<\/th>/);
   assert.match(html, /No protection key ID available/);

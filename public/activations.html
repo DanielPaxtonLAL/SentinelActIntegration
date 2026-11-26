@@ -76,8 +76,17 @@
                         :aria-label="'Created (UTC): ' + updateCreatedDate(entry.createDate)">{{ updateCreatedDate(entry.createDate) }}</span>
                       <span class="timeline-dot" aria-hidden="true"></span>
                       <details class="detail-collapsible">
-                        <summary>{{ entry.type === 2 ? 'Product key entitlement' : 'Key update entitlement' }} {{ entry.id }} — {{ displayValue(entry.state) }}<span v-if="entry.refId1"> — {{ entry.refId1 }}</span></summary>
+                        <summary>
+                          <template v-if="entry.type === 2">Product key entitlement {{ entry.id }} — {{ displayValue(entry.state) }}<span v-if="entry.refId1"> — {{ entry.refId1 }}</span></template>
+                          <template v-else>Update {{ entry.updateCounter ?? 'Unavailable' }} — {{ displayValue(entry.description) }}</template>
+                        </summary>
+                        <template v-if="entry.type === 3">
+                          <p>Entitlement ID: {{ entry.id }}</p>
+                          <p>Status: {{ displayValue(entry.state) }}</p>
+                          <p v-if="entry.refId1">Irricad Order Code (Ref ID 1): {{ entry.refId1 }}</p>
+                        </template>
                         <p v-if="entry.type === 3">Update counter: {{ entry.updateCounter ?? 'Unavailable' }}</p>
+                        <p v-if="entry.type === 3" class="timeline-description">Description: {{ displayValue(entry.description) }}</p>
                         <p v-if="entry.counterIssue" class="form-error" role="alert">{{ entry.counterIssue }}
                           <button type="button" @click="selectKey(selectedKey)">Retry</button>
                         </p>

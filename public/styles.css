@@ -628,6 +628,7 @@ td { overflow-wrap: anywhere; }
 .activations-page .timeline-dot { position: absolute; z-index: 1; left: var(--timeline-stem-x); top: .875rem; width: .75rem; height: .75rem; box-sizing: border-box; transform: translateX(-50%); border: 2px solid var(--timeline-entry-color); border-radius: 50%; background: var(--timeline-entry-color); box-shadow: 0 0 0 2px var(--color-surface); }
 .activations-page .timeline-entry:first-child .timeline-dot { background: var(--color-surface); }
 .activations-page .timeline-entry > .detail-collapsible { position: relative; margin-top: 0; }
+.activations-page .timeline-description { white-space: pre-wrap; }
 .activations-page td code { overflow-wrap: anywhere; }
 @media (max-width: 640px) { .activations-page .keys-layout { grid-template-columns: minmax(0, 1fr); } .activations-page .activation-list-tools { flex-wrap: wrap; } }
 @media (max-width: 700px) { .entitlements-page .entitlement-form .product-grid { grid-template-columns: 1fr; } }

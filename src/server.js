@@ -496,6 +496,7 @@ app.get('/api/protection-keys/:id/entitlements', async (req, res) => {
             state: entitlement.entState,
             createDate: entitlement.createDate,
             refId1: entitlement.refId1,
+            description: entitlement.description || entitlement.descr || '',
             customer: entitlement.customer,
             customerId: entitlement.customerId,
             products: entitlement.products.map(({ productId, productName }) => ({ productId, productName })),
