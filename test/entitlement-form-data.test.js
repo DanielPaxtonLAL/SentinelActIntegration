@@ -35,6 +35,12 @@ test('repo form data selects the original product IDs for each EMS server', () =
     assert.equal(data.defaultVersionLabel, 'Version 22');
     assert.equal(data.nextProductKeySerialNumberCustomerId, '1');
     assert.deepEqual(data.leaseExpiryRange, { minMonths: 6, maxMonths: 13 });
+    assert.deepEqual(data.pivotProductIds, isTestMode
+      ? { add: '6051', remove: '' }
+      : { add: '22', remove: '27' });
+    assert.deepEqual(data.featureProductIds, isTestMode
+      ? { standalone: { add: '6048', remove: '' }, link: { add: '6049', remove: '' }, pivot: { add: '6051', remove: '' } }
+      : { standalone: { add: '25', remove: '29' }, link: { add: '24', remove: '28' }, pivot: { add: '22', remove: '27' } });
   }
 });
 
@@ -46,6 +52,8 @@ test('parses ids, labels and default version', () => {
   assert.equal(data.defaultVersionLabel, 'V1');
   assert.deepEqual(data.versionProducts.map((p) => p.id), ['3']);
   assert.equal(data.lease.id, '4');
+  assert.equal(data.pivotProductIds, null);
+  assert.deepEqual(data.featureProductIds, { standalone: null, link: null, pivot: null });
   assert.deepEqual(data.leaseExpiryRange, { minMonths: 6, maxMonths: 24 });
   assert.deepEqual(data.productAliases, [
     { alias: 'a', id: '2', group: 'product' },
@@ -93,4 +101,18 @@ test('requires valid IDs for both servers and an explicit mode', () => {
   required.lease.lease['production-ems-server-product-id'] = '';
   assert.throws(() => parseFormData(required, true), /lease/);
   assert.throws(() => parseFormData(valid()), /test mode must be a boolean/);
+});
+
+test('accepts add/remove product IDs while validating both environments', () => {
+  const data = valid();
+  data['product-options'].a = {
+    label: 'A', 'add-test': '2', 'remove-test': '', 'add-production': '12', 'remove-production': '29',
+  };
+  assert.equal(parseFormData(data, true).accessProducts[0].id, '2');
+  assert.equal(parseFormData(data, false).accessProducts[0].id, '12');
+  data['product-options'].a['remove-test'] = 'invalid';
+  assert.throws(() => parseFormData(data, false), /remove-test/);
+  data['product-options'].a['remove-test'] = '';
+  delete data['product-options'].a['remove-production'];
+  assert.throws(() => parseFormData(data, true), /remove-production/);
 });

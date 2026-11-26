@@ -448,10 +448,10 @@ button.button--view:hover:not(:disabled) { background: var(--button-view-bg-hove
 .entitlements-page .entitlement-details.key-update { border-color: var(--entitlement-key-update-color); }
 .entitlements-page .entitlement-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
 .entitlements-page .entitlement-details h3 { margin: 1.5rem 0 .6rem; }
-.entitlements-page .entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }
-.entitlements-page .entitlement-detail-fields .detail-row { display: table-row; }
-.entitlements-page .entitlement-detail-fields .detail-row > div { display: table-cell; padding: .5rem .75rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow-wrap: anywhere; }
-.entitlements-page .entitlement-detail-fields .detail-label { width: 1%; white-space: nowrap; color: var(--color-text-muted); }
+.entitlement-detail-fields { display: table; width: 100%; border-collapse: collapse; }
+.entitlement-detail-fields .detail-row { display: table-row; }
+.entitlement-detail-fields .detail-row > div { display: table-cell; padding: .5rem .75rem; border-bottom: 1px solid var(--color-border); vertical-align: middle; overflow-wrap: anywhere; }
+.entitlement-detail-fields .detail-label { width: 1%; white-space: nowrap; color: var(--color-text-muted); }
 .entitlements-page .detail-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-top: .5rem; }
 .entitlements-page .detail-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
 .entitlements-page .detail-footnote { margin: 0; font-size: .75rem; color: var(--color-text-muted); }
@@ -603,12 +603,34 @@ td { overflow-wrap: anywhere; }
   .custom-entities-page table { display: block; overflow-x: auto; }
 }
 .entitlements-page .entitlement-form .product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
-.activations-page .activation-list { padding: 1rem; }
+.activations-page .keys-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(20rem, 1fr); gap: 1rem; align-items: start; padding: 1rem; }
+.activations-page .activation-list { min-width: 0; }
 .activations-page .activation-list-tools { display: flex; align-items: center; gap: 1rem; margin-bottom: .75rem; }
 .activations-page .activation-list-tools h2 { margin: 0; font-size: 1.1rem; }
 .activations-page .activation-list-tools input { width: min(100%, 22rem); padding: .5rem .6rem; border: 1px solid var(--color-border-strong); border-radius: 4px; }
 .activations-page .table-wrap { overflow-x: auto; }
+.activations-page .key-list { max-height: calc(100vh - 14rem); overflow: auto; }
+.activations-page .key-list table { width: 100%; }
+.activations-page .key-list th { position: sticky; top: 0; z-index: 1; }
+.activations-page .key-row { cursor: pointer; }
+.activations-page .key-row:hover, .activations-page .key-row:focus { background: var(--color-selected-bg); outline: 2px solid var(--color-selected-outline); outline-offset: -2px; }
+.activations-page .key-row.selected { background: var(--color-selected-strong-bg); font-weight: 600; }
+.activations-page .key-details { min-width: 0; padding: 1rem; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); overflow-wrap: anywhere; }
+.activations-page .key-details h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+.activations-page .timeline-entries { --timeline-update-color: #ff00ff; --timeline-product-color: #00ffff; --timeline-date-width: 4.5rem; --timeline-stem-x: calc(var(--timeline-date-width) + .75rem); margin: 0; padding: 0; list-style: none; }
+.activations-page .timeline-entry { --timeline-entry-color: var(--timeline-update-color); position: relative; padding-left: calc(var(--timeline-stem-x) + 1.375rem); }
+.activations-page .timeline-entry.timeline-product-key { --timeline-entry-color: var(--timeline-product-color); }
+.activations-page .timeline-entry + .timeline-entry { margin-top: .75rem; }
+.activations-page .timeline-entry:not(:last-child)::before { content: ''; position: absolute; left: var(--timeline-stem-x); top: 1.25rem; bottom: -2rem; width: 2px; transform: translateX(-50%); background: var(--timeline-entry-color); }
+.activations-page .timeline-entry.timeline-to-product-key::before { background: linear-gradient(to bottom, var(--timeline-update-color), var(--timeline-product-color)); }
+.activations-page .timeline-entry::after { content: ''; position: absolute; left: var(--timeline-stem-x); top: 1.25rem; width: 1.375rem; height: 2px; transform: translateY(-50%); background: var(--timeline-entry-color); }
+.activations-page .timeline-date { position: absolute; left: 0; top: 1.25rem; width: var(--timeline-date-width); transform: translateY(-50%); color: var(--color-text-muted); font-size: .75rem; line-height: 1.2; text-align: right; }
+.activations-page .timeline-dot { position: absolute; z-index: 1; left: var(--timeline-stem-x); top: .875rem; width: .75rem; height: .75rem; box-sizing: border-box; transform: translateX(-50%); border: 2px solid var(--timeline-entry-color); border-radius: 50%; background: var(--timeline-entry-color); box-shadow: 0 0 0 2px var(--color-surface); }
+.activations-page .timeline-entry:first-child .timeline-dot { background: var(--color-surface); }
+.activations-page .timeline-entry > .detail-collapsible { position: relative; margin-top: 0; }
+.activations-page .timeline-description { white-space: pre-wrap; }
 .activations-page td code { overflow-wrap: anywhere; }
+@media (max-width: 640px) { .activations-page .keys-layout { grid-template-columns: minmax(0, 1fr); } .activations-page .activation-list-tools { flex-wrap: wrap; } }
 @media (max-width: 700px) { .entitlements-page .entitlement-form .product-grid { grid-template-columns: 1fr; } }
 .entitlements-page .entitlement-form textarea { resize: none; }
 .entitlements-page .entitlement-list-panel .entitlements-subheading { justify-content: flex-start; }
@@ -629,10 +651,10 @@ td { overflow-wrap: anywhere; }
 .entitlements-page td.status-cell { text-align: center; vertical-align: middle; }
 .entitlements-page td.status-cell .status-tag { display: block; width: 100%; box-sizing: border-box; text-align: center; }
 .entitlements-page .entitlement-heading .status-tag { vertical-align: middle; margin-left: .25rem; }
-.entitlements-page .detail-collapsible { margin-top: 1rem; border: 1px solid var(--color-border); border-radius: 6px; }
-.entitlements-page .detail-collapsible > summary { padding: .6rem .75rem; font-weight: 600; cursor: pointer; background: var(--color-surface-header); border-radius: 6px; }
-.entitlements-page .detail-collapsible[open] > summary { border-bottom: 1px solid var(--color-border); border-radius: 6px 6px 0 0; }
-.entitlements-page .detail-collapsible > :not(summary) { margin: .75rem; }
+.entitlements-page .detail-collapsible, .activations-page .detail-collapsible { margin-top: 1rem; border: 1px solid var(--color-border); border-radius: 6px; }
+.entitlements-page .detail-collapsible > summary, .activations-page .detail-collapsible > summary { padding: .6rem .75rem; font-weight: 600; cursor: pointer; background: var(--color-surface-header); border-radius: 6px; }
+.entitlements-page .detail-collapsible[open] > summary, .activations-page .detail-collapsible[open] > summary { border-bottom: 1px solid var(--color-border); border-radius: 6px 6px 0 0; }
+.entitlements-page .detail-collapsible > :not(summary), .activations-page .detail-collapsible > :not(summary) { margin: .75rem; }
 .entitlements-page .entitlement-list-panel .search-filter { margin: 0 0 .75rem; }
 .entitlements-page .search-filter > summary { display: flex; align-items: center; gap: .5rem; }
 .entitlements-page .search-filter > summary::-webkit-details-marker { display: none; }

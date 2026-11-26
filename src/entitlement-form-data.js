@@ -10,12 +10,20 @@ function productIdFor(option, name, isTestMode) {
   if (!option || typeof option !== 'object' || Array.isArray(option)) {
     throw new Error(`entitlement form data: "${name}" must contain test and production product IDs`);
   }
-  for (const key of [TEST_PRODUCT_ID, PRODUCTION_PRODUCT_ID]) {
+  const usesAddRemove = ['add-test', 'remove-test', 'add-production', 'remove-production']
+    .some((key) => Object.hasOwn(option, key));
+  const keys = usesAddRemove
+    ? ['add-test', 'remove-test', 'add-production', 'remove-production']
+    : [TEST_PRODUCT_ID, PRODUCTION_PRODUCT_ID];
+  for (const key of keys) {
     if (typeof option[key] !== 'string' || (option[key].trim() !== '' && !isProductId(option[key].trim()))) {
       throw new Error(`entitlement form data: "${name}.${key}" must be an empty string or a positive product ID`);
     }
   }
-  return option[isTestMode ? TEST_PRODUCT_ID : PRODUCTION_PRODUCT_ID].trim();
+  const selectedKey = usesAddRemove
+    ? (isTestMode ? 'add-test' : 'add-production')
+    : (isTestMode ? TEST_PRODUCT_ID : PRODUCTION_PRODUCT_ID);
+  return option[selectedKey].trim();
 }
 
 // Keys starting with "_" are comments. Everything else in a group is an option.
@@ -63,6 +71,17 @@ function parseFormDataForMode(json, isTestMode) {
   if (!accessProducts.length) throw new Error('entitlement form data: "product-options" needs at least one option');
   const optionalOptions = optionsOf(json['optional-products'], 'optional-products', isTestMode);
   const optionalProducts = requireIds(optionalOptions, 'optional-products');
+  const featureProductIds = Object.fromEntries([
+    ['standalone', accessOptions, json['product-options']],
+    ['link', accessOptions, json['product-options']],
+    ['pivot', optionalOptions, json['optional-products']],
+  ].map(([key, options, group]) => {
+    const option = options.find((entry) => entry.key === key);
+    return [key, option ? {
+      add: option.id,
+      remove: (group[key][isTestMode ? 'remove-test' : 'remove-production'] ?? '').trim(),
+    } : null];
+  }));
 
   const versionOptions = optionsOf(json.version, 'version', isTestMode);
   const defaults = versionOptions.filter((option) => !option.id);
@@ -97,6 +116,8 @@ function parseFormDataForMode(json, isTestMode) {
     lease,
     leaseExpiryRange: { minMonths: range['min-months'], maxMonths: range['max-months'] },
     productAliases,
+    pivotProductIds: featureProductIds.pivot,
+    featureProductIds,
   };
 }
 

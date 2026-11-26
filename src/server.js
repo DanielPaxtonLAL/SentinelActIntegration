@@ -444,6 +444,82 @@ app.get('/api/protection-keys/:id/activations', async (req, res) => {
   }
 });
 
+app.get('/api/protection-keys/:id/update-counters', async (req, res) => {
+  const protectionKeyId = req.params.id;
+  res.set('Cache-Control', 'no-store');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(protectionKeyId)) {
+    return res.status(400).json({ error: 'Protection key ID is invalid.' });
+  }
+  try {
+    const history = await loadProtectionKeyHistory(req.ems, protectionKeyId);
+    res.json({
+      activations: history.activations.map(({ entitlementId, aid, updateCounter, counterError }) =>
+        ({ entitlementId, aid, updateCounter, counterError })),
+      warnings: history.warnings,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 401 ? 401 : 502).json({ error: err.message });
+  }
+});
+
+app.get('/api/protection-keys/:id/entitlements', async (req, res) => {
+  const protectionKeyId = req.params.id;
+  res.set('Cache-Control', 'no-store');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(protectionKeyId)) {
+    return res.status(400).json({ error: 'Protection key ID is invalid.' });
+  }
+  try {
+    const ids = await withSession(req.ems, () => req.ems.getProtectionKeyEntitlements(protectionKeyId));
+    const includeOriginal = req.query?.includeOriginal === '1';
+    const updates = [];
+    const originals = [];
+    let mixedTypes = false;
+    for (let index = 0; index < ids.length; index += 10) {
+      const details = await Promise.all(ids.slice(index, index + 10).map((id) =>
+        withSession(req.ems, () => req.ems.getEntitlementDetails(id, { includeCustomer: false }))
+      ));
+      for (const entitlement of details) {
+        if (!Array.isArray(entitlement.lineItemTypes) || !entitlement.lineItemTypes.length ||
+            entitlement.lineItemTypes.some((type) => typeof type !== 'string' || !type)) {
+          throw new Error('EMS returned an entitlement without valid line item types.');
+        }
+        const isUpdate = entitlement.lineItemTypes.includes('ProtectionKey_Update');
+        const isOriginal = entitlement.lineItemTypes.includes('Product_Key');
+        if (includeOriginal && isOriginal && isUpdate) mixedTypes = true;
+        if (isUpdate || (includeOriginal && isOriginal)) {
+          if (!Array.isArray(entitlement.products)) {
+            throw new Error('EMS returned an entitlement without a valid product list.');
+          }
+          const entry = {
+            id: entitlement.id,
+            state: entitlement.entState,
+            createDate: entitlement.createDate,
+            refId1: entitlement.refId1,
+            description: entitlement.description || entitlement.descr || '',
+            customer: entitlement.customer,
+            customerId: entitlement.customerId,
+            products: entitlement.products.map(({ productId, productName }) => ({ productId, productName })),
+          };
+          if (isUpdate) updates.push({ ...entry, type: 3 });
+          if (includeOriginal && isOriginal && !isUpdate) originals.push({ ...entry, type: 2 });
+        }
+      }
+    }
+    if (!includeOriginal) return res.json(updates);
+    const originalError = mixedTypes || originals.length > 1
+      ? 'EMS returned ambiguous product-key entitlements for this protection key.'
+      : originals.length === 0 ? 'EMS did not return the original product-key entitlement for this protection key.' : '';
+    res.json({
+      original: originalError ? null : originals[0], originalError, updates,
+      pivotProductIds: formData.pivotProductIds, featureProductIds: formData.featureProductIds,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 401 ? 401 : 502).json({ error: err.message });
+  }
+});
+
 app.get('/api/protection-keys/:id/v2cp', async (req, res) => {
   const protectionKeyId = req.params.id;
   res.set('Cache-Control', 'no-store');

@@ -185,7 +185,7 @@
                   </button>
                   <input type="file" accept=".c2v" hidden :aria-label="'Choose C2V for product key ' + key.productKeyId"
                     @change="activateProductKey(key, $event)">
-                  <p v-if="activationUncertainKeys.includes(key.productKeyId)" class="form-error" role="alert">Activation may have succeeded. Check the Product Keys page for the license before retrying.</p>
+                  <p v-if="activationUncertainKeys.includes(key.productKeyId)" class="form-error" role="alert">Activation may have succeeded. Check the Protection Keys page for the license before retrying.</p>
                   <div class="entitlement-detail-fields" role="table" aria-label="Product key details">
                     <div v-for="field in productKeyFields" :key="field.name" class="detail-row" role="row">
                       <div class="detail-label" role="rowheader">{{ field.label }}</div>
@@ -225,6 +225,26 @@
                       {{ historyPackages[id]?.loading ? 'Building…' : 'Download V2CP' }}
                     </button>
                     <p v-if="historyPackages[id]?.error" class="form-error" role="alert">{{ historyPackages[id].error }}</p>
+                    <details v-if="typeMarkerClass(selectedEntitlement.type) === 'product-key'" class="detail-collapsible"
+                      @toggle="$event.target.open && !keyUpdates[id] && loadKeyUpdates(id)">
+                      <summary>Protection key updates</summary>
+                      <p v-if="keyUpdates[id]?.loading" role="status">Loading key updates…</p>
+                      <p v-else-if="keyUpdates[id]?.error" class="form-error" role="alert">
+                        {{ keyUpdates[id].error }} <button type="button" @click="loadKeyUpdates(id)">Retry</button>
+                      </p>
+                      <template v-else-if="keyUpdates[id]">
+                        <p v-if="!keyUpdates[id].updates.length">No associated key updates found.</p>
+                        <ul v-else>
+                          <li v-for="update in keyUpdates[id].updates" :key="update.id">
+                            <button type="button" class="button--view" @click="openEntitlementDetails(update)">
+                              Entitlement {{ update.id }} — {{ displayValue(update.state) }}
+                            </button>
+                            <span v-if="update.createDate">Created {{ formatUtcDate(update.createDate) }} (UTC)</span>
+                            <span v-if="update.refId1"> — {{ update.refId1 }}</span>
+                          </li>
+                        </ul>
+                      </template>
+                    </details>
                   </div>
                 </div>
               </template>
