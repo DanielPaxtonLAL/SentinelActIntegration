@@ -17,13 +17,14 @@ function v2c(key = '12345', vendor = '42', payload = 'YWJj') {
   return `<hasp_info><haspscope><vendor id="${vendor}"><hasp id="${key}"/></vendor></haspscope><v2c>${payload}</v2c></hasp_info>`;
 }
 
-function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false, invalidUpdateProducts = false, additionalOriginal = false, updateDescription = { description: 'Added Link\nRemoved Pivot' } } = {}) {
+function activationsRoute({ c2vError, logger = console, validHistory = false, updateDetailsError, associatedIds, invalidUpdateDetails = false, invalidUpdateProducts = false, additionalOriginal = false, entitlementKeyAids = ['aid-001', 'aid-002'], missingLicenseId = false, updateDescription = { description: 'Added Link\nRemoved Pivot' } } = {}) {
   let handler;
   let pendingUpdatesHandler;
   let historyHandler;
   let historyPackageHandler;
   let keyEntitlementsHandler;
   let countersHandler;
+  let entitlementProtectionKeysHandler;
   const calls = [];
   class EmsClient {
     constructor() {
@@ -51,11 +52,16 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     }
     async getActivationLicense(aid) {
       calls.push(['activation', aid]);
+      if (missingLicenseId) return { aid, protectionKeyId: null };
       if (validHistory) return { aid, protectionKeyId: '12345', activationString: v2c('12345', '42', aid === 'history-base' ? 'YWJj' : 'ZGVm') };
       if (aid.startsWith('history-')) return {
         aid, protectionKeyId: aid === 'history-other' ? '999' : '12345', activationString: 'license-' + aid,
       };
       return { aid, protectionKeyId: 'pk-' + aid, activationString: 'license' };
+    }
+    async getEntitlementProductKeys(id) {
+      calls.push(['entitlement-product-keys', id]);
+      return [{ activationIds: entitlementKeyAids }, { activationIds: entitlementKeyAids.slice(0, 1) }];
     }
     async getProtectionKeyEntitlements(id) {
       calls.push(['entitlements', id]);
@@ -126,6 +132,7 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
       if (route === '/api/protection-keys/:id/activations') historyHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/update-counters') countersHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/entitlements') keyEntitlementsHandler = handlers.at(-1);
+      if (route === '/api/entitlements/:id/protection-keys') entitlementProtectionKeysHandler = handlers.at(-1);
       if (route === '/api/protection-keys/:id/v2cp') historyPackageHandler = handlers.at(-1);
     },
     post(route, ...handlers) {
@@ -172,10 +179,26 @@ function activationsRoute({ c2vError, logger = console, validHistory = false, up
     history: (id) => invoke(historyHandler, { id }),
     counters: (id) => invoke(countersHandler, { id }),
     keyEntitlements: (id, includeOriginal = false) => invoke(keyEntitlementsHandler, { id }, includeOriginal ? { includeOriginal: '1' } : {}),
+    entitlementProtectionKeys: (id) => invoke(entitlementProtectionKeysHandler, { id }),
     historyPackage: (id) => invoke(historyPackageHandler, { id }),
     pendingUpdates: (aid) => invoke(pendingUpdatesHandler, { aid }),
   };
 }
+
+test('resolves entitlement protection keys from activation licenses', async () => {
+  const { res, calls } = await activationsRoute().entitlementProtectionKeys('123');
+  assert.deepEqual(Array.from(res.body.protectionKeyIds), ['pk-aid-001', 'pk-aid-002']);
+  assert.deepEqual(calls, [
+    ['entitlement-product-keys', '123'], ['activation', 'aid-001'], ['activation', 'aid-002'],
+  ]);
+  const noKeys = await activationsRoute({ entitlementKeyAids: [] }).entitlementProtectionKeys('123');
+  assert.equal(noKeys.res.body.protectionKeyIds.length, 0);
+  const invalid = await activationsRoute().entitlementProtectionKeys('bad');
+  assert.equal(invalid.res.statusCode, 400);
+  const missing = await activationsRoute({ missingLicenseId: true, logger: { error() {} } }).entitlementProtectionKeys('123');
+  assert.equal(missing.res.statusCode, 502);
+  assert.match(missing.res.body.error, /protection key ID/);
+});
 
 test('lists only update entitlements associated with the requested protection key', async () => {
   const { res, calls } = await activationsRoute().keyEntitlements('12345');
@@ -462,16 +485,95 @@ test('groups by protection key, preserves unactivated product keys, and filters 
   assert.match(html, /key\.serialNumber \|\| 'Unavailable'/);
 });
 
-function definitionForKeys(fetchImpl = async () => {}) {
+function definitionForKeys(fetchImpl = async () => {}, windowImpl = { history: { replaceState() {} } }) {
   let definition;
   const script = fs.readFileSync(path.join(__dirname, '..', 'public', 'pages', 'activations.js'), 'utf8');
   vm.runInNewContext(script, {
     fetch: (...args) => fetchImpl(...args),
+    window: windowImpl,
+    URLSearchParams,
     EntitlementValues: require('../public/entitlement-values'),
     Vue: { createApp: (options) => { definition = options; return { mount() {} }; } },
   });
   return definition;
 }
+
+test('shows all keys while selecting an entitlement match', async () => {
+  let ids = ['456'];
+  let fail = false;
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/activations') return { ok: true, json: async () => ({ activations: [
+      { protectionKeyId: '123', productKeyId: 'a' },
+      { protectionKeyId: '456', productKeyId: 'b' },
+      { protectionKeyId: '789', productKeyId: 'c' },
+    ] }) };
+    assert.equal(url, '/api/entitlements/42/protection-keys');
+    return fail ? { ok: false, json: async () => ({ error: 'EMS unavailable' }) }
+      : { ok: true, json: async () => ({ protectionKeyIds: ids }) };
+  });
+  const app = definition.data();
+  app.associatedEntitlementId = '42';
+  app.groupKeys = definition.methods.groupKeys;
+  app.loadCurrentCustomers = async () => {};
+  app.selectKey = (key) => { app.selectedKey = key; };
+  await definition.methods.loadActivations.call(app);
+  assert.equal(app.selectedKey.protectionKeyId, '456');
+  assert.deepEqual(Array.from(definition.computed.filteredKeys.call(app), (key) => key.protectionKeyId), ['123', '456', '789']);
+  assert.equal(app.associatedEntitlementId, '');
+  app.selectedKey = app.keys[2];
+  await definition.methods.loadActivations.call(app);
+  assert.equal(app.selectedKey.protectionKeyId, '789');
+  ids = ['123', '456'];
+  app.selectedKey = null;
+  app.associatedEntitlementId = '42';
+  await definition.methods.loadActivations.call(app);
+  assert.equal(app.selectedKey.protectionKeyId, '123');
+  assert.deepEqual(Array.from(definition.computed.filteredKeys.call(app), (key) => key.protectionKeyId), ['123', '456', '789']);
+  app.associatedEntitlementId = '42';
+  ids = [];
+  await definition.methods.loadActivations.call(app);
+  assert.match(app.associationError, /No protection key ID/);
+  assert.equal(app.selectedKey, null);
+  ids = ['123', '999'];
+  await definition.methods.loadActivations.call(app);
+  assert.match(app.associationError, /not found/);
+  assert.equal(app.selectedKey, null);
+  fail = true;
+  await definition.methods.loadActivations.call(app);
+  assert.match(app.associationError, /EMS unavailable/);
+  assert.equal(definition.computed.filteredKeys.call(app).length, 3);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'activations.html'), 'utf8');
+  assert.doesNotMatch(html, /\(associated\)|Clear entitlement link/);
+});
+
+test('a newer reload ignores a pending association lookup', async () => {
+  let releaseAssociation;
+  let requested;
+  let first = true;
+  const associationRequested = new Promise((resolve) => { requested = resolve; });
+  const definition = definitionForKeys(async (url) => {
+    if (url === '/api/activations') return { ok: true, json: async () => ({
+      activations: [{ protectionKeyId: '123', productKeyId: 'a' }],
+    }) };
+    if (!first) return { ok: true, json: async () => ({ protectionKeyIds: ['123'] }) };
+    requested();
+    return new Promise((resolve) => { releaseAssociation = resolve; });
+  });
+  const app = definition.data();
+  app.associatedEntitlementId = '42';
+  app.groupKeys = definition.methods.groupKeys;
+  app.loadCurrentCustomers = async () => {};
+  app.selectKey = (key) => { app.selectedKey = key; };
+  const pending = definition.methods.loadActivations.call(app);
+  await associationRequested;
+  first = false;
+  await definition.methods.loadActivations.call(app);
+  releaseAssociation({ ok: true, json: async () => ({ protectionKeyIds: ['999'] }) });
+  await pending;
+  assert.equal(app.associatedEntitlementId, '');
+  assert.equal(app.associationError, '');
+  assert.equal(app.selectedKey.protectionKeyId, '123');
+});
 
 function timelineResponse(updates, original = { id: '10', type: 2, products: [] }) {
   return { original, originalError: original ? '' : 'Original unavailable', updates };

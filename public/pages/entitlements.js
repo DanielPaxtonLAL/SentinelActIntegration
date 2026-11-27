@@ -539,6 +539,9 @@ createApp({
       if (!this.isDraftEntitlement(entitlement)) return;
       window.location.assign('/update-entitlement-form.html?id=' + encodeURIComponent(entitlement.id));
     },
+    viewProtectionKeys(entitlement) {
+      window.location.assign('/activations.html?entitlementId=' + encodeURIComponent(entitlement.id));
+    },
     openCreateEntitlement() {
       window.location.assign('/create-entitlement-form.html');
     },

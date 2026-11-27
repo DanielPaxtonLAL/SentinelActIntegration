@@ -86,6 +86,7 @@ createApp({
       activations: [], keys: [], selectedKey: null, filter: '', loading: false, error: '',
       updates: [], originalEntitlement: null, originalError: '', updatesLoading: false, updatesError: '', counterWarning: '', selectionRequest: 0,
       featureProductIds: null, counterHistory: null, customerLookup: null, memoryConfig: null, versionProductMemory: {}, listRequest: 0,
+      associatedEntitlementId: '', associationError: '',
     };
   },
   computed: {
@@ -96,9 +97,8 @@ createApp({
     },
     filteredKeys() {
       const query = this.filter.toLocaleLowerCase();
-      if (!query) return this.keys;
       return this.keys.filter((key) =>
-        [key.protectionKeyId, key.serialNumber || '', key.currentCustomer?.value || '', ...key.customerNames, ...key.productKeyIds, ...key.activationIds]
+        !query || [key.protectionKeyId, key.serialNumber || '', key.currentCustomer?.value || '', ...key.customerNames, ...key.productKeyIds, ...key.activationIds]
           .some((value) => value.toLocaleLowerCase().includes(query))
       );
     },
@@ -460,6 +460,7 @@ createApp({
       const request = ++this.listRequest;
       this.loading = true;
       this.error = '';
+      this.associationError = '';
       const selectedId = this.selectedKey?.groupId;
       this.selectionRequest++;
       this.selectedKey = null;
@@ -485,8 +486,34 @@ createApp({
         }
         this.activations = data.activations;
         this.keys = this.groupKeys(data.activations);
+        let associatedKeys = null;
+        if (this.associatedEntitlementId) {
+          try {
+            if (!/^[1-9]\d*$/.test(this.associatedEntitlementId)) throw new Error('Invalid entitlement ID.');
+            const associationResponse = await fetch(`/api/entitlements/${encodeURIComponent(this.associatedEntitlementId)}/protection-keys`, { cache: 'no-store' });
+            const association = await associationResponse.json();
+            if (!associationResponse.ok) throw new Error(association.error || associationResponse.statusText);
+            if (!Array.isArray(association.protectionKeyIds) || association.protectionKeyIds.some((id) =>
+              typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id))) {
+              throw new Error('The server returned invalid protection key IDs.');
+            }
+            const ids = [...new Set(association.protectionKeyIds)];
+            if (!ids.length) throw new Error('No protection key ID is available for this entitlement.');
+            if (request !== this.listRequest) return;
+            if (ids.some((id) => !this.keys.some((key) => key.protectionKeyId === id))) {
+              throw new Error('Some associated protection keys were not found in the key list.');
+            }
+            associatedKeys = this.keys.filter((key) => ids.includes(key.protectionKeyId));
+            this.associatedEntitlementId = '';
+          } catch (err) {
+            if (request !== this.listRequest) return;
+            this.associationError = 'Unable to find protection keys: ' + err.message;
+          }
+        }
         this.loadCurrentCustomers(this.keys, request);
-        const selected = this.keys.find((key) => key.groupId === selectedId) || this.keys[0];
+        const selected = this.associationError ? null : associatedKeys
+          ? associatedKeys.find((key) => key.groupId === selectedId) || associatedKeys[0]
+          : this.keys.find((key) => key.groupId === selectedId) || this.keys[0];
         this.loading = false;
         if (selected) this.selectKey(selected);
         else {
@@ -517,6 +544,7 @@ createApp({
     },
   },
   mounted() {
+    this.associatedEntitlementId = new URLSearchParams(window.location.search).get('entitlementId') || '';
     this.loadActivations();
   },
 }).mount('#app');

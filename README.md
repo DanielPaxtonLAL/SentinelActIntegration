@@ -35,7 +35,7 @@ Run:
 ```
  The "next-serial-number-customer-id" values select the customer whose Ref ID 1 stores the next number as JSON, for example, `{"NextSerial": "06003"}`.
  After EMS and Act! authentication, login checks all entitlement pages and sets this value to one above the highest serial number, with a minimum of 06001. Login fails if the check cannot be completed.
- The Protection Keys list shows each key's serial number from its original product-key entitlement and the customer of its latest update (or the original customer if there are no updates); missing or conflicting data is reported as unavailable. The details reconstruct expected Standalone, Link, Pivot, Lease, serial, expiry and version values using EMS activation counters, base memory and current version-product definitions. Lease remains present once added because no lease removal modification is configured. This does not confirm that updates have been applied; incomplete or unsupported history is shown as unavailable.
+ The Protection Keys list shows each key's serial number from its original product-key entitlement and the customer of its latest update (or the original customer if there are no updates); missing or conflicting data is reported as unavailable. Completed entitlements have a View protection key action that selects an associated key in the full list. The details reconstruct expected Standalone, Link, Pivot, Lease, serial, expiry and version values using EMS activation counters, base memory and current version-product definitions. Lease remains present once added because no lease removal modification is configured. This does not confirm that updates have been applied; incomplete or unsupported history is shown as unavailable.
 
 #### 5. Lastly, run with:
 ```powershell
@@ -53,6 +53,8 @@ The output will provide links to access the application.
 5. Lastly, run `npm run dev -- --test` or `npm run dev -- --production`. The output will provide links to access the application.
 
 ### Optional
+To list production protection key IDs and current customers in descending serial number order, run `.\config-helper-scripts\get-protection-key-serials.ps1`. Customer names are derived from the latest counter-ordered entitlement and are shown as unavailable if the history cannot be verified. The helper prompts for EMS credentials and uses `https://10.6.88.235` by default. It disables TLS certificate verification by default; use only on a trusted network, or pass `-Insecure:$false` to verify the certificate. It can be copied and run on its own with Windows PowerShell 5.1 and .NET Framework 4.7.1 or later; no Node.js or additional packages are needed. It uses production base product ID `1` and EMS API version `v90`.
+
 Debugging Python files exist in **".\config-helper-scripts"**. If you want to run them, you will need a Python 3+ interpreter.
 
 ```powershell

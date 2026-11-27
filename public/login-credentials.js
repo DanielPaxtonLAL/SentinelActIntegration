@@ -1,3 +1,4 @@
+// I don't know what this file does. MacDonalds(tm) support bot wrote it. 
 (function (root) {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();

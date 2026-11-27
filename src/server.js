@@ -625,6 +625,39 @@ app.get('/api/entitlements/:id/product-keys', async (req, res) => {
   }
 });
 
+app.get('/api/entitlements/:id/protection-keys', async (req, res) => {
+  const ems = req.ems;
+  res.set('Cache-Control', 'no-store');
+  if (!/^[1-9]\d*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Entitlement ID must be a positive number' });
+  }
+  try {
+    const keys = await withSession(ems, () => ems.getEntitlementProductKeys(req.params.id));
+    if (!Array.isArray(keys) || keys.some((key) => !key || !Array.isArray(key.activationIds) ||
+        key.activationIds.some((aid) => typeof aid !== 'string' || !aid.trim()))) {
+      throw new Error('EMS returned invalid activation IDs for the entitlement.');
+    }
+    const aids = [...new Set(keys.flatMap((key) => key.activationIds))];
+    const ids = new Set();
+    for (let index = 0; index < aids.length; index += 10) {
+      const licenses = await Promise.all(aids.slice(index, index + 10).map((aid) =>
+        withSession(ems, () => ems.getActivationLicense(aid))
+      ));
+      for (const license of licenses) {
+        const id = String(license?.protectionKeyId ?? '').trim();
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)) {
+          throw new Error('EMS did not return a valid protection key ID for an activation.');
+        }
+        ids.add(id);
+      }
+    }
+    res.json({ protectionKeyIds: [...ids] });
+  } catch (err) {
+    console.error(err.message);
+    res.status(err.status === 400 ? 400 : err.status === 401 ? 401 : 502).json({ error: err.message });
+  }
+});
+
 /** Reject malformed C2V inputs before contacting EMS. */
 function validateC2VInput(c2v) {
   const trimmedC2V = typeof c2v === 'string' ? c2v.trim() : '';

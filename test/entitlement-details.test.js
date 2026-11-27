@@ -335,6 +335,18 @@ test('completed entitlement displays its product keys and associated protection 
   assert.doesNotMatch(html, /Fetch pending updates \(V2CP\)/);
 });
 
+test('completed entitlement action opens its associated protection keys', () => {
+  let target;
+  pageLocation.assign = (url) => { target = url; };
+  definition.methods.viewProtectionKeys({ id: '123' });
+  assert.equal(target, '/activations.html?entitlementId=123');
+  assert.match(html, /v-if="String\(entitlement\.state \|\| ''\)\.toUpperCase\(\) === 'COMPLETED'"[^>]*[\s\S]*?title="View protection key" aria-label="View protection key" @click="viewProtectionKeys\(entitlement\)"><span class="action-icon view-key-icon" aria-hidden="true"><\/span><\/button>/);
+  const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.view-key-icon \{[^}]*mask: url\('\/images\/key-icon\.svg'\)/);
+  assert.match(styles, /\.entitlement-actions \.action-icon-button \{[^}]*width: 1\.8rem; height: 1\.8rem; padding: 0;/);
+  delete pageLocation.assign;
+});
+
 test('completed entitlement downloads a V2CP and discards results after selection changes', async () => {
   downloads.length = 0;
   const app = definition.data();
@@ -501,8 +513,9 @@ test('only draft entitlements can open the edit form', () => {
   } finally {
     pageLocation.assign = previousAssign;
   }
-  assert.match(html, /:disabled="!isDraftEntitlement\(entitlement\) \|\| producing \|\| activating" @click="openEditEntitlement\(entitlement\)">Edit<\/button>/);
+  assert.match(html, /:disabled="!isDraftEntitlement\(entitlement\) \|\| producing \|\| activating"\s+title="Edit entitlement" aria-label="Edit entitlement" @click="openEditEntitlement\(entitlement\)"><span class="action-icon edit-icon" aria-hidden="true"><\/span><\/button>/);
   const styles = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+  assert.match(styles, /\.edit-icon \{[^}]*mask: url\('\/images\/edit-icon\.svg'\)/);
   assert.match(styles, /\.entitlements-page \.entitlement-row \.entitlement-actions button:disabled \{[^}]*display:\s*none/);
 });
 
@@ -529,6 +542,9 @@ test('entitlement list rows use compact spacing without wrapping cell contents',
   assert.match(styles, /\.entitlements-page \.entitlement-row > td \{[^}]*white-space:\s*nowrap/);
   assert.match(styles, /\.entitlements-page \.entitlement-row > td \{[^}]*padding:\s*0\.5em \.6rem/);
   assert.match(styles, /\.entitlements-page \.entitlement-row \.entitlement-actions button \{[^}]*padding:\s*\.15rem \.5rem/);
+  assert.match(styles, /\.entitlement-actions-header \{[^}]*width:\s*1%/);
+  assert.match(styles, /td\.entitlement-actions \{[^}]*text-align:\s*center/);
+  assert.match(styles, /\.entitlement-actions button:not\(:disabled\) \+ button \{[^}]*margin-left:/);
 });
 
 test('labels entitlement types and allows filtering by key update', () => {
@@ -768,7 +784,7 @@ test('sorts filtered entitlements by each data column and toggles direction', ()
   assert.deepEqual(ids(), ['b']);
   assert.match(html, /<th v-for="column in entitlementSortColumns"[^>]*:aria-sort="sortColumn === column.key \? sortDirection : null"[^>]*:title="'Sort ' \+ column.label \+ ' ' \+ \(sortColumn === column.key && sortDirection === 'ascending' \? 'descending' : 'ascending'\)"[^>]*@click="sortEntitlements\(column.key\)">\s*<button type="button" class="entitlement-sort">/);
   assert.match(html, /v-for="\(entitlement, index\) in sortedEntitlements"/);
-  assert.match(html, /<th>Actions<\/th>/);
+  assert.match(html, /<th class="entitlement-actions-header" aria-label="Actions"><\/th>/);
 });
 
 test('keeps invalid dates last and equal sort values in their original order', () => {

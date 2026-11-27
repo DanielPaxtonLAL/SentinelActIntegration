@@ -23,6 +23,9 @@
           <input v-model.trim="filter" type="search" placeholder="Filter keys"
             aria-label="Filter keys by customer, serial number, product key, Activation ID, or protection key">
         </div>
+        <p v-if="associationError" class="form-error" role="alert">{{ associationError }}
+          <button type="button" @click="loadActivations">Retry</button>
+        </p>
         <p v-if="error" class="form-error" role="alert">{{ error }}</p>
         <p v-if="!error && loading" role="status">Loading activations…</p>
         <p v-else-if="!error && !filteredKeys.length">{{ filter ? 'No matching records.' : 'No product keys or activations found.' }}</p>

@@ -78,7 +78,7 @@
                     {{ column.label }} <span v-if="sortColumn === column.key" aria-hidden="true">{{ sortDirection === 'ascending' ? '▲' : '▼' }}</span>
                   </button>
                 </th>
-                <th>Actions</th>
+                <th class="entitlement-actions-header" aria-label="Actions"></th>
               </tr>
             </thead>
             <tbody>
@@ -97,7 +97,10 @@
                 <td><template v-for="(part, partIndex) in highlightParts(entitlement.refId1)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></td>
                 <td class="status-cell"><span class="status-tag" :class="statusTagClass(entitlement.state)"><template v-for="(part, partIndex) in highlightParts(entitlement.state)" :key="partIndex"><mark v-if="part.highlighted">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></td>
                 <td class="entitlement-actions" @click.stop @keydown.stop>
-                  <button type="button" class="button--constructive" :disabled="!isDraftEntitlement(entitlement) || producing || activating" @click="openEditEntitlement(entitlement)">Edit</button>
+                  <button type="button" class="button--constructive action-icon-button" :disabled="!isDraftEntitlement(entitlement) || producing || activating"
+                    title="Edit entitlement" aria-label="Edit entitlement" @click="openEditEntitlement(entitlement)"><span class="action-icon edit-icon" aria-hidden="true"></span></button>
+                  <button v-if="String(entitlement.state || '').toUpperCase() === 'COMPLETED'" type="button" class="button--view action-icon-button"
+                    title="View protection key" aria-label="View protection key" @click="viewProtectionKeys(entitlement)"><span class="action-icon view-key-icon" aria-hidden="true"></span></button>
                 </td>
               </tr>
             </tbody>
